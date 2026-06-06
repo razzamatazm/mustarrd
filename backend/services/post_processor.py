@@ -1413,7 +1413,12 @@ class PostProcessor:
                 input_file.with_suffix(".vtt"),
             ]
             if edl_path:
-                candidates.append(Path(edl_path))
+                edl_file = Path(edl_path)
+                candidates.append(edl_file)
+                if edl_file.stem != input_file.stem:
+                    for suffix in [".txt", ".log", ".logo", ".csv", ".vdr", ".xml",
+                                   ".srt", ".ass", ".vtt"]:
+                        candidates.append(edl_file.with_suffix(suffix))
             for path in candidates:
                 if path.exists():
                     os.remove(path)
@@ -1449,7 +1454,7 @@ class PostProcessor:
                     end = float(parts[1])
                     seg_type = int(parts[2])
                     # Type 0 = cut, 3 = commercial
-                    if seg_type in [0, 3]:
+                    if seg_type in [0, 3] and end > start:
                         segments.append((start, end, seg_type))
         return segments
 
@@ -1462,6 +1467,8 @@ class PostProcessor:
         current_pos = 0
 
         for start, end, _ in sorted(commercial_segments):
+            if end <= start:
+                continue
             if start > current_pos:
                 keep_segments.append((current_pos, start))
             current_pos = end

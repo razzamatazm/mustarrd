@@ -38,15 +38,11 @@ class InvertedEdlSegmentTests(unittest.TestCase):
         self.addCleanup(os.unlink, f.name)
         return f.name
 
-    def test_parse_edl_accepts_inverted_entry(self):
-        """_parse_edl currently accepts start > end without error, exposing the bug."""
+    def test_parse_edl_rejects_inverted_entry(self):
+        """_parse_edl must skip entries where start > end."""
         edl = self._write_edl("60.000000 10.000000 0\n")
         segments = self.processor._parse_edl(edl)
-        # Currently passes; exposes downstream _invert_segments bug
-        self.assertEqual(len(segments), 1)
-        start, end, _ = segments[0]
-        # Bug: start (60) > end (10) - should be rejected or skipped
-        self.assertGreater(start, end, "EDL entry has start > end; _parse_edl should reject it")
+        self.assertEqual(len(segments), 0, "Inverted EDL entry (start > end) must be skipped")
 
     def test_invert_segments_inverted_entry_produces_overlapping_keeps(self):
         """_invert_segments with (60, 10) produces [(0,60),(10,duration)] - overlapping.
@@ -71,8 +67,8 @@ class InvertedEdlSegmentTests(unittest.TestCase):
                     f"by {overlap}s; inverted EDL entry produces duplicate content"
                 )
 
-    def test_invert_segments_multiple_inverted_entries_overlap(self):
-        """Multiple inverted EDL entries produce several overlapping keep segments."""
+    def test_invert_segments_multiple_inverted_entries_no_overlap(self):
+        """Multiple inverted EDL entries must be skipped; no overlapping keeps produced."""
         segments = [(60.0, 10.0, 0), (90.0, 80.0, 0)]
         duration = 3600.0
         keep = self.processor._invert_segments(segments, duration)
@@ -86,10 +82,9 @@ class InvertedEdlSegmentTests(unittest.TestCase):
                 if overlap > 0:
                     overlaps_found += 1
 
-        self.assertGreater(
+        self.assertEqual(
             overlaps_found, 0,
-            "Multiple inverted EDL entries should produce overlapping keep segments "
-            "(demonstrating the bug)"
+            "Inverted EDL entries must be skipped; keep segments must not overlap"
         )
 
 
