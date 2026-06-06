@@ -72,7 +72,7 @@ def _sanitize_filename(name: Optional[str]) -> Optional[str]:
     filename = name
     if not filename.endswith(".ts"):
         filename += ".ts"
-    return file_namer.sanitize_filename(filename.replace(".ts", "")) + ".ts"
+    return file_namer.sanitize_filename(filename.removesuffix(".ts")) + ".ts"
 
 
 def _map_download_status(status: str) -> str:

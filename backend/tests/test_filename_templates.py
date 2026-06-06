@@ -1,0 +1,83 @@
+import sys
+import unittest
+from pathlib import Path
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from services.file_namer import FileNamer
+
+
+def _prog(title, description="", start_time="2024-03-15T20:00:00"):
+    return {"title": title, "description": description, "start_time": start_time}
+
+
+def _channel(name="CNN"):
+    return {"name": name, "category_name": ""}
+
+
+class TemplateWiringTests(unittest.TestCase):
+    """User-configured templates are applied to generated filenames."""
+
+    def test_default_template_applied(self):
+        settings = {"default_template": "{channel} - {title} - {date}"}
+        result = FileNamer().generate_filename(_prog("Evening News"), _channel("CNN"), "other", settings)
+        self.assertEqual(result, "CNN - Evening News - 2024-03-15.ts")
+
+    def test_sports_template_applied(self):
+        settings = {"sports_template": "{title} ({date})"}
+        result = FileNamer().generate_filename(_prog("Lakers vs Celtics"), _channel(), "sports", settings)
+        self.assertEqual(result, "Lakers vs Celtics (2024-03-15).ts")
+
+    def test_movie_template_applied(self):
+        settings = {"movie_template": "{title} [{year}]"}
+        result = FileNamer().generate_filename(_prog("Inception", "A 2010 film"), _channel(), "movie", settings)
+        self.assertEqual(result, "Inception [2010].ts")
+
+    def test_tv_template_applied_when_season_episode_detected(self):
+        settings = {"tv_template": "{show} {season}x{episode:02d}"}
+        result = FileNamer().generate_filename(
+            _prog("Breaking Bad S02E05 - Breakage"), _channel(), "tv_show", settings
+        )
+        self.assertEqual(result, "Breaking Bad 2x05.ts")
+
+    def test_tv_falls_back_to_default_template_when_no_season_episode(self):
+        settings = {"default_template": "{title} ({date})"}
+        result = FileNamer().generate_filename(_prog("Evening News"), _channel(), "tv_show", settings)
+        self.assertEqual(result, "Evening News (2024-03-15).ts")
+
+    def test_no_settings_uses_hardcoded_defaults(self):
+        result = FileNamer().generate_filename(_prog("Evening News"), _channel(), "other")
+        self.assertEqual(result, "Evening News - 2024-03-15.ts")
+
+    def test_bad_template_key_falls_back_gracefully(self):
+        settings = {"default_template": "{title} - {nonexistent_key}"}
+        result = FileNamer().generate_filename(_prog("Evening News"), _channel(), "other", settings)
+        self.assertEqual(result, "Evening News - 2024-03-15.ts")
+
+    def test_channel_variable_available_in_template(self):
+        settings = {"default_template": "{channel}/{title}"}
+        result = FileNamer().generate_filename(_prog("The Wire"), _channel("HBO"), "other", settings)
+        self.assertEqual(result, "HBO The Wire.ts")
+
+
+class RemovesuffixTests(unittest.TestCase):
+    """removesuffix fix: .ts in the stem is not consumed."""
+
+    def test_ts_in_stem_preserved_download_builder(self):
+        from services.file_namer import file_namer
+        name = "KTSA.ts Evening News"
+        result = file_namer.sanitize_filename(name.removesuffix(".ts")) + ".ts"
+        self.assertIn("KTSA", result)
+        self.assertTrue(result.endswith(".ts"))
+
+    def test_ts_only_at_end_stripped_once(self):
+        from services.file_namer import file_namer
+        name = "My Show.ts"
+        result = file_namer.sanitize_filename(name.removesuffix(".ts")) + ".ts"
+        self.assertEqual(result, "My Show.ts")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -132,10 +132,10 @@ async def build_download_from_program(
         filename = custom_filename
         if not filename.endswith(".ts"):
             filename += ".ts"
-        filename = file_namer.sanitize_filename(filename.replace(".ts", "")) + ".ts"
+        filename = file_namer.sanitize_filename(filename.removesuffix(".ts")) + ".ts"
     else:
         program_type = epg_service.detect_program_type(program, channel)
-        filename = file_namer.generate_filename(program, channel, program_type)
+        filename = file_namer.generate_filename(program, channel, program_type, settings.to_dict() if settings else None)
 
     pre_padding = int(pre_padding_minutes or 0)
     post_padding = int(post_padding_minutes or 0)
