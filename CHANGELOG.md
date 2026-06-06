@@ -14,6 +14,46 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-04-02
+
+### Improved: Security hardening and simpler Settings page
+
+**What you would notice:** The Settings page no longer has a separate guide settings section. Those options are now part of per-account configuration. You will not notice any visible difference from the security changes during normal use, but the app now has stronger protection against cross-site request forgery.
+
+**What changed:** CSRF protection was hardened across all API endpoints. Legacy account credentials are migrated to a more secure storage format on startup.
+
+---
+
+## 2026-03-31
+
+### Improved: Per-account catchup window and EPG time offset
+
+**What you would notice:** Each IPTV account in Settings can now have its own catchup days setting. If one provider offers 7 days back and another offers 3, each is handled correctly. You can also set a time offset per account if your provider's EPG guide times are off by a few hours.
+
+**What changed:** Catchup availability is now calculated per account instead of using one global setting. A new guide offset field appears on each account in Settings.
+
+---
+
+## 2026-03-16
+
+### Improved: Hardware acceleration status visible in Settings
+
+**What you would notice:** The Settings page now shows a diagnostic report for your GPU. This makes it easier to confirm that hardware-accelerated transcoding is being detected and used correctly.
+
+**What changed:** The backend reports VAAPI driver status and GPU device info at startup. This report is visible in Settings under the transcoding section.
+
+---
+
+## 2026-03-04
+
+### Improved: Podman container support
+
+**What you would notice:** If you run Mustarrd inside a Podman container instead of Docker, it now correctly detects the container runtime. This fixes a detection issue that could cause problems on Podman-based systems.
+
+**What changed:** The startup configuration now checks for Podman-specific signals alongside the existing Docker check.
+
+---
+
 ## 2026-02-25
 
 ### Improved: Plex integration login flow and navigation
