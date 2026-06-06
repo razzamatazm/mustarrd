@@ -622,6 +622,8 @@ export default function Settings() {
           value={formData.download_folder}
           onChange={(e) => handleChange('download_folder', e.target.value)}
           leftSection={<IconFolder size={16} />}
+          styles={{ input: { textOverflow: 'ellipsis' } }}
+          title={formData.download_folder}
         />
         <TextInput
           label="Completed Folder"
@@ -629,6 +631,8 @@ export default function Settings() {
           value={formData.completed_folder}
           onChange={(e) => handleChange('completed_folder', e.target.value)}
           leftSection={<IconFolder size={16} />}
+          styles={{ input: { textOverflow: 'ellipsis' } }}
+          title={formData.completed_folder}
         />
       </Stack>
 
