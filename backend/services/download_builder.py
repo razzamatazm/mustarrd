@@ -66,7 +66,7 @@ def _normalize_provider_start_token(provider_start: str, pre_padding_minutes: in
         # Strip trailing timezone offset (e.g. " +0200", " -0500", " +0000") before
         # trying compact formats.  The datetime part without the offset is the
         # provider's local wall-clock time, which is what the timeshift URL expects.
-        bare = re.sub(r"\s+[+-]\d{4}$", "", token).strip()
+        bare = re.sub(r"\s*([+-]\d{2}:?\d{2}|Z)$", "", token).strip()
         for fmt, candidate in (
             ("%Y-%m-%d %H:%M:%S", bare),
             ("%Y-%m-%d %H:%M",    bare),

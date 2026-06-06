@@ -307,6 +307,81 @@ class CatchupResolutionTests(unittest.TestCase):
 
         self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
 
+    def test_yyyymmddhhmmss_provider_token_compact_offset_no_space_uses_local_part(self):
+        """Compact offset without whitespace (e.g. 20260420190000+0200) must strip correctly."""
+        download = asyncio.run(
+            self._build_download(
+                XtreamAccount(
+                    id=1,
+                    name="Provider B",
+                    server_url="https://provider.example.com",
+                    username="user",
+                    password="",
+                    guide_offset_hours=2,
+                ),
+                {
+                    "title": "Show",
+                    "start_time": "2026-04-20T17:00:00+00:00",
+                    "end_time": "2026-04-20T18:15:00+00:00",
+                    "start_timestamp": 1745679600,
+                    "stop_timestamp": 1745684100,
+                    "provider_start": "20260420190000+0200",
+                },
+            )
+        )
+
+        self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
+
+    def test_yyyymmddhhmmss_provider_token_z_suffix_uses_local_part(self):
+        """Z-suffix variant (e.g. 20260420190000Z) strips correctly."""
+        download = asyncio.run(
+            self._build_download(
+                XtreamAccount(
+                    id=1,
+                    name="Provider B",
+                    server_url="https://provider.example.com",
+                    username="user",
+                    password="",
+                    guide_offset_hours=0,
+                ),
+                {
+                    "title": "Show",
+                    "start_time": "2026-04-20T19:00:00+00:00",
+                    "end_time": "2026-04-20T20:15:00+00:00",
+                    "start_timestamp": 1745686800,
+                    "stop_timestamp": 1745691300,
+                    "provider_start": "20260420190000Z",
+                },
+            )
+        )
+
+        self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
+
+    def test_yyyymmddhhmmss_provider_token_colon_offset_uses_local_part(self):
+        """Colon offset variant (e.g. 20260420190000+02:00) strips correctly."""
+        download = asyncio.run(
+            self._build_download(
+                XtreamAccount(
+                    id=1,
+                    name="Provider B",
+                    server_url="https://provider.example.com",
+                    username="user",
+                    password="",
+                    guide_offset_hours=2,
+                ),
+                {
+                    "title": "Show",
+                    "start_time": "2026-04-20T17:00:00+00:00",
+                    "end_time": "2026-04-20T18:15:00+00:00",
+                    "start_timestamp": 1745679600,
+                    "stop_timestamp": 1745684100,
+                    "provider_start": "20260420190000+02:00",
+                },
+            )
+        )
+
+        self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
+
     def test_invalid_provider_token_falls_back_to_generated_start_without_account_offset(self):
         download = asyncio.run(
             self._build_download(
