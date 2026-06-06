@@ -1,18 +1,18 @@
 ![Mustarrd Logo](https://github.com/razzamatazm/mustarrd/blob/main/frontend/src/assets/mustarrdlogo.png "Mustarrd Logo")
-# Mustarrd — IPTV Catchup DVR
+# Mustarrd: IPTV Catchup DVR
 
-Mustarrd connects to your IPTV provider and lets you download past programs — think of it as a DVR for your IPTV catchup library. Browse your provider's program guide, pick anything from the last few days (or schedule shows airing in the future), and download it with a properly named file ready for Plex, Jellyfin, or just your hard drive.
+Mustarrd connects to your IPTV provider and lets you download past programs. Think of it as a DVR for your IPTV catchup library. Browse your provider's program guide, pick anything from the last few days (or schedule shows airing in the future), and download it with a properly named file ready for Plex, Jellyfin, or just your hard drive.
 
 ## Features
 
-- **Browse past programs** — scroll back through your provider's program guide (EPG) and see what's available to download
-- **Commercial skip** — ComSkip integration removes commercials before saving
-- **Remux to MKV** — TS playback sucks. MKV is a much easier container to skip through
-- **Download from On Demand** — If your provider provides on demand listings, you can grab those too!
-- **Scheduled recordings** — set programs to download automatically when they air
-- **Smart file naming** — TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
-- **Plex Link** — Allow your plex users to request programming by logging in with their Plex creds (or don't) and push recording directly to your TV recording library
-- **Multiple accounts** — connect more than one IPTV provider. Add more users to give them download access
+- **Browse past programs:** scroll back through your provider's program guide (EPG) and see what's available to download
+- **Commercial skip:** ComSkip integration removes commercials before saving
+- **Remux to MKV:** TS playback sucks. MKV is a much easier container to skip through
+- **Download from On Demand:** If your provider provides on demand listings, you can grab those too!
+- **Scheduled recordings:** set programs to download automatically when they air
+- **Smart file naming:** TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
+- **Plex Link:** Allow your plex users to request programming by logging in with their Plex creds (or don't) and push recording directly to your TV recording library
+- **Multiple accounts:** connect more than one IPTV provider. Add more users to give them download access
 
 ## Why Do I Need This? I have Sonarr...
 
@@ -24,7 +24,7 @@ Mustarrd connects to your IPTV provider and lets you download past programs — 
 ## Requirements
 
 - An IPTV subscription with **catchup / timeshift support** (must use the Xtream Codes protocol)
-- **Docker** — recommended install method, everything is bundled
+- **Docker:** recommended install method, everything is bundled
 
 > Not sure if your provider supports catchup? Check if they give you a "catchup days" value or mention timeshift in their plan details.
 
@@ -70,16 +70,16 @@ Then open **http://localhost:4177** in your browser.
    - Server URL (e.g. `https://your-provider.com`)
    - Username and password (from your provider)
 4. Optional - link to your Plex install to allow request access to your plex users and automatic library scans on file completion.
-4. Mustarrd will sync your provider's channel list and program guide to use in "Search All TV" mode.  This takes a minute or two on first load. Individual channels will load instantly if you select one.
-5. Go to **Browse**, pick a channel, and start downloading or search all.
+5. Mustarrd will sync your provider's channel list and program guide to use in "Search All TV" mode. This takes a minute or two on first load. Individual channels will load instantly if you select one.
+6. Go to **Browse**, pick a channel, and start downloading or search all.
 
 ## How to Use
 
-### Browse and Download a Programs
+### Browse and Download Programs
 
 1. Go to **Browse** and select an account
 2. Click a channel to open its program guide
-3. Programs with a **mustard yellow border** have catchup available — click one to open the download dialog
+3. Programs with a **mustard yellow border** have catchup available. Click one to open the download dialog
 4. Review the auto-generated filename (edit if needed) and click **Download**
 
 ### Monitor Downloads
@@ -110,8 +110,8 @@ Filename templates are customizable in Settings if you want a different format.
 | Folder | Contents |
 |--------|----------|
 | `./downloads/` | In-progress downloads and temp files used for ComSkip |
-| `./completed/` | Finished files — point this at your media library |
-| `./config/` | Database, settings, and Comskip config — keep this private |
+| `./completed/` | Finished files. Point this at your media library |
+| `./config/` | Database, settings, and Comskip config. Keep this private |
 
 Before first run, update the host paths in `docker-compose.yml` (`./config`, `./downloads`, `./completed`) to match your system.
 
@@ -124,7 +124,7 @@ Most users never need to touch these. Set them in `docker-compose.yml` or a `bac
 | `CATCHUP_DEFAULT_DOWNLOAD_FOLDER` | In-progress download location | `/app/downloads` |
 | `CATCHUP_DEFAULT_COMPLETED_FOLDER` | Finished file location | `/app/completed` |
 | `CATCHUP_MAX_CONCURRENT_DOWNLOADS` | Max simultaneous downloads | `2` |
-| `CATCHUP_SESSION_SECRET` | Session signing key — auto-generated and persisted to `./config/session_secret` on first run; only set this manually to rotate or share across instances | *(auto)* |
+| `CATCHUP_SESSION_SECRET` | Session signing key, auto-generated and persisted to `./config/session_secret` on first run. Only set this manually to rotate or share across instances | *(auto)* |
 | `CATCHUP_CORS_ORIGINS` | Comma-separated allowed frontend origins; only needed when the UI is accessed from a non-localhost address | `http://localhost:4178,...` |
 | `CATCHUP_SESSION_HTTPS_ONLY` | Require HTTPS for session cookies | `true` |
 | `CATCHUP_ALLOW_REMOTE_SETUP` | Allow password setup from non-local IPs | `false` |
