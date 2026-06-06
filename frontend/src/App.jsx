@@ -327,20 +327,22 @@ function App() {
           >
             MUSTARRD
           </Text>
-          <Group gap={5} align="center">
-            <Box
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: '#fa5252',
-                animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
-              }}
-            />
-            <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
-              REC
-            </Text>
-          </Group>
+          {activeDownloads > 0 && (
+            <Group gap={5} align="center">
+              <Box
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#fa5252',
+                  animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
+                }}
+              />
+              <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
+                REC
+              </Text>
+            </Group>
+          )}
         </Group>
       </AppShell.Header>
 
@@ -358,20 +360,22 @@ function App() {
             >
               MUSTARRD
             </Text>
-            <Group gap={5} align="center">
-              <Box
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: '#fa5252',
-                  animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
-                }}
-              />
-              <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
-                REC
-              </Text>
-            </Group>
+            {activeDownloads > 0 && (
+              <Group gap={5} align="center">
+                <Box
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: '#fa5252',
+                    animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
+                  }}
+                />
+                <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
+                  REC
+                </Text>
+              </Group>
+            )}
           </Group>
           <Divider mb={4} />
           {navItems.map((item) => (
