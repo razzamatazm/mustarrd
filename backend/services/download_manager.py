@@ -604,6 +604,11 @@ class DownloadManager:
                 # Download was cancelled
                 download.status = DownloadStatus.CANCELLED.value
                 await session.commit()
+                if download.output_path and os.path.exists(download.output_path):
+                    try:
+                        os.unlink(download.output_path)
+                    except OSError:
+                        pass
                 await self._broadcast_progress(
                     download_id, download.progress, DownloadStatus.CANCELLED.value
                 )
