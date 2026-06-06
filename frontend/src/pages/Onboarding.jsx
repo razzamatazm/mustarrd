@@ -490,14 +490,16 @@ export default function Onboarding() {
                     <Button type="submit" loading={createAccountMutation.isPending} fullWidth={isMobile}>
                       {accountComplete ? 'Add Another Account' : 'Save & Continue'}
                     </Button>
-                    <Button
-                      variant="light"
-                      onClick={() => setCurrentStep(1)}
-                      disabled={!accountComplete || isBusy}
-                      fullWidth={isMobile}
-                    >
-                      Continue
-                    </Button>
+                    {accountComplete && (
+                      <Button
+                        variant="light"
+                        onClick={() => setCurrentStep(1)}
+                        disabled={isBusy}
+                        fullWidth={isMobile}
+                      >
+                        Continue
+                      </Button>
+                    )}
                   </Group>
                 </Box>
               </Stack>
