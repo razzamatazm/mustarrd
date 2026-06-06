@@ -348,9 +348,12 @@ async def login_auth_legacy(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    # Compatibility wrapper: logs in admin user "admin" if present.
+    # Compatibility wrapper: finds the active admin by role, not by name.
+    admin = await get_admin_user(session)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Authentication failed")
     return await login_credentials(
-        CredentialsLoginPayload(username="admin", password=payload.password),
+        CredentialsLoginPayload(username=admin.username, password=payload.password),
         request,
         session,
     )
