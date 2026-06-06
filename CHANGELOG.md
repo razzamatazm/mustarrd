@@ -22,6 +22,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Improved: Empty Downloads and Scheduled pages now have a button to Browse
+
+**What you would notice:** If you open Downloads or Scheduled and nothing is there yet, you now see a "Go to Browse" button. Previously the page told you to go to Browse but gave you nothing to click.
+
+**What changed:** Both empty-state pages now include a button that takes you directly to the Browse page so you can find something to download.
+
+---
+
 ## 2026-04-29
 
 ### Fixed: Show times now display in the channel's local time
