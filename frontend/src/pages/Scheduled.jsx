@@ -411,7 +411,7 @@ export default function Scheduled() {
                   No schedule history yet.
                 </Text>
                 <Text c="dimmed" ta="center" size="sm">
-                  Past scheduled recordings that have already aired will appear here.
+                  Completed, failed, and cancelled scheduled recordings will appear here.
                 </Text>
               </Stack>
             </Card>
