@@ -16,6 +16,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _channel_has_tv_archive(ch: dict) -> bool:
+    return int(ch.get("tv_archive", 0) or 0) == 1
+
+
 @router.get("/accounts/{account_id}/categories")
 async def get_categories(
     account_id: int,
@@ -66,7 +70,7 @@ async def get_channels(
                 # Filter to only channels with catchup enabled
                 channels = [
                     ch for ch in channels
-                    if ch.get("tv_archive", 0) == 1 and epg_service.archive_days_for_channel(ch) > 0
+                    if _channel_has_tv_archive(ch) and epg_service.archive_days_for_channel(ch) > 0
                 ]
 
             # Add archive duration info

@@ -6,39 +6,30 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from api.channels import _channel_has_tv_archive
 from services.epg_service import EPGService
 
 
 class TvArchiveFilterTests(unittest.TestCase):
-    """get_channels() must include channels with tv_archive as int 1 or string "1"."""
-
-    def _filter(self, channels):
-        # Mirrors the filter in get_channels()
-        return [ch for ch in channels if int(ch.get("tv_archive", 0) or 0) == 1]
+    """_channel_has_tv_archive() (the Browse filter in api/channels.py) must accept int 1 and string "1"."""
 
     def test_int_1_included(self):
-        channels = [{"stream_id": "1", "tv_archive": 1}]
-        self.assertEqual(len(self._filter(channels)), 1)
+        self.assertTrue(_channel_has_tv_archive({"tv_archive": 1}))
 
     def test_string_1_included(self):
-        channels = [{"stream_id": "2", "tv_archive": "1"}]
-        self.assertEqual(len(self._filter(channels)), 1)
+        self.assertTrue(_channel_has_tv_archive({"tv_archive": "1"}))
 
     def test_int_0_excluded(self):
-        channels = [{"stream_id": "3", "tv_archive": 0}]
-        self.assertEqual(self._filter(channels), [])
+        self.assertFalse(_channel_has_tv_archive({"tv_archive": 0}))
 
     def test_string_0_excluded(self):
-        channels = [{"stream_id": "4", "tv_archive": "0"}]
-        self.assertEqual(self._filter(channels), [])
+        self.assertFalse(_channel_has_tv_archive({"tv_archive": "0"}))
 
     def test_missing_field_excluded(self):
-        channels = [{"stream_id": "5"}]
-        self.assertEqual(self._filter(channels), [])
+        self.assertFalse(_channel_has_tv_archive({}))
 
     def test_none_excluded(self):
-        channels = [{"stream_id": "6", "tv_archive": None}]
-        self.assertEqual(self._filter(channels), [])
+        self.assertFalse(_channel_has_tv_archive({"tv_archive": None}))
 
     def test_mixed_list_returns_only_archive_channels(self):
         channels = [
@@ -48,7 +39,7 @@ class TvArchiveFilterTests(unittest.TestCase):
             {"stream_id": "13", "tv_archive": "0"},
             {"stream_id": "14"},
         ]
-        result = self._filter(channels)
+        result = [ch for ch in channels if _channel_has_tv_archive(ch)]
         self.assertEqual(len(result), 2)
         self.assertEqual({ch["stream_id"] for ch in result}, {"10", "11"})
 
