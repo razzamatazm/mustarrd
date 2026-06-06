@@ -619,6 +619,11 @@ class DownloadManager:
                     download.status = DownloadStatus.FAILED.value
                     download.error_message = str(e)
                     await session.commit()
+                    try:
+                        if download.output_path and os.path.exists(download.output_path):
+                            os.unlink(download.output_path)
+                    except OSError:
+                        pass
 
                 await self._broadcast_progress(
                     download_id,
