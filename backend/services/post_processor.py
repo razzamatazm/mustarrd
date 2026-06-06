@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shutil
 import platform
@@ -10,6 +11,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class OutputFormat(str, Enum):
@@ -1445,9 +1448,13 @@ class PostProcessor:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) >= 3:
-                    start = float(parts[0])
-                    end = float(parts[1])
-                    seg_type = int(parts[2])
+                    try:
+                        start = float(parts[0])
+                        end = float(parts[1])
+                        seg_type = int(parts[2])
+                    except (ValueError, IndexError):
+                        logger.warning("Skipping malformed EDL line: %r", line.strip())
+                        continue
                     # Type 0 = cut, 3 = commercial
                     if seg_type in [0, 3]:
                         segments.append((start, end, seg_type))
