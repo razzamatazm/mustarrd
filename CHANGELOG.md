@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-06
 
+### Improved: Accounts and Plex Integration now have distinct icons in the Settings sidebar
+
+**What you would notice:** In the Settings navigation, Accounts and Plex Integration previously shared the same server rack icon. If you have both sections configured, it was hard to tell them apart at a glance. Plex Integration now shows a TV icon.
+
+**What changed:** The icon next to "Plex Integration" in the Settings sidebar was changed from a server rack icon to a TV icon.
+
+---
+
+### Improved: Long folder paths in Settings no longer overflow the text box
+
+**What you would notice:** If you configured a long folder path in Settings (common on Unraid when pointing Mustarrd at a deep NAS share path), the path would overflow and get cut off sharply at the edge of the field. It was hard to confirm which folder was actually configured. Long paths now show "..." at the point where they are truncated. Hovering over the field shows the full path.
+
+**What changed:** A text overflow style was applied to folder path fields in Settings. No folder paths or behavior were changed.
+
+---
+
+### Fixed: Entering wrong credentials now shows an error immediately instead of saving a broken account
+
+**What you would notice:** If you typed your IPTV username or password incorrectly when adding an account, Mustarrd accepted them, saved the account as connected, and showed nothing in Browse. The account appeared to be working but was not. You had to delete it and try again without a clear error message. Wrong credentials now show an error immediately so you know to correct them before saving.
+
+**What changed:** Mustarrd was treating a zero value in the authentication field as valid credentials. It now rejects that and returns an error.
+
+---
+
+### Fixed: An empty program guide response from your provider no longer crashes the server
+
+**What you would notice:** On some providers, if a channel's program guide returned no data, clicking anything related to that account would produce a server error. Browse could fail to load for that account entirely. This only affected providers that send a completely empty guide response instead of an empty list.
+
+**What changed:** Mustarrd now handles a completely absent program guide response the same way it handles an empty list, instead of crashing.
+
+---
+
 ### Fixed: Play and Download no longer fail after you change your download folder in Settings
 
 **What you would notice:** If you ever changed your download or completed folder in Settings (common on Unraid when pointing Mustarrd at a NAS share), clicking Play or Download on any recording would fail with a "403 Forbidden" error. The recording existed on disk but Mustarrd refused to serve it. This happened whether the recording was made before or after the folder change.
