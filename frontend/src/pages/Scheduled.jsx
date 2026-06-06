@@ -410,6 +410,9 @@ export default function Scheduled() {
                 <Text c="dimmed" ta="center">
                   No schedule history yet.
                 </Text>
+                <Text c="dimmed" ta="center" size="sm">
+                  Past scheduled recordings that have already aired will appear here.
+                </Text>
               </Stack>
             </Card>
           ) : (

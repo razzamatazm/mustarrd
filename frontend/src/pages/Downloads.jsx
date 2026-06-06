@@ -567,6 +567,9 @@ export default function Downloads() {
                 <Text c="dimmed" ta="center">
                   No download history yet.
                 </Text>
+                <Text c="dimmed" ta="center" size="sm">
+                  Completed, failed, and cancelled downloads will appear here.
+                </Text>
               </Stack>
             </Card>
           ) : (
