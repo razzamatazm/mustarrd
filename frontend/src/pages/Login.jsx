@@ -317,6 +317,7 @@ export default function Login() {
                 autoFocus={isSetupMode || Boolean(setupToken)}
                 required
                 size="md"
+                description={(isSetupMode || Boolean(setupToken)) ? 'Minimum 8 characters' : undefined}
               />
 
               <Button type="submit" loading={isSubmitting} size="md" color="yellow" fullWidth mt={4}>
