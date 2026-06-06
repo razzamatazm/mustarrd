@@ -552,12 +552,17 @@ class DownloadManager:
                 )
 
                 # Start download
-                await self._download_file(
+                downloaded_bytes = await self._download_file(
                     download.source_url,
                     download.output_path,
                     download_id,
                     session
                 )
+                if downloaded_bytes == 0:
+                    raise Exception(
+                        "Provider returned an empty response. "
+                        "The catchup window for this program may have expired."
+                    )
                 await self._broadcast_log(download_id, "Download transfer complete.")
 
                 settings_result = await session.execute(select(AppSettings))
@@ -984,6 +989,7 @@ class DownloadManager:
                     download_id,
                     f"Download bytes written: {downloaded:,}."
                 )
+                return downloaded
 
     async def _post_process(
         self,
