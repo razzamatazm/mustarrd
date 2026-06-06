@@ -22,8 +22,8 @@ class FileNamer:
         # Remove stylized "Live" markers frequently injected by providers
         name = re.sub(r'[\[\(\-–—|:]*\s*ᴸᶦᵛᵉ\s*[\]\)]*\s*(?:-\s*)?', ' ', name)
 
-        # Replace invalid characters with spaces
-        invalid_chars = r'[<>:"/\\|?*]'
+        # Replace invalid characters with spaces (includes null byte and other control chars)
+        invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
         sanitized = re.sub(invalid_chars, ' ', name)
         # Remove multiple spaces
         sanitized = re.sub(r'\s+', ' ', sanitized)
