@@ -254,6 +254,59 @@ class CatchupResolutionTests(unittest.TestCase):
         self.assertEqual(second.start_timestamp, 1774864800)
         self.assertEqual(second.stop_timestamp, 1774868400)
 
+    def test_yyyymmddhhmmss_provider_token_no_tz_is_used_as_url_start(self):
+        """Xtream Codes API often returns start as YYYYMMDDHHMMSS (no dashes, no TZ).
+        That string is the provider's local wall-clock time and must be used as-is
+        in the timeshift URL, not replaced by the UTC fallback."""
+        download = asyncio.run(
+            self._build_download(
+                XtreamAccount(
+                    id=1,
+                    name="Provider A",
+                    server_url="https://provider.example.com",
+                    username="user",
+                    password="",
+                    guide_offset_hours=2,
+                ),
+                {
+                    "title": "Show",
+                    "start_time": "2026-04-20T19:00:00+00:00",
+                    "end_time": "2026-04-20T20:15:00+00:00",
+                    "start_timestamp": 1776704400,
+                    "stop_timestamp": 1776708900,
+                    "provider_start": "20260420190000",
+                },
+            )
+        )
+
+        self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
+
+    def test_yyyymmddhhmmss_provider_token_with_tz_offset_uses_local_part(self):
+        """XMLTV start attributes arrive as YYYYMMDDHHMMSS ±HHMM.  The datetime
+        portion is the provider's local time; strip the TZ suffix and use it."""
+        download = asyncio.run(
+            self._build_download(
+                XtreamAccount(
+                    id=1,
+                    name="Provider B",
+                    server_url="https://provider.example.com",
+                    username="user",
+                    password="",
+                    guide_offset_hours=2,
+                ),
+                {
+                    "title": "Show",
+                    "start_time": "2026-04-20T17:00:00+00:00",
+                    "end_time": "2026-04-20T18:15:00+00:00",
+                    "start_timestamp": 1745679600,
+                    "stop_timestamp": 1745684100,
+                    "provider_start": "20260420190000 +0200",
+                },
+            )
+        )
+
+        self.assertIn("/75/2026-04-20:19-00/999.ts", download.source_url)
+
     def test_invalid_provider_token_falls_back_to_generated_start_without_account_offset(self):
         download = asyncio.run(
             self._build_download(

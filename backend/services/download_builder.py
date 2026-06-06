@@ -63,14 +63,20 @@ def _normalize_provider_start_token(provider_start: str, pre_padding_minutes: in
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}:\d{2}-\d{2}", token):
         parsed = datetime.strptime(token, "%Y-%m-%d:%H-%M")
     else:
-        for fmt in (
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M",
+        # Strip trailing timezone offset (e.g. " +0200", " -0500", " +0000") before
+        # trying compact formats.  The datetime part without the offset is the
+        # provider's local wall-clock time, which is what the timeshift URL expects.
+        bare = re.sub(r"\s+[+-]\d{4}$", "", token).strip()
+        for fmt, candidate in (
+            ("%Y-%m-%d %H:%M:%S", bare),
+            ("%Y-%m-%d %H:%M",    bare),
+            ("%Y-%m-%dT%H:%M:%S", bare),
+            ("%Y-%m-%dT%H:%M",    bare),
+            ("%Y%m%d%H%M%S",      bare),
+            ("%Y%m%d%H%M",        bare),
         ):
             try:
-                parsed = datetime.strptime(token, fmt)
+                parsed = datetime.strptime(candidate, fmt)
                 break
             except ValueError:
                 continue

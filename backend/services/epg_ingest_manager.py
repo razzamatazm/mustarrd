@@ -456,6 +456,8 @@ class EPGIngestManager:
                 "end_time": end_utc,
                 "start_timestamp": start_ts,
                 "stop_timestamp": stop_ts,
+                "provider_start": start_raw,
+                "provider_stop": stop_raw,
                 "duration_minutes": duration_minutes,
                 "has_archive": info["has_archive"],
             }
