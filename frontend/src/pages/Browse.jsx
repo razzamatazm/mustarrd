@@ -746,13 +746,19 @@ export default function Browse() {
               <Text size="sm" c="dimmed">Add an Xtream account to start browsing and recording.</Text>
             </div>
           </Group>
-          <Group gap="xs">
-            <Button size="xs" component={Link} to="/onboarding">
-              Open Setup
-            </Button>
-            <Button size="xs" variant="light" component={Link} to="/settings?section=accounts">
-              Add Account
-            </Button>
+          <Group gap="md" align="flex-start" wrap="wrap">
+            <Stack gap={4}>
+              <Button size="xs" component={Link} to="/onboarding">
+                Start Setup Wizard
+              </Button>
+              <Text size="xs" c="dimmed">Guided walkthrough for first-time setup</Text>
+            </Stack>
+            <Stack gap={4}>
+              <Button size="xs" variant="light" component={Link} to="/settings?section=accounts">
+                Add Account
+              </Button>
+              <Text size="xs" c="dimmed">Already set up? Add another IPTV account</Text>
+            </Stack>
           </Group>
         </Stack>
       </Card>
