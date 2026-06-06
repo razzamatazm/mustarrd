@@ -43,6 +43,8 @@ class XtreamClient:
             data = await response.json()
             if "user_info" not in data:
                 raise Exception("Invalid response from server")
+            if not data["user_info"].get("auth", 1):
+                raise Exception("Invalid credentials")
             return data
 
     async def get_live_categories(self) -> list:
@@ -71,7 +73,7 @@ class XtreamClient:
             if response.status != 200:
                 raise Exception(f"Failed to get EPG: HTTP {response.status}")
             data = await response.json()
-            return data.get("epg_listings", [])
+            return data.get("epg_listings") or []
 
     async def get_short_epg(self, stream_id: str, limit: int = 10) -> list:
         """Get short EPG (current + upcoming) for a channel."""
@@ -81,7 +83,7 @@ class XtreamClient:
             if response.status != 200:
                 raise Exception(f"Failed to get short EPG: HTTP {response.status}")
             data = await response.json()
-            return data.get("epg_listings", [])
+            return data.get("epg_listings") or []
 
     async def get_xmltv(self) -> bytes:
         """Get XMLTV guide data."""
