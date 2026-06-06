@@ -88,7 +88,7 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ### Improved: Browse setup buttons are now clearer for first-time users
 
-**What you would notice:** When no IPTV account is connected, the Browse page used to show two buttons ("Open Setup" and "Add Account") with no explanation of which to press first. The buttons now have clearer labels and helper text below each one. "Open Setup" is now "Start Setup Wizard" with the note "Guided walkthrough for first-time setup." The "Add Account" button now has the note "Already set up? Add another IPTV account" below it so returning users know which option is for them.
+**What you would notice:** When no IPTV account is connected, the Browse page used to show two buttons ("Open Setup" and "Add Account") with no explanation of which to press first. The buttons now have clearer labels and helper text below each one. "Open Setup" is now "Start Setup Wizard" with the note "Guided walkthrough for first-time setup." The "Add Account" button keeps its label but now has the note "Already set up? Add another IPTV account" below it so returning users know it is for them.
 
 **What changed:** Button labels and descriptions on the Browse page were updated. No functionality changed.
 
