@@ -43,6 +43,7 @@ import {
   IconPlus,
   IconTrash,
   IconKey,
+  IconDeviceTv,
 } from '@tabler/icons-react'
 
 import { adminPlexApi, adminUsersApi, authApi, settingsApi } from '../api'
@@ -113,7 +114,7 @@ function useBlocker(blocker, when = true) {
 const ADMIN_SECTIONS = [
   { id: 'accounts', label: 'Accounts', icon: IconServer },
   { id: 'users', label: 'Users', icon: IconUsers },
-  { id: 'plex', label: 'Plex Integration', icon: IconServer },
+  { id: 'plex', label: 'Plex Integration', icon: IconDeviceTv },
   { id: 'recording', label: 'Recording', icon: IconDownload },
   { id: 'processing', label: 'Post-Processing', icon: IconWand },
   { id: 'naming', label: 'File Naming', icon: IconFile },
