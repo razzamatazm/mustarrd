@@ -534,7 +534,10 @@ export default function Downloads() {
                 <Text c="dimmed" ta="center">
                   No active downloads.
                 </Text>
-                <Button variant="light" onClick={() => navigate('/browse')}>
+                <Text c="dimmed" ta="center" size="sm">
+                  Find a show in Browse, then click Download on any program.
+                </Text>
+                <Button onClick={() => navigate('/browse')}>
                   Go to Browse
                 </Button>
               </Stack>
