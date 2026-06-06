@@ -44,18 +44,17 @@ class InvertedEdlSegmentTests(unittest.TestCase):
         segments = self.processor._parse_edl(edl)
         self.assertEqual(len(segments), 0, "Inverted EDL entry (start > end) must be skipped")
 
-    def test_invert_segments_inverted_entry_produces_overlapping_keeps(self):
-        """_invert_segments with (60, 10) produces [(0,60),(10,duration)] - overlapping.
+    def test_invert_segments_inverted_entry_no_overlap(self):
+        """_invert_segments must skip an inverted entry (start > end); no overlapping keeps.
 
-        This is the core bug: content from 10-60 seconds ends up in BOTH keep segments,
-        so it appears twice in the concatenated output.
+        Input: commercial segment (60, 10) is inverted. After the fix, _invert_segments
+        skips it, so no duplicate content window is produced.
         """
         # Commercial claimed to be from t=60 to t=10 (inverted)
         segments = [(60.0, 10.0, 0)]
         duration = 3600.0
         keep = self.processor._invert_segments(segments, duration)
 
-        # Verify the bug exists: keep segments overlap
         for i, (s1, e1) in enumerate(keep):
             for j, (s2, e2) in enumerate(keep):
                 if i >= j:
@@ -64,7 +63,7 @@ class InvertedEdlSegmentTests(unittest.TestCase):
                 self.assertLessEqual(
                     overlap, 0.0,
                     f"Keep segments [{i}]=({s1},{e1}) and [{j}]=({s2},{e2}) overlap "
-                    f"by {overlap}s; inverted EDL entry produces duplicate content"
+                    f"by {overlap}s; inverted EDL entry must not produce duplicate content"
                 )
 
     def test_invert_segments_multiple_inverted_entries_no_overlap(self):
@@ -112,17 +111,16 @@ class ComskipTempProbeOrphanTests(unittest.TestCase):
         self.assertFalse(edl.exists(), "Show.edl should be removed")
         self.assertFalse(txt.exists(), "Show.txt should be removed")
 
-    def test_cleanup_leaves_temp_probe_siblings_on_disk(self):
-        """Bug: auxiliary files from the _comskip_input temp probe are NOT cleaned up.
+    def test_cleanup_removes_temp_probe_siblings(self):
+        """_cleanup_comskip_outputs must remove auxiliary files next to the temp probe EDL.
 
         When Comskip fails on the original .ts and succeeds on the _comskip_input.mkv
         probe, _cleanup_comskip_outputs is called with:
           input_path = "Show.ts"
           edl_path   = "Show_comskip_input.edl"
 
-        It removes Show_comskip_input.edl (explicit path) and Show.{txt,log,...}
-        (siblings of the original input), but does NOT remove
-        Show_comskip_input.{txt,log,logo,csv,vdr,xml} - orphaning them.
+        After the fix it removes Show_comskip_input.{edl,txt,log,logo,...} in addition
+        to Show.{txt,log,...}, so no orphan files are left on disk.
         """
         original = self._make_file("Show.ts")
         # Files Comskip writes next to the temp probe file
@@ -133,22 +131,10 @@ class ComskipTempProbeOrphanTests(unittest.TestCase):
 
         self.processor._cleanup_comskip_outputs(str(original), str(probe_edl))
 
-        # edl_path is explicit, so it should be removed
         self.assertFalse(probe_edl.exists(), "Show_comskip_input.edl should be removed")
-
-        # Bug: these are left on disk
-        self.assertFalse(
-            probe_txt.exists(),
-            "Show_comskip_input.txt should be removed but is orphaned (bug)"
-        )
-        self.assertFalse(
-            probe_log.exists(),
-            "Show_comskip_input.log should be removed but is orphaned (bug)"
-        )
-        self.assertFalse(
-            probe_logo.exists(),
-            "Show_comskip_input.logo should be removed but is orphaned (bug)"
-        )
+        self.assertFalse(probe_txt.exists(), "Show_comskip_input.txt should be removed")
+        self.assertFalse(probe_log.exists(), "Show_comskip_input.log should be removed")
+        self.assertFalse(probe_logo.exists(), "Show_comskip_input.logo should be removed")
 
 
 if __name__ == "__main__":
