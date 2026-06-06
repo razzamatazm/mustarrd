@@ -55,6 +55,7 @@ class PostProcessor:
     """Handles transcoding and commercial detection/removal."""
 
     VAAPI_RENDER_DEVICE = Path("/dev/dri/renderD128")
+    VAAPI_SYSFS_DRM_CLASS = Path("/sys/class/drm")
     VAAPI_DEFAULT_DRIVERS_PATH = (
         "/usr/local/lib/x86_64-linux-gnu/dri:/usr/local/lib/aarch64-linux-gnu/dri:"
         "/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri"
@@ -335,8 +336,9 @@ class PostProcessor:
                 "vendor": None,
             }
 
+        sysfs_class_entry = self.VAAPI_SYSFS_DRM_CLASS / device.name
         try:
-            sysfs_base = device.resolve(strict=True).parent.parent
+            sysfs_base = sysfs_class_entry.resolve(strict=True)
         except OSError:
             return {
                 "enabled": True,
