@@ -15,6 +15,7 @@ import {
   Button,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -221,6 +222,7 @@ function ScheduleCard({
 }
 
 export default function Scheduled() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localItems, setLocalItems] = useState([])
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
@@ -375,8 +377,11 @@ export default function Scheduled() {
               <Stack align="center" gap="md">
                 <IconCalendar size={48} opacity={0.3} />
                 <Text c="dimmed" ta="center">
-                  No scheduled recordings yet. Pick an upcoming show in Browse to schedule it.
+                  No scheduled recordings yet.
                 </Text>
+                <Button variant="light" onClick={() => navigate('/browse')}>
+                  Go to Browse
+                </Button>
               </Stack>
             </Card>
           ) : (

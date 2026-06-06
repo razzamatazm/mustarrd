@@ -16,6 +16,7 @@ import {
   Collapse,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -332,6 +333,7 @@ function DownloadCard({
 }
 
 export default function Downloads() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localProgress, setLocalProgress] = useState({})
   const [localLogs, setLocalLogs] = useState({})
@@ -530,8 +532,11 @@ export default function Downloads() {
               <Stack align="center" gap="md">
                 <IconDownload size={48} opacity={0.3} />
                 <Text c="dimmed" ta="center">
-                  No active downloads. Browse channels to start downloading.
+                  No active downloads.
                 </Text>
+                <Button variant="light" onClick={() => navigate('/browse')}>
+                  Go to Browse
+                </Button>
               </Stack>
             </Card>
           ) : (
