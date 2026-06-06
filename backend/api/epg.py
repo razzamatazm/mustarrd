@@ -27,6 +27,12 @@ class EPGRefreshRequest(BaseModel):
     force: bool = False
 
 
+def _build_like_pattern(q: str) -> str:
+    # Escape backslash first, then LIKE wildcards, so added backslashes aren't re-escaped.
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 @router.get("/epg/search")
 async def search_epg(
     account_id: int = Query(..., ge=1),
@@ -43,14 +49,14 @@ async def search_epg(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    query = f"%{q.lower()}%"
+    pattern = _build_like_pattern(q.lower())
     result = await session.execute(
         select(EPGProgram)
         .where(
             EPGProgram.account_id == account_id,
             or_(
-                func.lower(EPGProgram.title).like(query),
-                func.lower(EPGProgram.description).like(query),
+                func.lower(EPGProgram.title).like(pattern, escape="\\"),
+                func.lower(EPGProgram.description).like(pattern, escape="\\"),
             ),
         )
         .order_by(EPGProgram.start_time.desc())
