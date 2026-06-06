@@ -105,6 +105,7 @@ class FileNamer:
 
     _DEFAULT_TEMPLATES = {
         "tv": "{show} - S{season:02d}E{episode:02d} - {title}",
+        "tv_no_subtitle": "{show} - S{season:02d}E{episode:02d}",
         "movie": "{title} ({year})",
         "sports": "{title} - {date}",
         "default": "{title} - {date}",
@@ -138,12 +139,18 @@ class FileNamer:
             season_ep = self.extract_season_episode(full_text)
             if season_ep:
                 show_name = self.extract_show_name(title)
-                episode_title = self.extract_episode_title(title) or title
+                episode_title = self.extract_episode_title(title)
                 context = {
                     "show": show_name, "season": season_ep[0], "episode": season_ep[1],
                     "title": episode_title, "date": date_str, "channel": channel_name,
                 }
-                template = s.get("tv_template") or self._DEFAULT_TEMPLATES["tv"]
+                custom = s.get("tv_template")
+                if custom:
+                    template = custom
+                elif episode_title:
+                    template = self._DEFAULT_TEMPLATES["tv"]
+                else:
+                    template = self._DEFAULT_TEMPLATES["tv_no_subtitle"]
             else:
                 context = {"title": title, "date": date_str, "channel": channel_name}
                 template = s.get("default_template") or self._DEFAULT_TEMPLATES["default"]
@@ -161,44 +168,10 @@ class FileNamer:
 
         try:
             filename = template.format_map(context)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, AttributeError):
             filename = f"{title} - {date_str}"
 
         return self.sanitize_filename(filename) + ".ts"
-
-    def _generate_tv_filename(self, title: str, description: str, date_str: str) -> str:
-        """Generate filename for TV shows."""
-        full_text = f"{title} {description}"
-        season_ep = self.extract_season_episode(full_text)
-
-        if season_ep:
-            show_name = self.extract_show_name(title)
-            episode_title = self.extract_episode_title(title)
-
-            if episode_title:
-                return f"{show_name} - S{season_ep[0]:02d}E{season_ep[1]:02d} - {episode_title}"
-            else:
-                return f"{show_name} - S{season_ep[0]:02d}E{season_ep[1]:02d}"
-        else:
-            # No season/episode found, use default format
-            return f"{title} - {date_str}"
-
-    def _generate_sports_filename(self, title: str, date_str: str) -> str:
-        """Generate filename for sports content."""
-        return f"{title} - {date_str}"
-
-    def _generate_movie_filename(self, title: str, description: str, start_time: datetime) -> str:
-        """Generate filename for movies."""
-        year = self.extract_year(description) or self.extract_year(title) or start_time.year
-
-        # Clean title of year if present
-        clean_title = re.sub(r'\s*\(\d{4}\)\s*', '', title).strip()
-
-        return f"{clean_title} ({year})"
-
-    def _generate_default_filename(self, title: str, date_str: str) -> str:
-        """Generate default filename."""
-        return f"{title} - {date_str}"
 
 
 # Global instance

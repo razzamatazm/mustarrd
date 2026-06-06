@@ -247,8 +247,13 @@ async def preview_filename(
     # Detect program type
     program_type = epg_service.detect_program_type(data.program, channel)
 
+    # Load settings so the preview matches the actual download filename
+    settings_result = await session.execute(select(AppSettings))
+    app_settings_row = settings_result.scalar_one_or_none()
+    filename_settings = app_settings_row.to_dict() if app_settings_row else None
+
     # Generate filename
-    filename = file_namer.generate_filename(data.program, channel, program_type)
+    filename = file_namer.generate_filename(data.program, channel, program_type, filename_settings)
 
     return {
         "filename": filename,
