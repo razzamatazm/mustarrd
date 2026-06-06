@@ -14,6 +14,7 @@ import {
   Loader,
   Alert,
   NumberInput,
+  Box,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -32,6 +33,18 @@ import {
 import dayjs from 'dayjs'
 
 import { accountsApi, channelsApi, epgApi, settingsApi } from '../../api'
+
+function timeAgo(dateStr) {
+  if (!dateStr) return null
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
 
 function getGuideOffsetLabel(account) {
   const offset = Number(account?.guide_offset_hours || 0)
@@ -195,6 +208,42 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
             {isExpired ? 'Expired' : `Expires ${dayjs(account.expiration_date).format('MMM D, YYYY')}`}
           </Badge>
         )}
+      </Group>
+
+      <Group mt="xs" gap={6} align="center">
+        <Box
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            flexShrink: 0,
+            backgroundColor:
+              account.last_connection_ok === true
+                ? 'var(--mantine-color-green-6)'
+                : account.last_connection_ok === false
+                ? 'var(--mantine-color-red-6)'
+                : 'var(--mantine-color-gray-5)',
+          }}
+        />
+        <Text
+          size="xs"
+          c={
+            account.last_connection_ok === true
+              ? 'green'
+              : account.last_connection_ok === false
+              ? 'red'
+              : 'dimmed'
+          }
+        >
+          {account.last_connection_ok === true
+            ? 'Connected'
+            : account.last_connection_ok === false
+            ? 'Unreachable'
+            : 'Not checked yet'}
+          {account.last_connection_checked_at
+            ? ` · ${timeAgo(account.last_connection_checked_at)}`
+            : ''}
+        </Text>
       </Group>
     </Card>
   )
