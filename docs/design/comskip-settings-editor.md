@@ -47,18 +47,18 @@ Nine settings, grouped into three subsections. All values stored in `app_setting
 
 | Field | Label | Default | Tooltip |
 |-------|-------|---------|---------|
-| `detect_method` | Detection methods | 107 | Which signals Comskip looks for when finding commercial boundaries. 107 enables black frames, logo presence, fuzzy logic, aspect ratio changes, and silence detection. Recommended: 107. Higher values add rarely-useful signals and slow processing. |
+| `detect_method` | Detection methods | 107 | Which signals Comskip looks for when finding commercial boundaries. 107 enables black frames, logo presence, resolution change, aspect ratio changes, and silence detection. Recommended: 107. Higher values add rarely-useful signals and slow processing. |
 
 `detect_method` is a bitmask. UI: a `CheckboxGroup` (visible checkboxes, not a dropdown) with human labels:
 
 - `1` Black frames
 - `2` Logo detection
 - `4` Scene change
-- `8` Fuzzy logic
+- `8` Resolution change
 - `32` Aspect ratio change
 - `64` Silence detection
 
-Default `detect_method = 107` pre-checks: 1, 2, 8, 32, 64 (black frames, logo, fuzzy logic, aspect ratio, silence). Scene change (4) is **not** included in 107 and must not be pre-checked.
+Default `detect_method = 107` pre-checks: 1, 2, 8, 32, 64 (black frames, logo, resolution change, aspect ratio, silence). Scene change (4) is **not** included in 107 and must not be pre-checked.
 
 (Values 16 = closed captions and 128 = cutscenes omitted: rarely available or effective on IPTV streams.)
 
