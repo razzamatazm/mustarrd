@@ -30,11 +30,11 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
-### Fixed: Special characters in your IPTV password caused all operations to silently fail
+### Fixed: Special characters in your IPTV password broke channel browsing and guide updates
 
-**What you would notice:** If your IPTV provider gave you a password that included a `+`, `&`, `=`, or `%` character (common with auto-generated passwords), Mustarrd showed "Failed to load channels from provider" and nothing would work. Browsing, program guide updates, and downloads all failed, even though the password was correct.
+**What you would notice:** If your IPTV provider gave you a password that included a `+`, `&`, `=`, or `%` character (common with auto-generated passwords), Mustarrd showed "Failed to load channels from provider" and the program guide would not update, even though the password was correct. Downloads were not affected by this change.
 
-**What changed:** Mustarrd now correctly encodes special characters before sending your credentials to your provider. A `+` is sent as `+`, not misread as a space. Your password reaches the server exactly as you entered it.
+**What changed:** Mustarrd now correctly encodes special characters when it sends your credentials to your provider for channel lookups and guide data requests. A `+` is sent as `+`, not misread as a space.
 
 ---
 
