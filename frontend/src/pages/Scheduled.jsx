@@ -376,9 +376,14 @@ export default function Scheduled() {
             <Card shadow="sm" padding="xl" radius="md" withBorder>
               <Stack align="center" gap="md">
                 <IconCalendar size={48} opacity={0.3} />
-                <Text c="dimmed" ta="center">
-                  No scheduled recordings yet.
-                </Text>
+                <Stack gap={4} align="center">
+                  <Text c="dimmed" ta="center">
+                    No scheduled recordings yet.
+                  </Text>
+                  <Text size="sm" c="dimmed" ta="center" maw={400}>
+                    Browse the program guide to find upcoming shows, then click "Schedule" on any program to record it automatically when it airs.
+                  </Text>
+                </Stack>
                 <Button variant="light" onClick={() => navigate('/browse')}>
                   Go to Browse
                 </Button>
