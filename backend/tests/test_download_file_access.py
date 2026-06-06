@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from starlette.responses import FileResponse
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -56,13 +57,8 @@ class DownloadFileAccessTests(unittest.IsolatedAsyncioTestCase):
                 mock_cfg.default_download_folder = "/app/downloads"
                 mock_cfg.default_completed_folder = "/app/completed"
 
-                try:
-                    await get_download_file(1, None, "download", auth, session)
-                except HTTPException as exc:
-                    self.assertNotEqual(
-                        exc.status_code, 403,
-                        f"Got 403 for file inside DB-configured folder: {exc.detail}",
-                    )
+                result = await get_download_file(1, None, "download", auth, session)
+                self.assertIsInstance(result, FileResponse)
 
     async def test_env_fallback_when_no_db_row(self):
         """Falls back to env defaults when there is no AppSettings row."""
@@ -82,13 +78,35 @@ class DownloadFileAccessTests(unittest.IsolatedAsyncioTestCase):
                 mock_cfg.default_download_folder = default_dir
                 mock_cfg.default_completed_folder = "/some/completed"
 
-                try:
-                    await get_download_file(1, None, "download", auth, session)
-                except HTTPException as exc:
-                    self.assertNotEqual(
-                        exc.status_code, 403,
-                        f"Got 403 with env-default folder and no DB row: {exc.detail}",
-                    )
+                result = await get_download_file(1, None, "download", auth, session)
+                self.assertIsInstance(result, FileResponse)
+
+    async def test_file_in_env_default_while_db_points_elsewhere_not_403(self):
+        """File under the original env-default folder is still served after user switches to a
+        custom folder in Settings. Previously the allowlist dropped the env-default roots once
+        a DB row existed, causing a 403 on every recording made before the folder change."""
+        with tempfile.TemporaryDirectory() as env_default_dir:
+            old_file = os.path.join(env_default_dir, "OldShow.ts")
+            Path(old_file).write_bytes(b"fake")
+
+            db_settings = AppSettings()
+            db_settings.download_folder = "/nas/downloads"
+            db_settings.completed_folder = "/nas/completed"
+
+            session = AsyncMock()
+            session.execute = AsyncMock(side_effect=[
+                _ScalarResult(_make_download(old_file)),
+                _ScalarResult(db_settings),
+            ])
+
+            auth = AuthContext(authenticated=True, is_admin=True, user_id=1)
+
+            with patch("api.downloads.settings") as mock_cfg:
+                mock_cfg.default_download_folder = env_default_dir
+                mock_cfg.default_completed_folder = "/app/completed"
+
+                result = await get_download_file(1, None, "download", auth, session)
+                self.assertIsInstance(result, FileResponse)
 
     async def test_path_outside_all_roots_returns_403(self):
         """File path outside DB folders and env defaults raises 403."""

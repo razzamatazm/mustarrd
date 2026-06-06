@@ -334,10 +334,21 @@ async def get_download_file(
     file_path = Path(download.output_path).expanduser().resolve()
     db_settings_result = await session.execute(select(AppSettings))
     db_settings = db_settings_result.scalar_one_or_none()
-    allowed_roots = [
-        Path(db_settings.download_folder if db_settings and db_settings.download_folder else settings.default_download_folder).expanduser().resolve(),
-        Path(db_settings.completed_folder if db_settings and db_settings.completed_folder else settings.default_completed_folder).expanduser().resolve(),
-    ]
+    # Union of env defaults and DB-configured folders so recordings made before a
+    # folder change remain accessible (de-duplicated after resolve).
+    roots_raw = [settings.default_download_folder, settings.default_completed_folder]
+    if db_settings:
+        if db_settings.download_folder:
+            roots_raw.append(db_settings.download_folder)
+        if db_settings.completed_folder:
+            roots_raw.append(db_settings.completed_folder)
+    seen: set = set()
+    allowed_roots = []
+    for r in roots_raw:
+        resolved = Path(r).expanduser().resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            allowed_roots.append(resolved)
     if not any(file_path.is_relative_to(root) for root in allowed_roots):
         raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.is_file():
