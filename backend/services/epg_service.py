@@ -92,7 +92,7 @@ class EPGService:
         try:
             channels = await client.get_live_streams(category_id)
             # Filter to only channels with catchup enabled
-            return [ch for ch in channels if ch.get("tv_archive", 0) == 1]
+            return [ch for ch in channels if int(ch.get("tv_archive", 0) or 0) == 1]
         finally:
             await client.close()
 
@@ -241,7 +241,7 @@ class EPGService:
             "provider_start": str(provider_start).strip() if provider_start is not None else None,
             "provider_stop": str(provider_stop).strip() if provider_stop is not None else None,
             "duration_minutes": duration_minutes,
-            "has_archive": entry.get("has_archive", 0) == 1,
+            "has_archive": int(entry.get("has_archive", 0) or 0) == 1,
             "channel_id": channel_id or None,
         }
 
