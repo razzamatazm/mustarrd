@@ -86,9 +86,11 @@ class EPGIngestManager:
                 else:
                     await self._log("Starting account-specific EPG refresh.", account=account)
                 await self._refresh_account(account, force=force)
+                await self._update_connection_status(account.id, ok=True)
             except Exception as exc:
                 self._status["last_error"] = str(exc)
                 await self._log(f"Account EPG refresh failed: {exc}", level="error", account=account)
+                await self._update_connection_status(account.id, ok=False)
                 raise
             finally:
                 self._status.update({
@@ -133,12 +135,14 @@ class EPGIngestManager:
         for account in accounts:
             try:
                 await self._refresh_account(account, force=force)
+                await self._update_connection_status(account.id, ok=True)
             except Exception as exc:
                 self._status.update({
                     "last_error": str(exc),
                 })
                 logger.exception("Error refreshing XMLTV for account %s", account.id)
                 await self._log(f"EPG refresh failed: {exc}", level="error", account=account)
+                await self._update_connection_status(account.id, ok=False)
 
         self._status.update({
             "running": False,
@@ -344,6 +348,20 @@ class EPGIngestManager:
             f"EPG refresh complete. Parsed {processed:,} entries; inserted {inserted:,} new rows.",
             account=account
         )
+
+    async def _update_connection_status(self, account_id: int, ok: bool) -> None:
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(XtreamAccount).where(XtreamAccount.id == account_id)
+                )
+                account = result.scalar_one_or_none()
+                if account:
+                    account.last_connection_ok = ok
+                    account.last_connection_checked_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.exception("Failed to update connection status for account %s", account_id)
 
     def _build_channel_maps(self, channels: list[dict]) -> dict:
         stream_by_xmltv_id: Dict[str, str] = {}
