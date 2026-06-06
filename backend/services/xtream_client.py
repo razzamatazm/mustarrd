@@ -1,7 +1,7 @@
 import aiohttp
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
@@ -27,11 +27,11 @@ class XtreamClient:
 
     def _build_api_url(self, action: str, **params) -> str:
         base = f"{self.server_url}/player_api.php"
-        params_str = f"username={self.username}&password={self.password}&action={action}"
+        query = {"username": self.username, "password": self.password, "action": action}
         for key, value in params.items():
             if value is not None:
-                params_str += f"&{key}={value}"
-        return f"{base}?{params_str}"
+                query[key] = value
+        return f"{base}?{urlencode(query)}"
 
     async def authenticate(self) -> dict:
         """Get server info and validate credentials."""
@@ -85,7 +85,7 @@ class XtreamClient:
 
     async def get_xmltv(self) -> bytes:
         """Get XMLTV guide data."""
-        url = f"{self.server_url}/xmltv.php?username={self.username}&password={self.password}"
+        url = f"{self.server_url}/xmltv.php?{urlencode({'username': self.username, 'password': self.password})}"
         session = await self._get_session()
         async with session.get(url) as response:
             if response.status != 200:
