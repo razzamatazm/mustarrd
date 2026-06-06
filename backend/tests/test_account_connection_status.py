@@ -8,6 +8,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from models.account import XtreamAccount
+
 from services.epg_ingest_manager import EPGIngestManager
 
 
@@ -90,6 +92,41 @@ class ConnectionStatusUpdateTests(unittest.IsolatedAsyncioTestCase):
             await manager._refresh_all_accounts()
 
         mock_status.assert_called_once_with(account.id, ok=False)
+
+
+class AccountToDictTimestampTests(unittest.TestCase):
+    def _make_mock_account(self, checked_at):
+        account = MagicMock(spec=XtreamAccount)
+        account.id = 1
+        account.name = "Test"
+        account.server_url = "http://example.com"
+        account.username = "user"
+        account.is_active = True
+        account.created_at = datetime(2026, 6, 6, 23, 0, 0)
+        account.last_used = None
+        account.last_epg_backfill_at = None
+        account.max_connections = None
+        account.active_connections = None
+        account.expiration_date = None
+        account.guide_offset_hours = 0
+        account.last_connection_ok = True
+        account.last_connection_checked_at = checked_at
+        return account
+
+    def test_last_connection_checked_at_emits_utc_z_suffix(self):
+        # Naive datetimes stored by SQLite must be emitted with a Z suffix so
+        # the browser parses them as UTC rather than local time.
+        account = self._make_mock_account(datetime(2026, 6, 6, 23, 0, 0))
+        d = XtreamAccount.to_dict(account)
+        self.assertTrue(
+            d["last_connection_checked_at"].endswith("Z"),
+            f"Expected UTC Z suffix, got: {d['last_connection_checked_at']}"
+        )
+
+    def test_last_connection_checked_at_none_stays_none(self):
+        account = self._make_mock_account(None)
+        d = XtreamAccount.to_dict(account)
+        self.assertIsNone(d["last_connection_checked_at"])
 
 
 if __name__ == "__main__":

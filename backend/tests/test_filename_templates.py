@@ -61,6 +61,21 @@ class TemplateWiringTests(unittest.TestCase):
         result = FileNamer().generate_filename(_prog("The Wire"), _channel("HBO"), "other", settings)
         self.assertEqual(result, "HBO The Wire.ts")
 
+    def test_tv_no_subtitle_default_omits_title_segment(self):
+        # EPG title with no episode subtitle must not duplicate the show name.
+        # "Breaking Bad S01E01" has no "- Episode Title" part, so the output
+        # must be "Breaking Bad - S01E01.ts", not "Breaking Bad - S01E01 - Breaking Bad S01E01.ts".
+        result = FileNamer().generate_filename(
+            _prog("Breaking Bad S01E01"), _channel(), "tv_show"
+        )
+        self.assertEqual(result, "Breaking Bad - S01E01.ts")
+
+    def test_tv_with_subtitle_includes_episode_title(self):
+        result = FileNamer().generate_filename(
+            _prog("Breaking Bad S01E01 - Pilot"), _channel(), "tv_show"
+        )
+        self.assertEqual(result, "Breaking Bad - S01E01 - Pilot.ts")
+
 
 class RemovesuffixTests(unittest.TestCase):
     """removesuffix fix: .ts in the stem is not consumed."""

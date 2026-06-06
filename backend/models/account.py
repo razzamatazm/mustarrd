@@ -43,5 +43,5 @@ class XtreamAccount(Base):
             "expiration_date": self.expiration_date.isoformat() if self.expiration_date else None,
             "guide_offset_hours": int(self.guide_offset_hours or 0),
             "last_connection_ok": self.last_connection_ok,
-            "last_connection_checked_at": self.last_connection_checked_at.isoformat() if self.last_connection_checked_at else None,
+            "last_connection_checked_at": self.last_connection_checked_at.isoformat() + "Z" if self.last_connection_checked_at else None,
         }
