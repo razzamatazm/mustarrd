@@ -62,6 +62,46 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Downloading a program outside the catchup window silently created an empty file
+
+**What you would notice:** If you tried to download a recording that was older than your provider's catchup window (usually 3 to 7 days back), the download would show as Completed and a 0-byte file would appear in your completed folder. Playing it in Plex or Jellyfin would fail silently. Scheduled recordings that were delayed past the catchup window by a full disk could quietly accumulate empty files.
+
+**What changed:** Mustarrd now checks whether the provider actually sent any content. If it receives an empty response, it marks the download as Failed with the message "Provider returned an empty response. The catchup window for this program may have expired." The empty file is also deleted automatically.
+
+---
+
+### Improved: REC indicator now only shows when a download is active
+
+**What you would notice:** Previously, a red pulsing REC dot appeared in the corner on every screen, even on the login page when nothing was recording. Many users read the constant red pulse as an alarm or error. The indicator now only appears when at least one download is actually in progress.
+
+**What changed:** The REC dot is now hidden when there are no active downloads. It appears and pulses normally as soon as a download starts.
+
+---
+
+### Improved: Save Settings button now only appears when you have changes pending
+
+**What you would notice:** The Settings page used to always show a grayed-out "Save Settings" button, even when you had not changed anything. This was confusing because the button looked disabled or broken. The button now stays hidden until you actually edit a setting, at which point it turns orange and becomes clickable.
+
+**What changed:** The "Save Settings" button now follows the same pattern as "Discard Changes": both buttons only appear when there is something to act on.
+
+---
+
+### Improved: Browse setup buttons are now clearer for first-time users
+
+**What you would notice:** When no IPTV account is connected, the Browse page used to show two buttons ("Open Setup" and "Add Account") with no explanation of which to press first. The buttons now have clearer labels and helper text below each one. "Open Setup" is now "Start Setup Wizard" with the note "Guided walkthrough for first-time setup." The "Add Account" button now has the note "Already set up? Add another IPTV account" below it so returning users know which option is for them.
+
+**What changed:** Button labels and descriptions on the Browse page were updated. No functionality changed.
+
+---
+
+### Improved: Setup wizard no longer shows a grayed-out Continue button before your account is saved
+
+**What you would notice:** When you first open Mustarrd and reach the account setup step, you previously saw two buttons: an orange "Save & Continue" and a grayed-out "Continue" with no explanation of why it was disabled. This looked broken. The Continue button is now hidden until you have successfully saved your first account, at which point it appears if you want to skip adding a second account.
+
+**What changed:** The Continue button on the account setup step is now hidden until an account has been saved, instead of always being shown in a disabled state.
+
+---
+
 ## 2026-04-29
 
 ### Fixed: Show times now display in the channel's local time
