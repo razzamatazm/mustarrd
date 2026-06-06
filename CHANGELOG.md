@@ -4,7 +4,7 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
-## 2026-05-18
+## 2026-04-29
 
 ### Fixed: Show times now display in the channel's local time
 
