@@ -1320,11 +1320,10 @@ export default function Settings() {
               Discard Changes
             </Button>
           )}
-          {inConfigSection && (
+          {inConfigSection && (hasChanges || updateMutation.isPending) && (
             <Button
               onClick={handleSave}
               loading={updateMutation.isPending}
-              disabled={!hasChanges}
             >
               Save Settings
             </Button>
