@@ -22,6 +22,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Searching the program guide with special characters no longer returns wrong results
+
+**What you would notice:** If you typed a `%` sign or multiple underscores into the program guide search box, you got completely wrong results. Searching just `%` returned every program in the database regardless of what you were looking for. Searching a string of underscores like `_____` could cause a slow, unresponsive search. Any literal search that happened to contain these characters was broken.
+
+**What changed:** Mustarrd now treats `%` and `_` as plain text when you type them in the search box, rather than as special database wildcard characters. Search results now match what you actually typed.
+
+---
+
 ### Fixed: ComSkip commercial removal no longer fails when it produces unusual timing values
 
 **What you would notice:** After a recording finished and ComSkip ran to remove commercials, the download would sometimes end up marked as Failed with a cryptic error message. This happened when ComSkip produced an EDL file (its list of commercial segments) with a timing value it could not compute, such as `N/A`. The rest of the recording was fine but the whole post-processing step was aborted.
