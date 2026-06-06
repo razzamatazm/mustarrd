@@ -30,6 +30,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Special characters in your IPTV password caused all operations to silently fail
+
+**What you would notice:** If your IPTV provider gave you a password that included a `+`, `&`, `=`, or `%` character (common with auto-generated passwords), Mustarrd showed "Failed to load channels from provider" and nothing would work. Browsing, program guide updates, and downloads all failed, even though the password was correct.
+
+**What changed:** Mustarrd now correctly encodes special characters before sending your credentials to your provider. A `+` is sent as `+`, not misread as a space. Your password reaches the server exactly as you entered it.
+
+---
+
+### Fixed: Cancelling a download left a partial file on disk
+
+**What you would notice:** If you cancelled a download partway through, the partially-written file stayed in your downloads folder and was never cleaned up. On a busy system with slow providers that need retries, these leftover files could quietly fill your disk over time.
+
+**What changed:** Cancelling a download now deletes the partial file immediately, the same way a failed download already did.
+
+---
+
+### Fixed: Running out of disk space left a partial file that kept the disk full
+
+**What you would notice:** If a download ran out of disk space mid-transfer, Mustarrd correctly marked it as Failed, but left the partial file on disk. Because the disk was still full, every download after that also failed. A non-technical user had no obvious way to recover without manually finding and deleting the file.
+
+**What changed:** When a download fails because the disk is full, Mustarrd now automatically deletes the partial file. Disk space is freed immediately and the next download can proceed.
+
+---
+
+### Fixed: Hidden characters in program titles caused downloads to fail silently
+
+**What you would notice:** Some IPTV providers embed invisible control characters inside program titles in their guide data. When Mustarrd tried to create a folder for that download, it failed with a cryptic internal error and marked the download as Failed with no useful message shown to the user.
+
+**What changed:** Mustarrd now strips control characters (including null bytes) from program titles before creating folders or filenames. The download proceeds normally regardless of what characters the provider's guide data contains.
+
+---
+
 ## 2026-04-29
 
 ### Fixed: Show times now display in the channel's local time
