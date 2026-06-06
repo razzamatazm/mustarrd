@@ -1249,6 +1249,7 @@ class DownloadManager:
                 download.error_message = None
                 await session.commit()
 
+                self._cancelled.discard(download_id)
                 await self._queue.put(download_id)
                 return True
 
