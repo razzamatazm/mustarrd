@@ -384,7 +384,7 @@ export default function Scheduled() {
                     Browse the program guide to find upcoming shows, then click "Schedule" on any program to record it automatically when it airs.
                   </Text>
                 </Stack>
-                <Button variant="light" onClick={() => navigate('/browse')}>
+                <Button onClick={() => navigate('/browse')}>
                   Go to Browse
                 </Button>
               </Stack>
