@@ -228,9 +228,12 @@ async def update_settings(
             value = int(value)
         setattr(settings, field, value)
 
-    # If comskip is enabled, ensure transcoding is on.
-    if update_dict.get("comskip_enabled") is True:
+    # Enforce ComSkip constraints on the final stored state, not just the
+    # current request, so a subsequent request cannot disable transcode or
+    # enable remux-only while ComSkip is already on.
+    if settings.comskip_enabled:
         settings.transcode_enabled = True
+        settings.remux_only = False
 
     await session.commit()
     await session.refresh(settings)
