@@ -383,8 +383,15 @@ class EPGIngestManager:
 
     def _build_channel_maps(self, channels: list[dict]) -> dict:
         stream_by_xmltv_id: Dict[str, str] = {}
-        stream_by_name: Dict[str, str] = {}
         stream_info: Dict[str, dict] = {}
+
+        # Separate channels into two buckets so that name-only channels
+        # (no explicit xmltv id) get priority in the name fallback slot.
+        # A channel with an explicit id is already reachable via
+        # stream_by_xmltv_id, so it should only occupy the name slot when no
+        # name-only channel shares that normalized name.
+        name_only_names: list[tuple[str, str]] = []  # (norm_name, stream_id)
+        has_id_names: list[tuple[str, str]] = []
 
         for ch in channels:
             stream_id = str(ch.get("stream_id"))
@@ -398,9 +405,19 @@ class EPGIngestManager:
             xmltv_id = self._extract_xmltv_id(ch)
             if xmltv_id:
                 stream_by_xmltv_id[str(xmltv_id)] = stream_id
+                if name:
+                    has_id_names.append((self._normalize_name(name), stream_id))
+            else:
+                if name:
+                    name_only_names.append((self._normalize_name(name), stream_id))
 
-            if name:
-                stream_by_name.setdefault(self._normalize_name(name), stream_id)
+        # Pass 1: name-only channels fill the name slot (first-write-wins).
+        stream_by_name: Dict[str, str] = {}
+        for norm_name, stream_id in name_only_names:
+            stream_by_name.setdefault(norm_name, stream_id)
+        # Pass 2: id-having channels fill any remaining gaps only.
+        for norm_name, stream_id in has_id_names:
+            stream_by_name.setdefault(norm_name, stream_id)
 
         return {
             "stream_by_xmltv_id": stream_by_xmltv_id,
