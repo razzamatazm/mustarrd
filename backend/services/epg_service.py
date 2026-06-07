@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from models import XtreamAccount, EPGProgram
+from models import XtreamAccount, EPGProgram, AppSettings
 from services.account_credentials import resolve_account_password_with_migration
 from services.xtream_client import XtreamClient
 from config import settings as app_settings
@@ -113,6 +113,10 @@ class EPGService:
         if not account:
             raise Exception(f"Account {account_id} not found")
 
+        settings_result = await session.execute(select(AppSettings))
+        db_settings = settings_result.scalar_one_or_none()
+        global_offset_minutes = int(getattr(db_settings, "epg_offset_minutes", 0) or 0)
+
         cache_key = self._get_cache_key(
             account_id,
             channel_id,
@@ -137,7 +141,12 @@ class EPGService:
             try:
                 epg_data = await client.get_epg(channel_id)
                 processed = [
-                    self._process_epg_entry(entry, account, fallback_channel_id=channel_id, has_archive_fallback=True)
+                    self._process_epg_entry(
+                        entry, account,
+                        fallback_channel_id=channel_id,
+                        has_archive_fallback=True,
+                        global_offset_minutes=global_offset_minutes,
+                    )
                     for entry in epg_data
                 ]
                 filtered = self._filter_programs_by_cutoff(processed, cutoff)
@@ -169,7 +178,7 @@ class EPGService:
         db_rows = db_result.scalars().all()
         if db_rows:
             processed = [
-                self.serialize_program(row, account)
+                self.serialize_program(row, account, global_offset_minutes)
                 for row in db_rows
             ]
             processed = self._dedupe_programs(processed)
@@ -193,6 +202,7 @@ class EPGService:
         account: Optional[XtreamAccount] = None,
         fallback_channel_id: Optional[str] = None,
         has_archive_fallback: bool = False,
+        global_offset_minutes: int = 0,
     ) -> dict:
         """Process and normalize an EPG entry."""
         # Decode base64 title and description if present
@@ -219,7 +229,9 @@ class EPGService:
 
         provider_start = entry.get("start")
         provider_stop = entry.get("stop")
-        start_time, end_time = self._resolve_display_window(start_time_utc, end_time_utc, account)
+        start_time, end_time = self._resolve_display_window(
+            start_time_utc, end_time_utc, account, global_offset_minutes
+        )
 
         duration_minutes = 0
         if start_time and end_time:
@@ -287,8 +299,15 @@ class EPGService:
         past_programs.sort(key=lambda x: self._coerce_timestamp(x.get("start_timestamp")), reverse=True)
         return past_programs
 
-    def serialize_program(self, row: EPGProgram, account: Optional[XtreamAccount] = None) -> dict:
-        start_time, end_time = self._resolve_display_window(row.start_time, row.end_time, account)
+    def serialize_program(
+        self,
+        row: EPGProgram,
+        account: Optional[XtreamAccount] = None,
+        global_offset_minutes: int = 0,
+    ) -> dict:
+        start_time, end_time = self._resolve_display_window(
+            row.start_time, row.end_time, account, global_offset_minutes
+        )
         duration_minutes = 0
         if start_time and end_time:
             duration_minutes = int((end_time - start_time).total_seconds() / 60)
@@ -334,16 +353,19 @@ class EPGService:
         start_time_utc: Optional[datetime],
         end_time_utc: Optional[datetime],
         account: Optional[XtreamAccount],
+        global_offset_minutes: int = 0,
     ) -> tuple[Optional[datetime], Optional[datetime]]:
         normalized_start = self._normalize_time(start_time_utc)
         normalized_end = self._normalize_time(end_time_utc)
-        guide_offset_hours = int(getattr(account, "guide_offset_hours", 0) or 0)
-        if guide_offset_hours:
-            offset = timedelta(hours=guide_offset_hours)
+        total_offset = timedelta(
+            hours=int(getattr(account, "guide_offset_hours", 0) or 0),
+            minutes=global_offset_minutes,
+        )
+        if total_offset:
             if normalized_start:
-                normalized_start = normalized_start + offset
+                normalized_start = normalized_start + total_offset
             if normalized_end:
-                normalized_end = normalized_end + offset
+                normalized_end = normalized_end + total_offset
         return normalized_start, normalized_end
 
     def _coerce_timestamp(self, value) -> int:
