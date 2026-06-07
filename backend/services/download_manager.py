@@ -988,6 +988,77 @@ class DownloadManager:
         except Exception:
             pass
 
+    async def _stream_response_to_file(
+        self,
+        response,
+        output_path: str,
+        file_mode: str,
+        downloaded_start: int,
+        total_size: int,
+        download_id: int,
+        session: AsyncSession,
+    ) -> int:
+        """Write the body of *response* to *output_path* and return total bytes accumulated.
+
+        *downloaded_start* is added to the byte counter before the first write so
+        a resumed download reports cumulative progress from the start of the file.
+        """
+        if total_size > 0:
+            await self._broadcast_log(
+                download_id,
+                f"HTTP {response.status}. Expected size: {total_size:,} bytes."
+            )
+        else:
+            await self._broadcast_log(
+                download_id,
+                f"HTTP {response.status}. Size unknown; streaming download."
+            )
+
+        downloaded = downloaded_start
+        last_progress_update = 0
+
+        async with aiofiles.open(output_path, file_mode) as f:
+            async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                if download_id in self._cancelled:
+                    raise asyncio.CancelledError()
+
+                await f.write(chunk)
+                downloaded += len(chunk)
+
+                if total_size > 0:
+                    progress = (downloaded / total_size) * 100
+                else:
+                    progress = 0
+
+                if progress - last_progress_update >= 1 or downloaded == total_size:
+                    last_progress_update = progress
+
+                    await session.execute(
+                        update(Download)
+                        .where(Download.id == download_id)
+                        .values(
+                            progress=progress,
+                            downloaded_bytes=downloaded,
+                            file_size=total_size
+                        )
+                    )
+                    await session.commit()
+
+                    await self._broadcast_progress(
+                        download_id,
+                        progress,
+                        DownloadStatus.DOWNLOADING.value,
+                        downloaded_bytes=downloaded,
+                        file_size=total_size,
+                        download_progress=progress
+                    )
+
+        await self._broadcast_log(
+            download_id,
+            f"Download bytes written: {downloaded:,}."
+        )
+        return downloaded
+
     async def _download_file(
         self,
         url: str,
@@ -999,10 +1070,11 @@ class DownloadManager:
         """Stream download a file with progress tracking.
 
         If *offset* is non-zero a ``Range: bytes=<offset>-`` header is sent.
-        A 206 response means the server honours the range; the existing partial
-        file is appended to and *downloaded* starts at *offset* so the reported
-        byte count is cumulative.  A 200 response means the server ignored the
-        range; the file is truncated and the download starts from scratch.
+        A 206 response with a matching Content-Range is resumed (``ab`` mode).
+        A 200 response (server ignored Range) re-downloads from byte 0 (``wb``).
+        A 206 whose start position cannot be confirmed (absent or mismatched
+        Content-Range) releases the connection and issues a fresh GET without the
+        Range header so the written file always starts from a known byte 0.
         """
         timeout = aiohttp.ClientTimeout(total=None, sock_read=60)
 
@@ -1011,6 +1083,8 @@ class DownloadManager:
             request_headers["Range"] = f"bytes={offset}-"
 
         async with aiohttp.ClientSession(timeout=timeout) as http_session:
+            needs_restart = False
+
             async with http_session.get(url, headers=request_headers) as response:
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
@@ -1046,86 +1120,53 @@ class DownloadManager:
                     and range_start == offset
                 )
 
-                if total_size > 0:
-                    await self._broadcast_log(
-                        download_id,
-                        f"HTTP {response.status}. Expected size: {total_size:,} bytes."
-                    )
+                if response.status == 206 and offset > 0 and not resuming:
+                    # The 206 body starts at an unknown or wrong offset, not byte 0.
+                    # Writing it with 'wb' would produce a silently truncated file.
+                    # Release this connection without reading the body, then re-request
+                    # from byte 0 with no Range header.
+                    needs_restart = True
+                    if range_mismatch:
+                        await self._broadcast_log(
+                            download_id,
+                            f"Provider returned Content-Range start {range_start:,} "
+                            f"instead of requested {offset:,}; re-requesting from start."
+                        )
+                    else:
+                        await self._broadcast_log(
+                            download_id,
+                            "Provider returned 206 without Content-Range; re-requesting from start."
+                        )
                 else:
-                    await self._broadcast_log(
-                        download_id,
-                        f"HTTP {response.status}. Size unknown; streaming download."
-                    )
-
-                if resuming:
-                    downloaded = offset
-                    file_mode = "ab"
-                    await self._broadcast_log(
-                        download_id,
-                        f"Resuming from byte {offset:,}."
-                    )
-                else:
-                    downloaded = 0
-                    file_mode = "wb"
-                    if offset > 0:
-                        if range_mismatch:
-                            await self._broadcast_log(
-                                download_id,
-                                f"Provider returned Content-Range start {range_start:,} "
-                                f"instead of requested {offset:,}; re-downloading from start."
-                            )
-                        else:
+                    if resuming:
+                        await self._broadcast_log(
+                            download_id,
+                            f"Resuming from byte {offset:,}."
+                        )
+                        return await self._stream_response_to_file(
+                            response, output_path, "ab", offset,
+                            total_size, download_id, session
+                        )
+                    else:
+                        if offset > 0:
                             await self._broadcast_log(
                                 download_id,
                                 "Provider did not honour Range request; re-downloading from start."
                             )
+                        return await self._stream_response_to_file(
+                            response, output_path, "wb", 0,
+                            total_size, download_id, session
+                        )
 
-                last_progress_update = 0
-
-                async with aiofiles.open(output_path, file_mode) as f:
-                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
-                        # Check for cancellation
-                        if download_id in self._cancelled:
-                            raise asyncio.CancelledError()
-
-                        await f.write(chunk)
-                        downloaded += len(chunk)
-
-                        # Update progress every 1%
-                        if total_size > 0:
-                            progress = (downloaded / total_size) * 100
-                        else:
-                            progress = 0
-
-                        if progress - last_progress_update >= 1 or downloaded == total_size:
-                            last_progress_update = progress
-
-                            # Update database
-                            await session.execute(
-                                update(Download)
-                                .where(Download.id == download_id)
-                                .values(
-                                    progress=progress,
-                                    downloaded_bytes=downloaded,
-                                    file_size=total_size
-                                )
-                            )
-                            await session.commit()
-
-                            # Broadcast progress
-                            await self._broadcast_progress(
-                                download_id,
-                                progress,
-                                DownloadStatus.DOWNLOADING.value,
-                                downloaded_bytes=downloaded,
-                                file_size=total_size,
-                                download_progress=progress
-                            )
-                await self._broadcast_log(
-                    download_id,
-                    f"Download bytes written: {downloaded:,}."
+            # Only reached when needs_restart is True: re-request from byte 0.
+            async with http_session.get(url) as response:
+                if response.status not in (200, 206):
+                    raise Exception(f"HTTP {response.status}: {response.reason}")
+                total_size = response.content_length or 0
+                return await self._stream_response_to_file(
+                    response, output_path, "wb", 0,
+                    total_size, download_id, session
                 )
-                return downloaded
 
     async def _post_process(
         self,

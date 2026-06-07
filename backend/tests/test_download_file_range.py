@@ -71,6 +71,28 @@ def _make_aiohttp_client_session(response):
     return mock_session, client_cm
 
 
+def _make_aiohttp_client_session_multi(responses):
+    """Return (mock_session, patch_target) yielding successive responses on each get() call."""
+    call_index = [0]
+
+    def get_side_effect(*args, **kwargs):
+        idx = call_index[0]
+        call_index[0] += 1
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=responses[idx])
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    mock_session = MagicMock()
+    mock_session.get.side_effect = get_side_effect
+
+    client_cm = MagicMock()
+    client_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    client_cm.__aexit__ = AsyncMock(return_value=False)
+
+    return mock_session, client_cm
+
+
 def _make_db_session():
     session = AsyncMock()
     session.execute = AsyncMock()
@@ -309,17 +331,25 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             os.unlink(tmp_path)
 
-    async def test_206_content_range_start_mismatch_restarts(self):
+    async def test_206_content_range_start_mismatch_restarts_from_byte_0(self):
         """
-        A 206 response where Content-Range start != requested offset means the provider
-        returned data from the wrong position. _download_file must fall back to 'wb'
-        mode and restart from 0 rather than appending corrupted data.
+        206 with Content-Range starting at the wrong offset: release the partial
+        body and re-request from byte 0 instead of writing the mismatched tail.
+
+        The mismatched 206 body starts at a position the server chose, not byte 0.
+        Writing it with 'wb' would truncate the file to only the tail fragment.
+        The fix re-requests without a Range header to get the full stream from byte 0.
         """
-        existing = b"\x00" * 4096
-        # Provider returns 206 but Content-Range says it started at byte 0, not 4096
-        new_data = b"\x47" * 512
-        response = _make_aiohttp_response(206, [new_data], content_range="bytes 0-511/10000")
-        _mock_session, client_cm = _make_aiohttp_client_session(response)
+        offset = 4096
+        existing = b"\x00" * offset
+        tail = b"\x47" * 512           # bytes the mismatched 206 would send
+        full_content = existing + tail  # expected final file after restart
+
+        # Provider returns 206 claiming start=0 instead of the requested 4096
+        response_206 = _make_aiohttp_response(206, [tail], content_range="bytes 0-511/10000")
+        # Restart GET returns the full stream from byte 0
+        response_200 = _make_aiohttp_response(200, [full_content])
+        _mock_session, client_cm = _make_aiohttp_client_session_multi([response_206, response_200])
 
         manager = DownloadManager()
         db_session = _make_db_session()
@@ -335,19 +365,21 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):
                 total = await manager._download_file(
-                    "http://provider/stream", tmp_path, 1, db_session, offset=4096
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
                 )
 
-            # Must restart: return value is only new bytes (no offset added)
             self.assertEqual(
                 total,
-                512,
-                "Content-Range start mismatch must trigger restart; return value must not include offset.",
+                len(full_content),
+                "Content-Range mismatch must trigger restart; return value is full content length.",
             )
-            # File must be overwritten (truncated), not appended
             with open(tmp_path, "rb") as fh:
                 contents = fh.read()
-            self.assertEqual(contents, new_data, "File must be overwritten when Content-Range start != offset.")
+            self.assertEqual(
+                contents,
+                full_content,
+                "File must contain full content from byte 0 after restart, not just the mismatched tail.",
+            )
         finally:
             os.unlink(tmp_path)
 
@@ -384,32 +416,30 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
-    async def test_206_no_content_range_falls_back_to_restart(self):
+    async def test_206_no_content_range_restarts_from_byte_0(self):
         """
-        A 206 response with no Content-Range header must fall back to restart ('wb').
+        206 with no Content-Range: abandon the partial body and re-request from
+        byte 0 so the written file contains the full stream, not just the tail.
 
-        When the server returns 206 but omits the Content-Range header, range_start
-        stays None.  Without the fix, the mismatch guard was:
-            range_mismatch = range_start is not None and range_start != offset
-        Since range_start is None, range_mismatch is False, so resuming evaluates to
-        True.  The file is opened in 'ab' mode even though we have no confirmation
-        that the server is sending from the right position.  A buggy or proxied IPTV
-        provider that returns 206 from byte 0 (without Content-Range) would cause the
-        partial file to grow from offset+0 to offset+server_full_size, producing a
-        corrupt recording.
+        Pre-fix (guard only): resuming=False, but _download_file reuses the open
+        206 response (which carries only the tail bytes from the requested offset).
+        Writing those tail bytes with 'wb' produces a silently truncated recording:
+        the file looks complete (downloaded == content_length) but contains only
+        the second half.
 
-        Fix: treat absent Content-Range as "position unknown" and fall back
-        to restart ('wb', downloaded=0), the same as a Content-Range mismatch.
-        Guard is now:
-            resuming = status==206 and offset>0 and range_start is not None
-                       and range_start == offset
+        Full fix: detect the unverifiable 206, release the connection without
+        reading the body, re-GET without a Range header, write the full stream.
         """
-        existing = b"\x00" * 4096
-        # Provider returns 206 but NO Content-Range header (RFC violation, common in
-        # cheap IPTV catchup implementations and some transparent proxies).
-        new_data = b"\x47" * 512
-        response = _make_aiohttp_response(206, [new_data])  # content_range=None
-        _mock_session, client_cm = _make_aiohttp_client_session(response)
+        offset = 4096
+        existing = b"\x00" * offset
+        tail = b"\x47" * 512           # bytes the server sends from offset onward
+        full_content = existing + tail  # expected final file
+
+        # First GET: 206 no Content-Range; body is only the tail (realistic)
+        response_206 = _make_aiohttp_response(206, [tail])  # content_range=None
+        # Second GET (restart from byte 0): full stream
+        response_200 = _make_aiohttp_response(200, [full_content])
+        _mock_session, client_cm = _make_aiohttp_client_session_multi([response_206, response_200])
 
         manager = DownloadManager()
         db_session = _make_db_session()
@@ -425,21 +455,20 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):
                 total = await manager._download_file(
-                    "http://provider/stream", tmp_path, 1, db_session, offset=4096
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
                 )
 
-            # Must fall back to restart: file overwritten, return value is only new bytes.
             self.assertEqual(
                 total,
-                512,
-                "206 with no Content-Range must restart (return new bytes only, not offset+new).",
+                len(full_content),
+                "After restart, return value must be the full content length from byte 0.",
             )
             with open(tmp_path, "rb") as fh:
                 contents = fh.read()
             self.assertEqual(
                 contents,
-                new_data,
-                "File must be overwritten when Content-Range is absent, not appended.",
+                full_content,
+                "File must contain full content from byte 0 after restart, not just the tail.",
             )
         finally:
             os.unlink(tmp_path)
