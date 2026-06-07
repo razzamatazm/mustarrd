@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, conint
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete as sql_delete
 from typing import Optional
 
 from auth import (
@@ -328,6 +328,22 @@ async def create_download(
     download = await download_manager.queue_download(download)
 
     return (await _attach_requested_by(session, [download.to_dict()], auth))[0]
+
+
+@router.delete("/finished")
+async def clear_finished_downloads(
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete all completed and failed download entries."""
+    query = sql_delete(Download).where(
+        Download.status.in_([DownloadStatus.COMPLETED.value, DownloadStatus.FAILED.value])
+    )
+    if not auth.is_admin:
+        query = query.where(Download.requested_by_user_id == auth.user_id)
+    result = await session.execute(query)
+    await session.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.get("/{download_id}")

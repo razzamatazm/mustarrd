@@ -448,6 +448,23 @@ export default function Downloads() {
     },
   })
 
+  const clearFinishedMutation = useMutation({
+    mutationFn: downloadsApi.clearFinished,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['downloads'] })
+      notifications.show({
+        title: 'History Cleared',
+        message: data.deleted === 0
+          ? 'Nothing to clear'
+          : `Removed ${data.deleted} finished download${data.deleted === 1 ? '' : 's'}`,
+        color: 'green',
+      })
+    },
+    onError: (error) => {
+      notifications.show({ title: 'Error', message: error.message, color: 'red' })
+    },
+  })
+
   const handleOpenFileLocation = async (download) => {
     if (!desktopApi?.openFileLocation) return
     try {
@@ -598,6 +615,18 @@ export default function Downloads() {
             </Card>
           ) : (
             <Stack gap="md">
+              <Group justify="flex-end">
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="red"
+                  leftSection={<IconTrash size={14} />}
+                  onClick={() => clearFinishedMutation.mutate()}
+                  loading={clearFinishedMutation.isPending}
+                >
+                  Clear finished
+                </Button>
+              </Group>
               {historyDownloads.map((download) => (
                 <DownloadCard
                   key={download.id}
