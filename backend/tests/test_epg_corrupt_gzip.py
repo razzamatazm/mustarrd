@@ -31,18 +31,17 @@ class MaybeDecompressCorruptGzipTests(unittest.TestCase):
     def setUp(self):
         self.manager = EPGIngestManager()
 
-    def test_corrupt_gzip_body_does_not_raise(self):
-        """_maybe_decompress must not propagate BadGzipFile on invalid gzip data."""
+    def test_corrupt_gzip_body_returns_empty(self):
+        """_maybe_decompress must return b"" on corrupt gzip data, not raise BadGzipFile."""
         corrupt = b"\x1f\x8b" + b"\x00" * 20
-        # Bug: currently raises gzip.BadGzipFile; expected to return bytes safely
         result = self.manager._maybe_decompress(corrupt)
-        self.assertIsInstance(result, bytes)
+        self.assertEqual(result, b"")
 
-    def test_truncated_gzip_body_does_not_raise(self):
-        """_maybe_decompress must handle data truncated immediately after magic bytes."""
+    def test_truncated_gzip_body_returns_empty(self):
+        """_maybe_decompress must return b"" when data is truncated after magic bytes."""
         truncated = b"\x1f\x8b"
         result = self.manager._maybe_decompress(truncated)
-        self.assertIsInstance(result, bytes)
+        self.assertEqual(result, b"")
 
     def test_valid_gzip_still_decompresses(self):
         """_maybe_decompress must still decompress valid gzip data after fix."""

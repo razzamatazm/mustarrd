@@ -477,7 +477,10 @@ class EPGIngestManager:
 
     def _maybe_decompress(self, data: bytes) -> bytes:
         if data[:2] == b"\x1f\x8b":
-            return gzip.decompress(data)
+            try:
+                return gzip.decompress(data)
+            except (gzip.BadGzipFile, EOFError, OSError):
+                return b""
         return data
 
     def _ensure_aware(self, value: Optional[datetime]) -> Optional[datetime]:
