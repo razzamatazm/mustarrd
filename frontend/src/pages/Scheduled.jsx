@@ -139,21 +139,12 @@ function ScheduleCard({
           </Group>
         </Group>
 
-        <Group gap="xs" wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            {startTime || 'Unknown'}
-          </Text>
-          <Text size="xs" c="dimmed">
-            ({formatDuration(totalDuration)})
-          </Text>
-        </Group>
-
         <Text size="xs" c="dimmed">
-          Expected start: {availableAt || 'Unknown'}
+          Airs: {startTime || 'Unknown'} - {endTime || 'Unknown'} ({formatDuration(totalDuration)})
         </Text>
 
         <Text size="xs" c="dimmed">
-          Slot: {startTime || 'Unknown'} - {endTime || 'Unknown'}
+          Download starts: {availableAt || 'Unknown'}
         </Text>
 
         {schedule.status_message && (
