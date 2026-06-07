@@ -3,7 +3,9 @@
 
 Mustarrd connects to your IPTV provider and lets you download past programs. Think of it as a DVR for your IPTV catchup library. Browse your provider's program guide, pick anything from the last few days (or schedule shows airing in the future), and download it with a properly named file ready for Plex, Jellyfin, or just your hard drive.
 
-![Browse your provider's program guide](docs/screenshots/screenshot-browse.png)
+| Desktop | Mobile |
+|---------|--------|
+| ![Browse your provider's program guide](docs/screenshots/screenshot-browse.png) | ![Browse on mobile](docs/screenshots/screenshot-browse-mobile.png) |
 
 ## Features
 
@@ -89,14 +91,18 @@ Then open **http://localhost:4177** in your browser.
 - Go to the **Downloads** page to see active downloads with progress bars
 - Failed downloads can be retried from the same page
 
-![Downloads page](docs/screenshots/screenshot-downloads.png)
+| Desktop | Mobile |
+|---------|--------|
+| ![Downloads page](docs/screenshots/screenshot-downloads.png) | ![Downloads on mobile](docs/screenshots/screenshot-downloads-mobile.png) |
 
 ### Schedule a Recording
 
 - Browse to an upcoming program and use the **Schedule** option to download it automatically when it airs
 - Make sure to turn on the view future programming switch
 
-![Scheduled Recordings page](docs/screenshots/screenshot-scheduled.png)
+| Desktop | Mobile |
+|---------|--------|
+| ![Scheduled Recordings page](docs/screenshots/screenshot-scheduled.png) | ![Scheduled Recordings on mobile](docs/screenshots/screenshot-scheduled-mobile.png) |
 
 ## Smart Filename Detection
 
@@ -125,7 +131,9 @@ Before first run, update the host paths in `docker-compose.yml` (`./config`, `./
 
 Most users never need to touch these. Set them in `docker-compose.yml` or a `backend/.env` file.
 
-![Settings page](docs/screenshots/screenshot-settings.png)
+| Desktop | Mobile |
+|---------|--------|
+| ![Settings page](docs/screenshots/screenshot-settings.png) | ![Settings on mobile](docs/screenshots/screenshot-settings-mobile.png) |
 
 | Variable | Description | Default |
 |----------|-------------|---------|
