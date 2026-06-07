@@ -10,7 +10,7 @@ from typing import Optional, Callable, Dict, Set, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from models import Download, DownloadStatus, AppSettings, XtreamAccount, PlexServer
+from models import Download, DownloadStatus, AppSettings, XtreamAccount, PlexServer, ScheduledRecording
 from config import settings as app_settings, is_docker_env
 from database import async_session_maker
 from services.log_stream import backend_log_stream
@@ -594,6 +594,7 @@ class DownloadManager:
                 download.progress = 100.0
                 download.completed_at = datetime.utcnow()
                 download.error_message = None
+                await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                 await session.commit()
 
                 await self._broadcast_progress(
@@ -608,6 +609,7 @@ class DownloadManager:
             except asyncio.CancelledError:
                 # Download was cancelled
                 download.status = DownloadStatus.CANCELLED.value
+                await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                 await session.commit()
                 if download.output_path and os.path.exists(download.output_path):
                     try:
@@ -628,6 +630,7 @@ class DownloadManager:
                 if download:
                     download.status = DownloadStatus.FAILED.value
                     download.error_message = str(e)
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
                     try:
                         if download.output_path and os.path.exists(download.output_path):
@@ -682,6 +685,7 @@ class DownloadManager:
                         download.progress = 100.0
                         download.completed_at = datetime.utcnow()
                         download.error_message = None
+                        await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                         await session.commit()
                         await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
                         await self._broadcast_log(download_id, "Post-processing recovery: finalized completed output.")
@@ -697,6 +701,7 @@ class DownloadManager:
                     download.progress = 100.0
                     download.completed_at = datetime.utcnow()
                     download.error_message = None
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                     await session.commit()
                     await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
                     await self._broadcast_log(download_id, "Post-processing disabled; finalized completed output.")
@@ -736,6 +741,7 @@ class DownloadManager:
                 download.status = DownloadStatus.COMPLETED.value
                 download.progress = 100.0
                 download.completed_at = datetime.utcnow()
+                await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                 await session.commit()
 
                 await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
@@ -756,6 +762,7 @@ class DownloadManager:
                     DownloadStatus.PROCESSING.value,
                 ]:
                     download.status = DownloadStatus.CANCELLED.value
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                     await session.commit()
                     await self._broadcast_progress(
                         download_id, download.progress, DownloadStatus.CANCELLED.value
@@ -770,6 +777,7 @@ class DownloadManager:
                 if download:
                     download.status = DownloadStatus.FAILED.value
                     download.error_message = str(e)
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
 
                 await self._broadcast_progress(
@@ -827,6 +835,17 @@ class DownloadManager:
                 level="warning",
                 message=f"Plex refresh skipped: {exc}",
             )
+
+    async def _sync_schedule_status(self, session: AsyncSession, download_id: int, new_status: str) -> None:
+        """Update the linked ScheduledRecording when a download reaches a terminal state."""
+        result = await session.execute(
+            select(ScheduledRecording).where(ScheduledRecording.download_id == download_id)
+        )
+        schedule = result.scalar_one_or_none()
+        if schedule and schedule.status != new_status:
+            schedule.status = new_status
+            schedule.status_message = None
+            schedule.updated_at = datetime.utcnow()
 
     def _resolve_completed_folder(self, settings: Optional[AppSettings]) -> str:
         if settings and settings.completed_folder and not settings.completed_folder.startswith("./data"):

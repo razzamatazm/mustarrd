@@ -110,26 +110,16 @@ async def list_schedules(
         )
         downloads = {d.id: d for d in download_result.scalars().all()}
 
-    updated = False
     response = []
     for schedule in schedules:
         download = downloads.get(schedule.download_id)
-        if download:
-            mapped_status = _map_download_status(download.status)
-            if schedule.status != mapped_status:
-                schedule.status = mapped_status
-                schedule.status_message = None
-                schedule.updated_at = datetime.utcnow()
-                updated = True
         data = schedule.to_dict()
         if download:
+            data["status"] = _map_download_status(download.status)
             data["download_status"] = download.status
             data["download_progress"] = download.progress
             data["download_output_path"] = download.output_path
         response.append(data)
-
-    if updated:
-        await session.commit()
 
     return response
 
