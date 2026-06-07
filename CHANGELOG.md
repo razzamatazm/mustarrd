@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Show titles no longer get cut off on phones
+
+**What you would notice:** On phone screens, if a show title was long and shared a row with a wide badge (like "PAUSED (LOW SPACE)"), the title was cut off with "..." making it impossible to read the full name. The title now wraps to a second line so the full show name is always visible.
+
+**What changed:** The program title on the Scheduled and Downloads pages now wraps instead of truncating when there is not enough horizontal space. No visual change on desktop screens.
+
+---
+
+### Fixed: Hardware-accelerated transcoding no longer overwrites recordings with empty files
+
+**What you would notice:** If you had Transcoding turned on with the output format set to TS and hardware acceleration turned on (VAAPI, NVIDIA, AMD, or Apple Silicon), every completed recording was silently overwritten with a 0-byte empty file. The download looked done in the UI but the file on disk was empty. This did not affect users with hardware acceleration set to CPU, or users saving to MKV or MP4.
+
+**What changed:** When the output format is already TS (the same format as the source file), Mustarrd no longer runs FFmpeg at all. The file is left as-is. This was always the correct behavior: copying a TS file to itself with stream copy produces an empty file. The CPU code path happened to avoid this bug, but any hardware-accelerated path triggered it.
+
+---
+
+### Fixed: Resuming an interrupted download no longer starts over from the beginning
+
+**What you would notice:** If the backend restarted while a recording was in progress and your provider did not report how long the download would be, the download would always restart from byte zero. For a recording close to the end of your provider's catchup window, re-downloading from scratch could cause the window to close before the file was complete. Mustarrd now sends a Range request to your provider when resuming. If the provider supports it (most do), the download picks up from where it left off. If the provider does not support resuming, Mustarrd falls back to starting over and logs a message explaining why.
+
+**What changed:** When recovering an in-progress download, Mustarrd now sends a `Range: bytes=<offset>-` header to request only the remaining portion. If the provider responds with HTTP 206, the existing partial file is kept and bytes are appended from the saved position. If the provider responds with HTTP 200 (ignoring the Range header), Mustarrd falls back to a full re-download, same as before.
+
+---
+
 ### Improved: Low disk space badge on Downloads now matches the Scheduled page
 
 **What you would notice:** When a recording is paused because your drive is running low on space, the Downloads page showed an orange badge reading "LOW DISK SPACE" with no icon. The Scheduled page showed the same paused recording as a yellow "PAUSED (LOW SPACE)" badge with an alert icon. The two pages were describing the same condition in two different ways. Both pages now show "PAUSED (LOW SPACE)" in yellow with an alert icon, so you always see the same label no matter which page you check.
