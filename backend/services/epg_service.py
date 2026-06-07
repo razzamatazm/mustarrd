@@ -230,6 +230,8 @@ class EPGService:
         if channel_id and start_timestamp and stop_timestamp:
             epg_id = f"{channel_id}:{start_timestamp}:{stop_timestamp}"
 
+        raw_has_archive = entry.get("has_archive")
+
         return {
             "id": entry.get("id"),
             "epg_id": epg_id,
@@ -242,7 +244,7 @@ class EPGService:
             "provider_start": str(provider_start).strip() if provider_start is not None else None,
             "provider_stop": str(provider_stop).strip() if provider_stop is not None else None,
             "duration_minutes": duration_minutes,
-            "has_archive": (int(entry["has_archive"] or 0) == 1) if "has_archive" in entry else has_archive_fallback,
+            "has_archive": has_archive_fallback if raw_has_archive is None else (int(raw_has_archive or 0) == 1),
             "channel_id": channel_id or None,
         }
 

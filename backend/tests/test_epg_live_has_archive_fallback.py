@@ -84,6 +84,18 @@ class LiveEPGHasArchiveFallbackTests(unittest.TestCase):
         result = self.svc._process_epg_entry(self._entry(has_archive="1"))
         self.assertTrue(result["has_archive"])
 
+    def test_null_has_archive_uses_channel_fallback(self):
+        """Provider sends has_archive=null: treat same as absent, use fallback."""
+        entry = {**self._entry(), "has_archive": None}
+        result = self.svc._process_epg_entry(entry, has_archive_fallback=True)
+        self.assertTrue(result["has_archive"])
+
+    def test_null_has_archive_defaults_false_without_fallback(self):
+        """Provider sends has_archive=null without fallback: still False."""
+        entry = {**self._entry(), "has_archive": None}
+        result = self.svc._process_epg_entry(entry)
+        self.assertFalse(result["has_archive"])
+
 
 if __name__ == "__main__":
     unittest.main()
