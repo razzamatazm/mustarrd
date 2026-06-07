@@ -4,6 +4,32 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-06-07
+
+### Fixed: Program guide no longer goes blank when your provider does not include a catchup window length
+
+**What you would notice:** On some IPTV providers, the program guide would go completely blank after a refresh. The Browse page would show no programs even though your channels were still listed. Mustarrd now keeps your existing program guide data in this case.
+
+**What changed:** When a provider sends channel information without a catchup window length, Mustarrd was treating the missing value as zero and deleting all stored program guide entries for that channel. It now treats a missing catchup window as "unknown" and keeps whatever program data is already stored.
+
+---
+
+### Fixed: TV episode filenames no longer end with a trailing dash when a custom filename template is set
+
+**What you would notice:** If you had customized the TV filename template in Settings, episodes with no subtitle would produce filenames with a trailing separator, for example "Breaking Bad - S01E01 - .ts" instead of "Breaking Bad - S01E01.ts". This only happened when a custom template was saved in Settings; the default template was not affected.
+
+**What changed:** The filename builder was not checking whether an episode title existed before applying a custom template. It now checks first, and falls back to the no-subtitle format when no episode title is available.
+
+---
+
+### Fixed: Hidden characters from RTL-language providers no longer appear in filenames or break Plex and Jellyfin matching
+
+**What you would notice:** If your IPTV provider is Arabic, Hebrew, Persian, or another right-to-left language, channel names and program titles may contain invisible formatting characters that are not visible to you but are present in the text. These characters ended up in your filenames, causing files to appear invisible or fail to match in Plex and Jellyfin. Filenames are now cleaned of these characters before the file is saved.
+
+**What changed:** Seven invisible Unicode characters (including zero-width space, directional marks, and soft hyphen) are now stripped from channel names and program titles before they reach the filename. They are removed rather than replaced with spaces so that words remain joined correctly.
+
+---
+
 ## 2026-06-06
 
 ### Improved: Each account in Settings now shows whether it can reach your provider
