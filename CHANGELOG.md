@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-06
 
+### Fixed: Custom filename templates in Settings now actually apply to your downloads
+
+**What you would notice:** If you ever opened Settings and customized the filename template for TV shows, movies, or sports, those changes were saved but had no effect. Every downloaded file still used the default naming format no matter what you entered. Your templates now apply correctly.
+
+**What changed:** The part of Mustarrd that names files during a download was not reading your saved template preferences at all. It now reads them and uses them when building the filename. If a template contains a variable that is not available for a particular program, Mustarrd falls back to the default format instead of crashing.
+
+---
+
+### Fixed: Show names containing ".ts" in the middle no longer get corrupted in the filename
+
+**What you would notice:** If you downloaded a program where the channel name or show title happened to include ".ts" somewhere in the middle, for example "KTSA.ts Evening News", the downloaded file would be incorrectly named with that text removed: "KTSA Evening News.ts". The file still downloaded correctly, but the name was wrong.
+
+**What changed:** A text substitution that was only meant to remove the file extension from the end of a name was also removing ".ts" from anywhere inside the name. It now only removes the extension at the very end.
+
+---
+
+### Fixed: TV episode filenames with no subtitle no longer repeat the show title
+
+**What you would notice:** If you downloaded a TV episode that had no episode title (just a show name and episode number, which is common for news and sports programs), the downloaded filename contained the show name twice: for example, "Breaking Bad - S01E01 - Breaking Bad S01E01.ts" instead of "Breaking Bad - S01E01.ts".
+
+**What changed:** The filename builder was using the full show identifier as a fallback for the missing subtitle field, duplicating the title. It now leaves the subtitle portion out entirely when no episode title is available.
+
+---
+
+### Fixed: Filename preview in Settings now matches the actual filename saved to disk
+
+**What you would notice:** When you customized a filename template in Settings, there was a preview that showed an example of what the filename would look like. That preview was not reading your saved settings, so it showed a different result than what your downloads actually produced. The preview now matches what Mustarrd will actually name your files.
+
+**What changed:** The filename preview feature was not passing your settings to the preview calculation. It now uses the same settings as the download process.
+
+---
+
 ### Improved: Accounts and Plex Integration now have distinct icons in the Settings sidebar
 
 **What you would notice:** In the Settings navigation, Accounts and Plex Integration previously shared the same server rack icon. If you have both sections configured, it was hard to tell them apart at a glance. Plex Integration now shows a TV icon.
