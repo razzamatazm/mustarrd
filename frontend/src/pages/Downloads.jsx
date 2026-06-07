@@ -654,8 +654,8 @@ export default function Downloads() {
                       </Group>
                     </Stack>
                     {rec.status === 'paused_low_space' && (
-                      <Badge color="orange" variant="light" size="sm">
-                        Low disk space
+                      <Badge color="yellow" variant="light" size="sm" leftSection={<IconAlertCircle size={12} />}>
+                        Paused (Low Space)
                       </Badge>
                     )}
                   </Group>
