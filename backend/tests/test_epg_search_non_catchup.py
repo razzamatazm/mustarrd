@@ -20,7 +20,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from database import Base
-from models import EPGProgram, XtreamAccount
+from models import EPGProgram, XtreamAccount, AppSettings
 from api.epg import search_epg
 
 
@@ -180,6 +180,41 @@ class EPGSearchNonCatchupTests(unittest.IsolatedAsyncioTestCase):
             rows = await self._search(session, 1, "Fargo")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["epg_id"], "offset-future")
+
+    async def test_global_offset_minutes_keeps_near_threshold_program(self):
+        """A positive epg_offset_minutes shifts the search threshold back, including
+        a non-archive program that raw-UTC filtering would exclude.
+
+        Program ends 30 min ago (raw UTC). No account offset. Without global offset it
+        falls past the threshold (end_time < now) and is hidden. With
+        epg_offset_minutes=60, threshold = now - 60 min, so end_time = now - 30 min
+        passes and the row is returned.
+        """
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as session:
+            session.add(_account())
+            session.add(AppSettings(epg_offset_minutes=60))
+            # end_time 30 min ago: excluded without global offset, included with +60 min offset
+            session.add(_prog("global-offset-keep", "Breaking Bad", now - timedelta(minutes=30), has_archive=False))
+            await session.commit()
+            rows = await self._search(session, 1, "Breaking Bad")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["epg_id"], "global-offset-keep")
+
+    async def test_global_offset_minutes_excludes_too_old_program(self):
+        """A positive epg_offset_minutes does not resurrect programs far in the past.
+
+        Program ends 2 hours ago with epg_offset_minutes=60: threshold = now - 60 min,
+        end_time = now - 2h still fails. Row excluded without archive.
+        """
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as session:
+            session.add(_account())
+            session.add(AppSettings(epg_offset_minutes=60))
+            session.add(_prog("global-offset-exclude", "The Wire", now - timedelta(hours=2), has_archive=False))
+            await session.commit()
+            rows = await self._search(session, 1, "The Wire")
+        self.assertEqual(rows, [])
 
 
 if __name__ == "__main__":
