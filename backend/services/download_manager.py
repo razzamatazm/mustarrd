@@ -216,7 +216,7 @@ class DownloadManager:
             return False
         if not settings:
             return False
-        return True
+        return settings.transcode_enabled or settings.comskip_enabled
 
     def _processed_output_candidates(self, input_path: str, settings: Optional[AppSettings]) -> list[str]:
         input_file = Path(input_path)
@@ -1022,7 +1022,7 @@ class DownloadManager:
         remux_only = getattr(settings, "remux_only", False)
 
         will_comskip = settings.comskip_enabled and post_processor.comskip_available
-        will_transcode = post_processor.ffmpeg_available
+        will_transcode = settings.transcode_enabled and post_processor.ffmpeg_available
 
         if not will_comskip and not will_transcode:
             return current_path, warnings
