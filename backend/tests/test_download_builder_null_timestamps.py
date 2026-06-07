@@ -95,5 +95,37 @@ class ParseProgramTimesNullTests(unittest.TestCase):
         self.assertEqual(duration, 120)
 
 
+    def test_empty_string_timestamps_fall_through_to_iso_fallback(self):
+        """start_timestamp='' (from flaky provider) must not raise ValueError.
+
+        The ad-hoc download path passes start_timestamp straight from request JSON.
+        An empty string was silently treated as falsy before; now it must still
+        route to the ISO fallback rather than crashing with ValueError.
+        """
+        program = {
+            "start_timestamp": "",
+            "stop_timestamp": "",
+            "start_time": "2026-03-30T17:00:00",
+            "end_time": "2026-03-30T18:00:00",
+        }
+        _, _, duration, _, _ = _parse_program_times(program)
+        self.assertEqual(duration, 60)
+
+    def test_digit_string_timestamps_take_fast_path(self):
+        """start_timestamp='1700000000' (string from JSON) must use the timestamp path.
+
+        Request JSON fields arrive as strings. Valid numeric strings must still
+        resolve via fromtimestamp(), not fall through to fromisoformat().
+        """
+        import datetime
+        program = {
+            "start_timestamp": "1700000000",
+            "stop_timestamp": "1700003600",
+        }
+        start, end, duration, _, _ = _parse_program_times(program)
+        self.assertEqual(duration, 60)
+        self.assertEqual(start.tzinfo, datetime.timezone.utc)
+
+
 if __name__ == "__main__":
     unittest.main()

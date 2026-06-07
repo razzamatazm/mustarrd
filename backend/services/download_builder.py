@@ -14,14 +14,23 @@ from services.xtream_client import XtreamClient
 from config import settings as app_settings
 
 
+def _coerce_ts(value) -> int:
+    """Convert a timestamp value to int, returning 0 for None/empty/non-numeric."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, datetime, datetime]:
     start_timestamp = program.get("start_timestamp")
     stop_timestamp = program.get("stop_timestamp")
 
     # Treat 0 as "not set": legacy rows created before the timestamp columns
     # existed have start_timestamp=0 (the column default from ALTER TABLE).
-    ts_start = int(start_timestamp) if start_timestamp is not None else 0
-    ts_stop = int(stop_timestamp) if stop_timestamp is not None else 0
+    # _coerce_ts handles None, "", and non-numeric strings from flaky providers.
+    ts_start = _coerce_ts(start_timestamp)
+    ts_stop = _coerce_ts(stop_timestamp)
     if ts_start and ts_stop:
         program_start_utc = datetime.fromtimestamp(ts_start, tz=timezone.utc)
         program_end_utc = datetime.fromtimestamp(ts_stop, tz=timezone.utc)
