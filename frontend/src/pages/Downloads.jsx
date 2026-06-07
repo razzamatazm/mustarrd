@@ -15,6 +15,7 @@ import {
   Tooltip,
   Button,
   Collapse,
+  Select,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useNavigate } from 'react-router-dom'
@@ -36,6 +37,7 @@ import {
   IconChevronUp,
   IconDatabase,
   IconCalendar,
+  IconFilter,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -349,6 +351,7 @@ export default function Downloads() {
   const [localProgress, setLocalProgress] = useState({})
   const [localLogs, setLocalLogs] = useState({})
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [historyFilter, setHistoryFilter] = useState('all')
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
   const isDesktop = Boolean(desktopApi?.openFileLocation && desktopApi?.playFile)
 
@@ -538,6 +541,10 @@ export default function Downloads() {
   const historyDownloads = enhancedDownloads?.filter((d) =>
     ['completed', 'failed', 'cancelled'].includes(d.status)
   ) || []
+
+  const filteredHistoryDownloads = historyFilter === 'all'
+    ? historyDownloads
+    : historyDownloads.filter((d) => d.status === historyFilter)
   const accountGuideOffsets = Object.fromEntries(
     (accounts || []).map((account) => [Number(account.id), getGuideOffsetHours(account.guide_offset_hours)])
   )
@@ -677,7 +684,21 @@ export default function Downloads() {
             </Card>
           ) : (
             <Stack gap="md">
-              <Group justify="flex-end">
+              <Group justify="space-between">
+                <Select
+                  size="xs"
+                  w={160}
+                  value={historyFilter}
+                  onChange={(v) => setHistoryFilter(v || 'all')}
+                  leftSection={<IconFilter size={14} />}
+                  allowDeselect={false}
+                  data={[
+                    { value: 'all', label: 'All statuses' },
+                    { value: 'completed', label: 'Completed' },
+                    { value: 'failed', label: 'Failed' },
+                    { value: 'cancelled', label: 'Cancelled' },
+                  ]}
+                />
                 <Button
                   size="xs"
                   variant="subtle"
@@ -689,20 +710,26 @@ export default function Downloads() {
                   Clear finished
                 </Button>
               </Group>
-              {historyDownloads.map((download) => (
-                <DownloadCard
-                  key={download.id}
-                  download={download}
-                  isAdmin={Boolean(authStatus?.is_admin)}
-                  isDesktop={isDesktop}
-                  onCancel={(d) => cancelMutation.mutate(d)}
-                  onRetry={(d) => retryMutation.mutate(d)}
-                  onDelete={(d) => deleteMutation.mutate(d)}
-                  onOpenFileLocation={handleOpenFileLocation}
-                  onPlayFile={handlePlayFile}
-                  guideOffsetHours={accountGuideOffsets[Number(download.account_id)] || 0}
-                />
-              ))}
+              {filteredHistoryDownloads.length === 0 ? (
+                <Text c="dimmed" ta="center" py="lg" size="sm">
+                  No {historyFilter} downloads.
+                </Text>
+              ) : (
+                filteredHistoryDownloads.map((download) => (
+                  <DownloadCard
+                    key={download.id}
+                    download={download}
+                    isAdmin={Boolean(authStatus?.is_admin)}
+                    isDesktop={isDesktop}
+                    onCancel={(d) => cancelMutation.mutate(d)}
+                    onRetry={(d) => retryMutation.mutate(d)}
+                    onDelete={(d) => deleteMutation.mutate(d)}
+                    onOpenFileLocation={handleOpenFileLocation}
+                    onPlayFile={handlePlayFile}
+                    guideOffsetHours={accountGuideOffsets[Number(download.account_id)] || 0}
+                  />
+                ))
+              )}
             </Stack>
           )}
         </Tabs.Panel>
