@@ -69,16 +69,13 @@ class DuplicateChannelNameTests(unittest.TestCase):
         self.assertEqual(programs[0]["channel_id"], "101")
 
     # ------------------------------------------------------------------
-    # Bug: second channel with same normalized name overwrites the first
-    # in stream_by_name.  Programs go to stream 102, stream 101 gets none.
-    #
-    # This test FAILS on current code and must PASS after the fix.
+    # Regression: second channel with same normalized name must not overwrite
+    # the first in stream_by_name (was last-write-wins before the fix).
     # ------------------------------------------------------------------
 
-    @unittest.expectedFailure
     def test_first_channel_retains_epg_when_second_has_same_name(self):
-        """Adding a second channel with the same normalized name must not
-        silently deprive the first channel of its XMLTV-matched programs."""
+        """First channel with a given normalized name retains XMLTV programs
+        when a second channel has the same normalized name."""
         channels = [
             _make_channel("101", "CNN"),   # comes first in the provider list
             _make_channel("102", "cnn"),   # same normalized name, different stream
@@ -87,8 +84,6 @@ class DuplicateChannelNameTests(unittest.TestCase):
         programs = self._collect_programs(channels, xmltv)
 
         stream_ids_with_data = {p["channel_id"] for p in programs}
-        # Stream 101 (the first channel with this name) must receive programs.
-        # Before the fix: stream_ids_with_data == {"102"} and this assertion fails.
         self.assertIn(
             "101",
             stream_ids_with_data,
@@ -97,7 +92,6 @@ class DuplicateChannelNameTests(unittest.TestCase):
             "names are not handled in _build_channel_maps.",
         )
 
-    @unittest.expectedFailure
     def test_duplicate_name_second_channel_does_not_steal_all_programs(self):
         """When two channels share a name, all programs must not go to only
         one of them via the name-based fallback."""
@@ -108,20 +102,12 @@ class DuplicateChannelNameTests(unittest.TestCase):
         xmltv = _make_xmltv("bbc1", "BBC One")
         programs = self._collect_programs(channels, xmltv)
 
-        # With two same-named channels and one XMLTV entry, at least one
-        # channel must get the programs.  The critical failure is that the
-        # first channel gets ZERO programs while the second gets all of them.
-        self.assertTrue(
-            len(programs) > 0,
-            "No programs were yielded at all for a valid XMLTV entry.",
-        )
-        # Stream 101 should not be completely excluded by stream 102.
+        self.assertTrue(len(programs) > 0, "No programs yielded for a valid XMLTV entry.")
         stream_ids_with_data = {p["channel_id"] for p in programs}
         self.assertIn(
             "101",
             stream_ids_with_data,
-            "All programs went to stream 102; stream 101 (first matching "
-            "channel) got none due to the last-write-wins dict collision.",
+            "Stream 101 (first channel named 'BBC One') received no programs.",
         )
 
 

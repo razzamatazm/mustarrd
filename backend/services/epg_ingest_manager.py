@@ -400,7 +400,7 @@ class EPGIngestManager:
                 stream_by_xmltv_id[str(xmltv_id)] = stream_id
 
             if name:
-                stream_by_name[self._normalize_name(name)] = stream_id
+                stream_by_name.setdefault(self._normalize_name(name), stream_id)
 
         return {
             "stream_by_xmltv_id": stream_by_xmltv_id,
