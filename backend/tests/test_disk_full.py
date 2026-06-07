@@ -87,7 +87,7 @@ class DiskFullTests(unittest.IsolatedAsyncioTestCase):
             download = _FakeDownload(dl_id=42, output_path=output_path)
             session = _FakeSession(download)
 
-            async def fake_download_file(url, path, dl_id, ses):
+            async def fake_download_file(url, path, dl_id, ses, offset=0):
                 # Simulate provider sends some bytes, then disk fills.
                 with open(path, "wb") as fh:
                     fh.write(b"\x47" * 512 * 1024)  # 512 KB partial TS data

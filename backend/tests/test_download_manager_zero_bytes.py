@@ -42,7 +42,7 @@ class ZeroBytesDownloadTests(unittest.TestCase):
             async def mock_session_maker():
                 yield mock_session
 
-            async def fake_download_file_zero_bytes(url, path, download_id, session):
+            async def fake_download_file_zero_bytes(url, path, download_id, session, offset=0):
                 # Provider returns HTTP 200 with empty body: file created but no bytes written.
                 open(path, "wb").close()
                 return 0
@@ -104,7 +104,7 @@ class ZeroBytesDownloadTests(unittest.TestCase):
             async def mock_session_maker():
                 yield mock_session
 
-            async def fake_download_file_with_bytes(url, path, download_id, session):
+            async def fake_download_file_with_bytes(url, path, download_id, session, offset=0):
                 with open(path, "wb") as f:
                     f.write(b"\x00" * 1024)
                 return 1024

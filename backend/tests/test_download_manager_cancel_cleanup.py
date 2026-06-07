@@ -41,7 +41,7 @@ class CancelCleanupTests(unittest.TestCase):
             async def mock_session_maker():
                 yield mock_session
 
-            async def fake_download_file(url, path, download_id, session):
+            async def fake_download_file(url, path, download_id, session, offset=0):
                 with open(path, "wb") as f:
                     f.write(b"\x00" * 1024)
                 raise asyncio.CancelledError()

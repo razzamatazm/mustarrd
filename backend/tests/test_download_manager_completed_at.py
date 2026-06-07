@@ -56,7 +56,7 @@ class DownloadManagerCompletedAtTests(unittest.TestCase):
             mock_download.downloaded_bytes = 0
             mock_download.completed_at = None
 
-            async def fail_download(url, path, download_id, session):
+            async def fail_download(url, path, download_id, session, offset=0):
                 raise Exception("Connection reset by peer")
 
             with patch("services.download_manager.async_session_maker", self._make_session(mock_download)):
