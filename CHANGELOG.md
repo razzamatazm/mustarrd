@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Downloading the same program twice no longer corrupts the recording
+
+**What you would notice:** If you double-clicked the Download button before the page could disable it, Mustarrd would start two recordings of the same program writing to the same file. The second recording would overwrite the first mid-stream, leaving a corrupt or empty file. The second click now gets a clear error immediately ("A download for this program is already active.") and no duplicate is created.
+
+**What changed:** Before starting a new download, Mustarrd now checks whether a recording for the same program is already pending, downloading, or being processed. If one is found, it returns an error immediately instead of creating a second entry. The check covers all three active states, so re-downloading a program that previously failed or was cancelled still works normally.
+
+---
+
+### Fixed: Failed transcode no longer leaves a partial file on disk
+
+**What you would notice:** If a download required conversion (transcoding) and FFmpeg failed partway through, a partial file ending in .mkv or .mp4 was left in your download folder and never cleaned up. These incomplete files accumulated over time and could not be played. Now Mustarrd deletes them automatically when transcoding fails, so only successfully converted recordings are kept.
+
+**What changed:** The cleanup step that runs after a failed download now includes .mkv and .mp4 partial outputs alongside the existing types it already removed. Successful recordings are not affected: the output file is moved to your completed folder before cleanup runs, so it is never deleted.
+
+---
+
 ### Fixed: Movies and Series page no longer blank on some providers
 
 **What you would notice:** On certain IPTV providers, opening the Movies or Series page showed nothing at all. There was no error message. The page was simply empty, even though your provider had content available. This is now fixed.
