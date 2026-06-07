@@ -6,11 +6,11 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
-### Fixed: Downloading the same program twice no longer corrupts the recording
+### Fixed: Queuing a download that is already active now gives a clear error
 
-**What you would notice:** If you double-clicked the Download button before the page could disable it, Mustarrd would start two recordings of the same program writing to the same file. The second recording would overwrite the first mid-stream, leaving a corrupt or empty file. The second click now gets a clear error immediately ("A download for this program is already active.") and no duplicate is created.
+**What you would notice:** If a recording of a program was already in the queue (pending, downloading, or being processed) and you clicked Download for the same program again, Mustarrd would silently start a second recording writing to the same file. The two recordings would overwrite each other, leaving a corrupt or incomplete file. Now Mustarrd immediately rejects the second request with the message "A download for this program is already active."
 
-**What changed:** Before starting a new download, Mustarrd now checks whether a recording for the same program is already pending, downloading, or being processed. If one is found, it returns an error immediately instead of creating a second entry. The check covers all three active states, so re-downloading a program that previously failed or was cancelled still works normally.
+**What changed:** Before starting a new download, Mustarrd checks whether an active entry for the same program already exists. If one is found in the pending, downloading, or processing state, the request is rejected and no duplicate entry is created. Re-downloading a program that previously failed or was cancelled still works normally, because only active (in-progress) entries trigger the check.
 
 ---
 
