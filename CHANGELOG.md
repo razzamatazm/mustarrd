@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Low disk space badge on Downloads now matches the Scheduled page
+
+**What you would notice:** When a recording is paused because your drive is running low on space, the Downloads page showed an orange badge reading "LOW DISK SPACE" with no icon. The Scheduled page showed the same paused recording as a yellow "PAUSED (LOW SPACE)" badge with an alert icon. The two pages were describing the same condition in two different ways. Both pages now show "PAUSED (LOW SPACE)" in yellow with an alert icon, so you always see the same label no matter which page you check.
+
+**What changed:** The badge label and color on the Downloads page Upcoming tab now match the Scheduled page for recordings paused due to low disk space. No recording behavior was changed.
+
+---
+
 ### Improved: Account cards now say "Enabled" and "Disabled" instead of "Active" and "Inactive"
 
 **What you would notice:** The status badge on each account card used to read "ACTIVE" in green when an account was turned on. This sat next to the red "Unreachable" dot that appears when Mustarrd cannot reach your provider. Seeing a green "ACTIVE" badge next to a red failure dot was confusing: the green badge looked like everything was working, but the red dot said it was not. The badge now reads "ENABLED" when the account is turned on, and "DISABLED" when it is turned off. "Enabled" describes whether the account is switched on in Mustarrd, not whether the connection to your provider is currently working. The red "Unreachable" dot separately tells you about the connection.
