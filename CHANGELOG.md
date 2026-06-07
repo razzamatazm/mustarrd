@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Hardware-accelerated transcoding no longer destroys MP4 and MKV recordings
+
+**What you would notice:** If you use hardware acceleration (VAAPI, NVIDIA, or AMD) and your Recording Format is set to MP4 or MKV, every completed VOD download was being permanently destroyed during post-processing. The download appeared to finish normally in the UI, but the file on disk was empty and could not be played. This did not affect users with Hardware Acceleration set to CPU, or users keeping recordings as TS files.
+
+**What changed:** When the recording format already matches the downloaded file type, Mustarrd now skips the conversion step entirely. Running a conversion tool with the same file as both the input and the output empties the file before it can read a single byte. The same protection added for TS files in an earlier update is now applied to MP4 and MKV as well.
+
+---
+
+### Fixed: A completed recording is no longer deleted after a container restart
+
+**What you would notice:** If Mustarrd restarted (for example, during an Unraid array update or a container restart) at the exact moment a download finished writing to disk but before it could save the completion status, the recording would be permanently deleted the next time Mustarrd started and reported as Failed with "Provider returned an error (HTTP 416)." This only affected providers that do not include a file size in the download response. Those recordings are now kept and marked as completed instead of being deleted.
+
+**What changed:** When a provider replies with HTTP 416 (meaning the requested start position is past the end of the file, indicating the file is already complete) and a partial file already exists on disk, Mustarrd now treats the response as a success and moves the recording to the completed folder. An HTTP 416 with no file on disk is still treated as an error.
+
+---
+
 ### Improved: Deleting a scheduled recording now asks for confirmation
 
 **What you would notice:** Clicking Delete on a scheduled recording used to remove it immediately with no warning. A single misclick meant the schedule was gone and you had to go back to Browse to re-schedule the show. Deleting a schedule now shows a confirmation row at the bottom of the card with a red "Yes, delete" button and a plain "Cancel" button. Works on both desktop and mobile.
