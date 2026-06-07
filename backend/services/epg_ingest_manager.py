@@ -3,6 +3,7 @@ import base64
 import gzip
 import io
 import logging
+import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional
 from xml.etree.ElementTree import Element
@@ -479,7 +480,7 @@ class EPGIngestManager:
         if data[:2] == b"\x1f\x8b":
             try:
                 return gzip.decompress(data)
-            except (gzip.BadGzipFile, EOFError, OSError):
+            except (gzip.BadGzipFile, EOFError, OSError, zlib.error):
                 return b""
         return data
 
