@@ -209,29 +209,37 @@ function DownloadCard({
               </Text>
             )}
 
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed">Commercial Detect</Text>
-              <Text size="xs" c="dimmed">
-                {formatStagePercent(comskipProgress, comskipIndeterminate)}
-              </Text>
-            </Group>
-            <ProgressBar
-              progress={comskipProgress ?? 0}
-              color="orange"
-              indeterminate={comskipIndeterminate}
-            />
+            {(comskipProgress !== null || comskipIndeterminate) && (
+              <>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed">Commercial Detect</Text>
+                  <Text size="xs" c="dimmed">
+                    {formatStagePercent(comskipProgress, comskipIndeterminate)}
+                  </Text>
+                </Group>
+                <ProgressBar
+                  progress={comskipProgress ?? 0}
+                  color="orange"
+                  indeterminate={comskipIndeterminate}
+                />
+              </>
+            )}
 
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed">Re-encode</Text>
-              <Text size="xs" c="dimmed">
-                {formatStagePercent(transcodeProgress, transcodeIndeterminate)}
-              </Text>
-            </Group>
-            <ProgressBar
-              progress={transcodeProgress ?? 0}
-              color="teal"
-              indeterminate={transcodeIndeterminate}
-            />
+            {(transcodeProgress !== null || transcodeIndeterminate) && (
+              <>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed">Re-encode</Text>
+                  <Text size="xs" c="dimmed">
+                    {formatStagePercent(transcodeProgress, transcodeIndeterminate)}
+                  </Text>
+                </Group>
+                <ProgressBar
+                  progress={transcodeProgress ?? 0}
+                  color="teal"
+                  indeterminate={transcodeIndeterminate}
+                />
+              </>
+            )}
 
             {download.status === 'processing' && (
               <Text size="xs" c="dimmed">
