@@ -21,6 +21,34 @@ from services.plex_service import plex_service
 logger = logging.getLogger(__name__)
 
 
+def _friendly_error(e: Exception) -> str:
+    """Translate a download exception into a short, user-readable string."""
+    import errno
+    if isinstance(e, asyncio.TimeoutError):
+        return "Connection timed out. The provider took too long to respond."
+    if isinstance(e, aiohttp.ClientConnectorError):
+        return "Cannot reach the provider. Check the server URL in your account settings."
+    if isinstance(e, aiohttp.ServerDisconnectedError):
+        return "Provider disconnected unexpectedly. Try again later."
+    if isinstance(e, aiohttp.ClientError):
+        return "Network error connecting to provider. Try again later."
+    if isinstance(e, OSError) and e.errno == errno.ENOSPC:
+        return "Not enough disk space. Free up space and retry."
+    msg = str(e)
+    if not msg:
+        return "Download failed for an unknown reason. Check the logs for details."
+    if msg.startswith("HTTP 401") or msg.startswith("HTTP 403"):
+        return "Invalid credentials or not authorized. Check your account settings."
+    if msg.startswith("HTTP 404"):
+        return "Recording not found on provider. The catchup window may have expired."
+    if msg.startswith("HTTP 5"):
+        return "Provider server error. Try again later."
+    if msg.startswith("HTTP "):
+        code = msg.split(":")[0]
+        return f"Provider returned an error ({code}). Try again later."
+    return msg
+
+
 class DownloadManager:
     def __init__(self):
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -635,7 +663,7 @@ class DownloadManager:
                 download = result.scalar_one_or_none()
                 if download:
                     download.status = DownloadStatus.FAILED.value
-                    download.error_message = str(e)
+                    download.error_message = _friendly_error(e)
                     await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
                     try:
@@ -782,7 +810,7 @@ class DownloadManager:
                 download = result.scalar_one_or_none()
                 if download:
                     download.status = DownloadStatus.FAILED.value
-                    download.error_message = str(e)
+                    download.error_message = _friendly_error(e)
                     await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
 

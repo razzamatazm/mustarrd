@@ -110,9 +110,9 @@ class DiskFullTests(unittest.IsolatedAsyncioTestCase):
                 "Download must be marked FAILED on ENOSPC.",
             )
             self.assertIn(
-                "28",
-                download.error_message or "",
-                "error_message must reference errno 28.",
+                "disk space",
+                (download.error_message or "").lower(),
+                "error_message must mention disk space.",
             )
 
             # Partial file must be gone. This assertion FAILS on the current codebase.
