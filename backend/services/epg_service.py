@@ -345,12 +345,15 @@ class EPGService:
         if value is None:
             return 0
         try:
-            return int(value)
+            result = int(value)
         except (TypeError, ValueError):
             try:
-                return int(float(value))
+                result = int(float(value))
             except (TypeError, ValueError):
                 return 0
+        if result > 10_000_000_000:
+            result = result // 1000
+        return result
 
     def _extract_program_timestamps(self, program: dict) -> tuple[int, int]:
         start_ts = self._coerce_timestamp(program.get("start_timestamp"))
