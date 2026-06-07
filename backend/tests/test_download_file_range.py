@@ -384,13 +384,12 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
-    @unittest.expectedFailure
     async def test_206_no_content_range_falls_back_to_restart(self):
         """
-        BUG: A 206 response with no Content-Range header causes false resume.
+        A 206 response with no Content-Range header must fall back to restart ('wb').
 
-        Root cause: when the server returns 206 but omits the Content-Range header,
-        range_start stays None.  The mismatch guard is:
+        When the server returns 206 but omits the Content-Range header, range_start
+        stays None.  Without the fix, the mismatch guard was:
             range_mismatch = range_start is not None and range_start != offset
         Since range_start is None, range_mismatch is False, so resuming evaluates to
         True.  The file is opened in 'ab' mode even though we have no confirmation
@@ -399,9 +398,9 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
         partial file to grow from offset+0 to offset+server_full_size, producing a
         corrupt recording.
 
-        Expected fix: treat absent Content-Range as "position unknown" and fall back
+        Fix: treat absent Content-Range as "position unknown" and fall back
         to restart ('wb', downloaded=0), the same as a Content-Range mismatch.
-        Guard should be:
+        Guard is now:
             resuming = status==206 and offset>0 and range_start is not None
                        and range_start == offset
         """
@@ -433,18 +432,14 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 total,
                 512,
-                "206 with no Content-Range must restart (return new bytes only, not offset+new). "
-                "Currently returns 4096+512 because range_start=None bypasses the mismatch guard, "
-                "treating absent Content-Range as a confirmed resume.",
+                "206 with no Content-Range must restart (return new bytes only, not offset+new).",
             )
             with open(tmp_path, "rb") as fh:
                 contents = fh.read()
             self.assertEqual(
                 contents,
                 new_data,
-                "File must be overwritten when Content-Range is absent, not appended. "
-                "Currently the partial file is opened 'ab' and the server's bytes "
-                "(from an unknown position) are appended, corrupting the recording.",
+                "File must be overwritten when Content-Range is absent, not appended.",
             )
         finally:
             os.unlink(tmp_path)

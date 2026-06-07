@@ -1039,7 +1039,12 @@ class DownloadManager:
                 # If Content-Range is present but starts elsewhere, the provider silently
                 # returned data from a different position; appending would corrupt the file.
                 range_mismatch = range_start is not None and range_start != offset
-                resuming = response.status == 206 and offset > 0 and not range_mismatch
+                resuming = (
+                    response.status == 206
+                    and offset > 0
+                    and range_start is not None
+                    and range_start == offset
+                )
 
                 if total_size > 0:
                     await self._broadcast_log(
