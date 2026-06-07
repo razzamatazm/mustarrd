@@ -604,5 +604,47 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
+    async def test_restart_after_416_rejects_text_content_type(self):
+        """
+        416 triggers restart from byte 0. If the provider then returns an error
+        page (Content-Type: text/*), _download_file must raise rather than write
+        the HTML body to the .ts file.
+
+        Before the fix: the restart block checked HTTP status but not Content-Type,
+        so a text/html error page was silently written as a "completed" recording.
+        """
+        offset = 1024
+        remote_total = 900
+
+        response_416 = _make_aiohttp_response(416, [], content_range=f"bytes */{remote_total}")
+        response_416.reason = "Range Not Satisfiable"
+
+        response_html = _make_aiohttp_response(200, [b"<html>error</html>"])
+        response_html.headers["Content-Type"] = "text/html; charset=utf-8"
+
+        _mock_session, client_cm = _make_aiohttp_client_session_multi([response_416, response_html])
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(b"\x00" * offset)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                with self.assertRaises(Exception) as ctx:
+                    await manager._download_file(
+                        "http://provider/stream", tmp_path, 1, db_session, offset=offset
+                    )
+            self.assertIn("error page", str(ctx.exception))
+        finally:
+            os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()

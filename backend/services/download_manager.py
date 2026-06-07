@@ -1200,6 +1200,12 @@ class DownloadManager:
             async with http_session.get(url) as response:
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
+                restart_ct = response.headers.get("Content-Type", "")
+                if restart_ct.lower().startswith("text/"):
+                    raise Exception(
+                        f"Provider returned an error page (Content-Type: {restart_ct}). "
+                        "The catchup window may have expired or be unavailable."
+                    )
                 total_size = response.content_length or 0
                 return await self._stream_response_to_file(
                     response, output_path, "wb", 0,
