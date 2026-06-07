@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Downloads no longer save an unplayable file when your provider returns an error page instead of video
+
+**What you would notice:** Some providers return a web page instead of the actual video content when a program is unavailable, for example when the catchup window has expired or you have hit a session limit. Before this fix, Mustarrd treated that web page as if it were a real recording, wrote it to disk, and marked the download as Completed. The "completed" file was garbage and could not be played. Mustarrd now detects this situation and marks the download as Failed with a clear message explaining what happened.
+
+**What changed:** After connecting to your provider, Mustarrd now checks whether the response is a video stream before writing any data. If the provider sends an HTML or plain-text response instead of a video, the download is stopped immediately and marked Failed with the message "Provider returned an error page (Content-Type: text/html). The catchup window may have expired or be unavailable." Providers that correctly omit the Content-Type header are not affected.
+
+---
+
 ### Improved: Downloads > Upcoming now labels the air time as "Airs:"
 
 **What you would notice:** On the Downloads > Upcoming tab, each recording card showed a date and time below the channel name with no explanation of what that time meant. You could not tell at a glance whether it was when the show airs, when the download would start, or something else. Each card now shows "Airs:" before the date and time, making it immediately clear. The Scheduled Recordings page already used this label; the Downloads page now matches it.
