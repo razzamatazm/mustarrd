@@ -600,10 +600,13 @@ async def complete_user_setup(
     user = user_result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.status == "disabled":
+        raise HTTPException(status_code=403, detail="Account is disabled")
 
     user.password_hash = hash_password(payload.password)
     user.password_reset_required = False
-    user.status = "active"
+    if user.status != "active":
+        user.status = "active"
     user.updated_at = datetime.utcnow()
     row.used_at = datetime.utcnow()
     await session.commit()

@@ -148,6 +148,8 @@ async def generate_setup_link(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.status == "disabled":
+        raise HTTPException(status_code=400, detail="Cannot generate a setup link for a disabled user")
     token = await _create_setup_token(session, user_id)
     return {
         "token": token,
