@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_admin, hash_password, AuthContext
 from database import get_session
-from models import User, UserSetupToken
+from models import User, UserIdentity, UserSetupToken
 
 
 router = APIRouter()
@@ -133,6 +133,7 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    await session.execute(delete(UserIdentity).where(UserIdentity.user_id == user.id))
     await session.delete(user)
     await session.commit()
     return {"status": "deleted"}
