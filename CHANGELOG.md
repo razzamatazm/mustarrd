@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Downloads page no longer shows blank progress bars for stages that are not running
+
+**What you would notice:** While a recording was downloading, the Downloads page showed three progress bars: Download, Commercial Detect, and Re-encode. For most users who have ComSkip and transcoding turned off, the Commercial Detect and Re-encode bars appeared immediately at zero with blank labels and stayed that way for the entire download. It looked like something was broken or stuck. Now only the stages that are actually running show a bar.
+
+**What changed:** The Commercial Detect and Re-encode progress bars are now hidden when those stages are not active for a given download. If you have ComSkip or transcoding enabled, the bars appear as soon as those stages start working.
+
+---
+
+### Improved: Browse now shows a clear message when your provider cannot be reached
+
+**What you would notice:** When your IPTV provider was unreachable, the Browse page channels panel showed "No channels available yet." The same message appeared on a freshly configured account waiting for its first sync. There was no way to tell whether something was wrong or the channels simply had not loaded yet. Browse now shows a red alert with "Could not reach your provider." Admin users also see a link to Settings to check the account connection status and error details.
+
+**What changed:** The Browse channels panel now shows a distinct error message when your provider cannot be reached, instead of the same empty-state message shown on first setup. Admin users see a link to Settings. Non-admin users see a note suggesting they contact their administrator.
+
+---
+
+### Fixed: Recordings with post-padding no longer fail immediately if the program just expired
+
+**What you would notice:** If you added extra post-recording padding (minutes added after a show ends), a recording whose program had just passed the catchup window could still be dispatched and immediately fail with "Recording not found on provider." This left a red error row in your Downloads list. It only happened when the padding time extended past the catchup window boundary, and only with non-zero post-padding. Those recordings are now correctly marked as expired before any download attempt.
+
+**What changed:** When deciding whether to dispatch a scheduled recording, Mustarrd now compares the actual program end time against the catchup window, ignoring any padding. A recording whose program has already expired is marked Failed with a clear message immediately, rather than being dispatched and failing.
+
+---
+
 ### Improved: Settings now has a single Recording Format dropdown instead of separate toggles
 
 **What you would notice:** The Settings page previously showed four separate fields for post-processing: "Enable Transcoding," "Remux Only," "Enable ComSkip," and a Transcode Format selector. These are now combined into a single "Recording Format" dropdown with plain-English labels. Your existing configuration is read and shown correctly in the new dropdown. Nothing about how recordings are saved has changed.
