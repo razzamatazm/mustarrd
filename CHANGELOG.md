@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Downloads no longer fail when a stream or video ID contains special characters
+
+**What you would notice:** Some IPTV providers assign stream IDs, on-demand video IDs, or series episode IDs that include characters like `/`, `#`, or `?`. Before this fix, those characters would corrupt the download URL, and every attempt to record from those channels would fail immediately with no clear reason. The content appeared available in your guide, but the download never started or returned a confusing error. This is now fixed for all four Xtream download URL types (live streams, timeshift, on-demand video, and series episodes).
+
+**What changed:** Stream IDs, video IDs, and episode IDs are now encoded before being placed in the download URL, the same way your username and password were already encoded by an earlier fix.
+
+---
+
+### Fixed: Recording padding is now capped at 120 minutes for manual downloads
+
+**What you would notice:** When starting a manual download with a very large pre-padding or post-padding value, Mustarrd would build a download window spanning days or longer and send it to your provider. The provider would usually return a confusing error or deliver garbage content with no clear explanation. Manual downloads now enforce the same 120-minute maximum padding that scheduled recordings already had.
+
+**What changed:** The manual download request handler now rejects padding values above 120 minutes, matching the limit already in place for scheduled recordings.
+
+---
+
 ### Improved: Red badge on the Downloads menu item shows how many recordings have failed
 
 **What you would notice:** Before this change, there was no way to know a recording had failed without manually opening the Downloads page. You might not notice a failed recording for days. A small red badge now appears on the Downloads item in the sidebar as soon as a recording permanently fails. The badge shows the number of failures since you last visited Downloads. Opening the Downloads page clears the badge. The existing yellow badge that shows how many downloads are currently in progress continues to work alongside it.
