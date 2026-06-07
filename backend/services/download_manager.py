@@ -1015,6 +1015,13 @@ class DownloadManager:
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 
+                content_type = response.headers.get("Content-Type", "")
+                if content_type.lower().startswith("text/"):
+                    raise Exception(
+                        f"Provider returned an error page (Content-Type: {content_type}). "
+                        "The catchup window may have expired or be unavailable."
+                    )
+
                 total_size = response.content_length or 0
                 range_start = None
                 if response.status == 206:
