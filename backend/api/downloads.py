@@ -103,8 +103,8 @@ class DownloadCreate(BaseModel):
     channel_name: str
     program: dict  # EPG program data
     custom_filename: Optional[str] = None
-    pre_padding_minutes: Optional[conint(ge=0)] = 0
-    post_padding_minutes: Optional[conint(ge=0)] = 0
+    pre_padding_minutes: Optional[conint(ge=0, le=120)] = 0
+    post_padding_minutes: Optional[conint(ge=0, le=120)] = 0
 
 
 class FilenamePreview(BaseModel):
