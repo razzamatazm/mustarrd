@@ -114,7 +114,7 @@ function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading }) 
           ))}
           {filteredChannels.length === 0 && (
             <Text c="dimmed" ta="center" py="md">
-              No channels found
+              {search ? 'No channels match your search.' : 'No channels available yet.'}
             </Text>
           )}
         </Stack>
@@ -187,7 +187,7 @@ function CategoryList({ categories, selectedCategory, onSelectCategory, isLoadin
           ))}
           {filtered.length === 0 && (
             <Text c="dimmed" ta="center" py="md">
-              No categories found
+              {search ? 'No categories match your search.' : 'No categories available.'}
             </Text>
           )}
         </Stack>
