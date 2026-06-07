@@ -126,5 +126,39 @@ class MinFreeSpaceNormalizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["min_free_space_gb"], 10)
 
 
+class DefaultPaddingValidationTests(unittest.TestCase):
+    """default_pre/post_padding_minutes must be >= 0; negative values silently
+    truncate every recording by shifting the start forward or reducing duration."""
+
+    def test_zero_pre_padding_accepted(self):
+        m = SettingsUpdate(default_pre_padding_minutes=0)
+        self.assertEqual(m.default_pre_padding_minutes, 0)
+
+    def test_positive_pre_padding_accepted(self):
+        m = SettingsUpdate(default_pre_padding_minutes=10)
+        self.assertEqual(m.default_pre_padding_minutes, 10)
+
+    def test_negative_pre_padding_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(default_pre_padding_minutes=-1)
+
+    def test_zero_post_padding_accepted(self):
+        m = SettingsUpdate(default_post_padding_minutes=0)
+        self.assertEqual(m.default_post_padding_minutes, 0)
+
+    def test_positive_post_padding_accepted(self):
+        m = SettingsUpdate(default_post_padding_minutes=5)
+        self.assertEqual(m.default_post_padding_minutes, 5)
+
+    def test_negative_post_padding_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(default_post_padding_minutes=-1)
+
+    def test_none_padding_accepted(self):
+        m = SettingsUpdate(default_pre_padding_minutes=None, default_post_padding_minutes=None)
+        self.assertIsNone(m.default_pre_padding_minutes)
+        self.assertIsNone(m.default_post_padding_minutes)
+
+
 if __name__ == "__main__":
     unittest.main()
