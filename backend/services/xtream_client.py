@@ -40,7 +40,7 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Authentication failed: HTTP {response.status}")
-            data = await response.json()
+            data = await response.json(content_type=None)
             if "user_info" not in data:
                 raise Exception("Invalid response from server")
             if not data["user_info"].get("auth", 1):
@@ -54,7 +54,7 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get categories: HTTP {response.status}")
-            data = await response.json()
+            data = await response.json(content_type=None)
             return list(data.values()) if isinstance(data, dict) else data
 
     async def get_live_streams(self, category_id: Optional[str] = None) -> list:
@@ -64,7 +64,7 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get streams: HTTP {response.status}")
-            data = await response.json()
+            data = await response.json(content_type=None)
             return list(data.values()) if isinstance(data, dict) else data
 
     async def get_epg(self, stream_id: str) -> list:
@@ -74,7 +74,7 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get EPG: HTTP {response.status}")
-            data = await response.json()
+            data = await response.json(content_type=None)
             return data.get("epg_listings") or []
 
     async def get_short_epg(self, stream_id: str, limit: int = 10) -> list:
@@ -84,7 +84,7 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get short EPG: HTTP {response.status}")
-            data = await response.json()
+            data = await response.json(content_type=None)
             return data.get("epg_listings") or []
 
     async def get_xmltv(self) -> bytes:
@@ -103,7 +103,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get VOD categories: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     async def get_vod_streams(self, category_id: Optional[str] = None) -> list:
         """Get VOD (movies) streams."""
@@ -112,7 +112,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get VOD streams: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     async def get_vod_info(self, vod_id: str) -> dict:
         """Get VOD (movie) details."""
@@ -121,7 +121,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get VOD info: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     async def get_series_categories(self) -> list:
         """Get series categories."""
@@ -130,7 +130,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get series categories: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     async def get_series(self, category_id: Optional[str] = None) -> list:
         """Get series list."""
@@ -139,7 +139,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get series: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     async def get_series_info(self, series_id: str) -> dict:
         """Get series details (seasons + episodes)."""
@@ -148,7 +148,7 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get series info: HTTP {response.status}")
-            return await response.json()
+            return await response.json(content_type=None)
 
     def build_timeshift_url(
         self,
