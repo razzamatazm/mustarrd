@@ -27,9 +27,16 @@ class ScheduleCreate(BaseModel):
     post_padding_minutes: Optional[conint(ge=0, le=120)] = 0
 
 
+def _coerce_ts(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_program(program: dict) -> tuple[datetime, datetime, int, int, int, str | None, str | None]:
-    start_timestamp = program.get("start_timestamp")
-    stop_timestamp = program.get("stop_timestamp")
+    start_timestamp = _coerce_ts(program.get("start_timestamp"))
+    stop_timestamp = _coerce_ts(program.get("stop_timestamp"))
 
     if start_timestamp and stop_timestamp:
         start_time = datetime.fromtimestamp(int(start_timestamp), tz=timezone.utc)

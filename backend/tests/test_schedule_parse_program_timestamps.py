@@ -112,6 +112,34 @@ class TestScheduleParseProgramTimestamps(unittest.TestCase):
         _, _, _, _, duration, _, _ = _parse_program(program)
         self.assertEqual(duration, 60)
 
+    def test_empty_string_start_timestamp_falls_through_to_iso(self):
+        """Empty string start_timestamp is non-numeric; must fall through to ISO strings."""
+        import datetime as dt
+        program = {
+            "start_timestamp": "",
+            "stop_timestamp": "",
+            "start_time": "2026-03-30T17:00:00+00:00",
+            "end_time":   "2026-03-30T18:00:00+00:00",
+        }
+        _, _, start_ts, _, duration, _, _ = _parse_program(program)
+        expected = int(dt.datetime(2026, 3, 30, 17, 0, 0, tzinfo=dt.timezone.utc).timestamp())
+        self.assertEqual(start_ts, expected)
+        self.assertEqual(duration, 60)
+
+    def test_nonnumeric_start_timestamp_falls_through_to_iso(self):
+        """Non-numeric start_timestamp must fall through to ISO strings, not crash."""
+        import datetime as dt
+        program = {
+            "start_timestamp": "abc",
+            "stop_timestamp": "xyz",
+            "start_time": "2026-03-30T17:00:00+00:00",
+            "end_time":   "2026-03-30T18:00:00+00:00",
+        }
+        _, _, start_ts, _, duration, _, _ = _parse_program(program)
+        expected = int(dt.datetime(2026, 3, 30, 17, 0, 0, tzinfo=dt.timezone.utc).timestamp())
+        self.assertEqual(start_ts, expected)
+        self.assertEqual(duration, 60)
+
 
 if __name__ == "__main__":
     unittest.main()
