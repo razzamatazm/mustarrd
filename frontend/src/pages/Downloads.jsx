@@ -59,7 +59,7 @@ function formatDuration(minutes) {
   const hours = d.hours()
   const mins = d.minutes()
   if (hours > 0) {
-    return `${hours}h ${mins}m`
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
   }
   return `${mins}m`
 }
