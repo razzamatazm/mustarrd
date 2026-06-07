@@ -4,13 +4,14 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from auth import require_admin, require_admin_or_download_user, AuthContext
 from database import get_session
-from models import AppSettings, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
+from models import AppSettings, EPGProgram, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
 from services.download_manager import download_manager
 from services.epg_ingest_manager import epg_ingest_manager
+from services.epg_service import epg_service
 from services.account_credentials import (
     encrypt_account_password,
     resolve_account_password_with_migration,
@@ -236,8 +237,13 @@ async def delete_account(
     )
     active_dl_ids = [d.id for d in dl_result.scalars().all()]
 
+    await session.execute(
+        delete(EPGProgram).where(EPGProgram.account_id == account.id)
+    )
+
     await session.delete(account)
     await session.commit()
+    epg_service.clear_cache()
 
     for dl_id in active_dl_ids:
         await download_manager.cancel_download(dl_id)
