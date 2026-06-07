@@ -276,8 +276,10 @@ class EPGService:
             start_time = datetime.fromtimestamp(start_ts, tz=timezone.utc)
             end_time = datetime.fromtimestamp(stop_ts, tz=timezone.utc)
 
-            # Include programs that have ended and are within the catchup window
-            if start_time >= cutoff and end_time < now:
+            # Include programs that ended within the catchup window. Using end_time
+            # (not start_time) means a long program that started just before the
+            # archive boundary but ended within it is still shown and downloadable.
+            if end_time > cutoff and end_time < now:
                 if program.get("has_archive", False):
                     past_programs.append(program)
 
