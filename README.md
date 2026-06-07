@@ -89,6 +89,7 @@ Then open **http://localhost:4177** in your browser.
 ### Monitor Downloads
 
 - Go to the **Downloads** page to see active downloads with progress bars
+- The **Upcoming** tab lists everything scheduled to record automatically, sorted by air date, with show name, channel, time, and duration. A count badge on the tab heading shows how many recordings are queued at a glance. Recordings paused for low disk space show an orange badge explaining why
 - A red badge on the **Downloads** menu item shows how many recordings have permanently failed since you last visited. Opening Downloads clears it
 - A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
 - Failed downloads can be retried from the same page

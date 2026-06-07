@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Settings now rejects invalid values and explains what is accepted
+
+**What you would notice:** Before this change, if you typed an unsupported format like "avi" into the Transcode Format field or left Minimum Free Space set to 0, Mustarrd would save the value silently and every transcoded download would fail with a confusing FFmpeg error, or the disk-space guard would be disabled entirely with no warning. Settings now shows a clear error immediately when a value is not accepted. If your saved configuration already has 0 in the Minimum Free Space field (possible on older installs), Mustarrd now silently corrects it to 25 GB so you can open and save Settings without hitting an error.
+
+**What changed:** The Transcode Format and Hardware Acceleration fields now only accept values Mustarrd supports. The Minimum Free Space field requires at least 1 GB. A legacy stored value of 0 is corrected to 25 GB automatically when you open Settings.
+
+---
+
+### Improved: Downloads page now has an Upcoming tab showing your scheduled recordings
+
+**What you would notice:** The Downloads page now has three tabs: Active, Upcoming, and History. The new Upcoming tab lists every recording that is scheduled to download automatically, sorted by when the program airs. Each row shows the show name, channel, air time, and duration. If a recording is paused because your drive is running low on space, it shows an orange badge explaining why. A count badge on the tab heading (for example "Upcoming (3)") shows how many recordings are queued without requiring you to click in.
+
+**What changed:** A new Upcoming tab was added to the Downloads page between the Active and History tabs. A new backend endpoint returns the list of upcoming scheduled recordings.
+
+---
+
 ### Fixed: Downloads no longer fail when a stream or video ID contains special characters
 
 **What you would notice:** Some IPTV providers assign stream IDs, on-demand video IDs, or series episode IDs that include characters like `/`, `#`, or `?`. Before this fix, those characters would corrupt the download URL, and every attempt to record from those channels would fail immediately with no clear reason. The content appeared available in your guide, but the download never started or returned a confusing error. This is now fixed for all four Xtream download URL types (live streams, timeshift, on-demand video, and series episodes).
