@@ -1,4 +1,7 @@
+import asyncio
 import mimetypes
+import os
+import shutil
 from pathlib import Path
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -219,6 +222,32 @@ async def get_download_history(
     history = await download_manager.get_history()
     filtered = history if auth.is_admin else [d for d in history if d.get("requested_by_user_id") == auth.user_id]
     return await _attach_requested_by(session, filtered, auth)
+
+
+@router.get("/disk-space")
+async def get_disk_space(
+    _auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return free disk space on the download folder."""
+    result = await session.execute(select(AppSettings))
+    app_settings = result.scalar_one_or_none()
+    folder = app_settings.download_folder if app_settings else settings.default_download_folder
+    min_free_gb = app_settings.min_free_space_gb if app_settings else 25
+
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+
+    usage = await asyncio.to_thread(shutil.disk_usage, folder)
+    free_bytes = usage.free
+    free_gb = free_bytes / (1024 ** 3)
+
+    return {
+        "disk_free_bytes": free_bytes,
+        "disk_free_gb": round(free_gb, 1),
+        "min_free_space_gb": min_free_gb,
+        "is_low": free_gb < min_free_gb,
+    }
 
 
 @router.post("/preview-filename")

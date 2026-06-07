@@ -33,6 +33,7 @@ import {
   IconFolderOpen,
   IconChevronDown,
   IconChevronUp,
+  IconDatabase,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -354,6 +355,12 @@ export default function Downloads() {
     queryFn: accountsApi.publicList,
   })
 
+  const { data: diskSpace } = useQuery({
+    queryKey: ['downloads', 'disk-space'],
+    queryFn: downloadsApi.diskSpace,
+    refetchInterval: 30000,
+  })
+
   useEffect(() => {
     const ws = createDownloadWebSocket((data) => {
       if (data.type === 'progress') {
@@ -514,7 +521,20 @@ export default function Downloads() {
 
   return (
     <Stack>
-      <Title order={2}>Downloads</Title>
+      <Group justify="space-between" align="center">
+        <Title order={2}>Downloads</Title>
+        {diskSpace && (
+          <Badge
+            color={diskSpace.is_low ? 'red' : 'gray'}
+            variant={diskSpace.is_low ? 'filled' : 'light'}
+            leftSection={<IconDatabase size={12} />}
+            size="lg"
+          >
+            {diskSpace.disk_free_gb} GB free
+            {diskSpace.is_low ? ': Low disk space' : ''}
+          </Badge>
+        )}
+      </Group>
 
       <Tabs defaultValue="active">
         <Tabs.List>
