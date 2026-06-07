@@ -14,6 +14,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Improved: Long show titles in Downloads > Upcoming no longer get cut off on phones
+
+**What you would notice:** On phone screens, long show titles on the Downloads > Upcoming tab were still being cut off with "..." after an earlier fix covered the Scheduled page and the Downloads list view. The Upcoming tab now wraps titles to a second line so the full show name is always readable.
+
+**What changed:** Program titles on the Downloads > Upcoming tab now wrap instead of truncating on narrow screens. No visual change on desktop screens.
+
+---
+
 ### Improved: Show titles no longer get cut off on phones
 
 **What you would notice:** On phone screens, if a show title was long and shared a row with a wide badge (like "PAUSED (LOW SPACE)"), the title was cut off with "..." making it impossible to read the full name. The title now wraps to a second line so the full show name is always visible.
