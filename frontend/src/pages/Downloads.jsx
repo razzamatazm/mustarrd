@@ -646,12 +646,9 @@ export default function Downloads() {
                     <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
                       <Text fw={500}>{rec.program_title}</Text>
                       <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
-                      <Group gap="xs">
-                        <Text size="xs" c="dimmed">
-                          Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}
-                        </Text>
-                        <Text size="xs" c="dimmed">({formatDuration(rec.duration_minutes)})</Text>
-                      </Group>
+                      <Text size="xs" c="dimmed">
+                        Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
+                      </Text>
                     </Stack>
                     {rec.status === 'paused_low_space' && (
                       <Badge color="yellow" variant="light" size="sm" leftSection={<IconAlertCircle size={12} />}>
