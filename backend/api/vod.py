@@ -1,3 +1,6 @@
+import asyncio
+import os
+import shutil
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,8 +9,9 @@ from typing import Optional
 import logging
 
 from auth import require_admin_or_download_user, AuthContext
+from config import settings
 from database import get_session
-from models import XtreamAccount
+from models import AppSettings, XtreamAccount
 from services.account_credentials import resolve_account_password_with_migration
 from services.xtream_client import XtreamClient
 from services.vod_service import build_movie_download, build_episode_download
@@ -16,6 +20,33 @@ from services.download_manager import download_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _check_disk_space(session: AsyncSession) -> None:
+    settings_result = await session.execute(select(AppSettings))
+    app_settings_row = settings_result.scalar_one_or_none()
+    download_folder = (
+        app_settings_row.download_folder
+        if app_settings_row and app_settings_row.download_folder
+        else settings.default_download_folder
+    )
+    min_free_gb = (
+        app_settings_row.min_free_space_gb
+        if app_settings_row and app_settings_row.min_free_space_gb is not None
+        else 25
+    )
+    if min_free_gb and min_free_gb > 0 and await asyncio.to_thread(os.path.exists, download_folder):
+        usage = await asyncio.to_thread(shutil.disk_usage, download_folder)
+        free_gb = usage.free / (1024 ** 3)
+        if free_gb < min_free_gb:
+            raise HTTPException(
+                status_code=507,
+                detail=(
+                    f"Not enough disk space to start this download. "
+                    f"{free_gb:.1f} GB free, {min_free_gb} GB required. "
+                    f"Free up space or lower the minimum free space setting."
+                ),
+            )
 
 
 class MovieDownloadRequest(BaseModel):
@@ -145,6 +176,7 @@ async def download_movie(
             raise HTTPException(status_code=404, detail="Account not found")
         raise HTTPException(status_code=400, detail="Unable to queue movie download")
 
+    await _check_disk_space(session)
     download = await download_manager.queue_download(download)
     return download.to_dict()
 
@@ -212,6 +244,7 @@ async def download_series(
     auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session)
 ):
+    await _check_disk_space(session)
     downloads = []
     for episode in data.episodes:
         try:
