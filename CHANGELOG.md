@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Subtitle files next to recordings are no longer deleted by ComSkip post-processing
+
+**What you would notice:** If you placed subtitle files (`.srt`, `.vtt`, `.ass`) or metadata files (`.xml`) in the same folder as your recordings and then ran a download with ComSkip enabled, those files would silently vanish after post-processing finished. There was no warning and no way to recover them. Subtitle files in your recording folders are now left alone.
+
+**What changed:** ComSkip's cleanup step was incorrectly including subtitle and metadata file extensions alongside the working files it is supposed to remove. Only actual ComSkip and FFmpeg working files (`.edl`, `.txt`, `.log`, `.logo`, `.csv`, `.vdr`, segment files) are now deleted. The same correction was applied to the cleanup that runs after every transcode or remux, so subtitle files are preserved in both paths.
+
+---
+
 ### Fixed: Downloading from Browse now checks available disk space before starting
 
 **What you would notice:** Settings lets you configure a minimum free disk space threshold (default 25 GB). That limit protected scheduled recordings but was ignored for manual downloads you started by clicking Download in Browse. If your disk was nearly full, the download would start, run until your storage ran out, leave a partial file behind, and show a cryptic error like "No space left on device." Now Browse checks free space before queuing the download. If there is not enough room, you see a clear message straight away: "Not enough disk space to start this download. 5.0 GB free, 25 GB required." No partial file is written.
