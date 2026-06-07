@@ -34,7 +34,7 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 **What you would notice:** If a download was interrupted (for example by a container restart) and Mustarrd sent a request to your provider asking to continue from where it left off, some providers acknowledged the request with the right status code but did not include the information Mustarrd needed to verify they were actually sending from the right position. Mustarrd was trusting the provider and appending bytes regardless, which produced a corrupted recording roughly twice the expected size. Mustarrd now falls back to a clean re-download whenever the provider does not confirm the resume position, and logs a message explaining the fallback.
 
-**What changed:** When resuming an interrupted download, Mustarrd now checks that the provider explicitly confirms the byte position before appending. If the confirmation is missing, the download starts over from byte zero. The log will say "Provider did not honour Range request; re-downloading from start." No change to downloads that are not interrupted.
+**What changed:** When resuming an interrupted download, Mustarrd now checks that the provider explicitly confirms the byte position before appending. If the confirmation is missing, the download starts over from byte zero. The log will say "Provider returned 206 without Content-Range; re-requesting from start." (If the provider confirms a resume but starts from the wrong position, the log will say "Provider returned Content-Range start N instead of requested M; re-requesting from start.") No change to downloads that are not interrupted.
 
 ---
 
