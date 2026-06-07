@@ -954,6 +954,11 @@ class DownloadManager:
                 f"{escaped_stem}.logo",
                 f"{escaped_stem}.csv",
                 f"{escaped_stem}.vdr",
+                # Partial transcode outputs left by a mid-transcode FFmpeg failure.
+                # The completed_real guard below skips these when transcode succeeded and
+                # the file was already moved to completed_folder.
+                f"{escaped_stem}.mkv",
+                f"{escaped_stem}.mp4",
             ]
             if not keep_logs:
                 patterns.extend([
