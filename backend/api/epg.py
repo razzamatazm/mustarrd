@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,7 @@ async def search_epg(
         raise HTTPException(status_code=404, detail="Account not found")
 
     pattern = _build_like_pattern(q.lower())
+    now_utc = datetime.now(timezone.utc)
     result = await session.execute(
         select(EPGProgram)
         .where(
@@ -57,6 +59,10 @@ async def search_epg(
             or_(
                 func.lower(EPGProgram.title).like(pattern, escape="\\"),
                 func.lower(EPGProgram.description).like(pattern, escape="\\"),
+            ),
+            or_(
+                EPGProgram.end_time > now_utc,
+                EPGProgram.has_archive == True,
             ),
         )
         .order_by(EPGProgram.start_time.desc())
