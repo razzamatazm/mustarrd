@@ -367,6 +367,9 @@ async def create_download(
         raise HTTPException(status_code=400, detail=message)
 
     # Reject duplicate: same program already pending, downloading, or processing.
+    # Note: this is a read-then-insert check, not atomic. Two simultaneous POSTs
+    # (e.g. double-click) can both pass before either commits; sequential duplicates
+    # are blocked but a true concurrent race is not fully closed.
     _active = [
         DownloadStatus.PENDING.value,
         DownloadStatus.DOWNLOADING.value,
