@@ -28,11 +28,24 @@ def _make_session(min_free_gb=25, download_folder="/downloads"):
     app_settings.download_folder = download_folder
     app_settings.min_free_space_gb = min_free_gb
 
-    scalar_result = MagicMock()
-    scalar_result.scalar_one_or_none = MagicMock(return_value=app_settings)
+    settings_result = MagicMock()
+    settings_result.scalar_one_or_none = MagicMock(return_value=app_settings)
+
+    # Duplicate-check query (1st execute call) must return None so it does not
+    # trigger 409 before the disk-space check runs.
+    no_dup_result = MagicMock()
+    no_dup_result.scalar_one_or_none = MagicMock(return_value=None)
+
+    call_count = [0]
+
+    async def _execute(query):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return no_dup_result
+        return settings_result
 
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=scalar_result)
+    session.execute = AsyncMock(side_effect=_execute)
     return session
 
 

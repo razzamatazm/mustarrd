@@ -366,6 +366,24 @@ async def create_download(
             raise HTTPException(status_code=404, detail=message)
         raise HTTPException(status_code=400, detail=message)
 
+    # Reject duplicate: same program already pending, downloading, or processing.
+    _active = [
+        DownloadStatus.PENDING.value,
+        DownloadStatus.DOWNLOADING.value,
+        DownloadStatus.PROCESSING.value,
+    ]
+    _dup = await session.execute(
+        select(Download).where(
+            Download.account_id == download.account_id,
+            Download.channel_id == download.channel_id,
+            Download.start_timestamp == download.start_timestamp,
+            Download.stop_timestamp == download.stop_timestamp,
+            Download.status.in_(_active),
+        )
+    )
+    if _dup.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="A download for this program is already active.")
+
     # Scheduled recordings check free space in scheduled_manager; ad-hoc downloads
     # must enforce the same guard here or the threshold is silently bypassed.
     await check_disk_space(session)
