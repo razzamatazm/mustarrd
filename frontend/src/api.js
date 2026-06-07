@@ -127,6 +127,7 @@ export const downloadsApi = {
   retry: (id) => request(`/downloads/${id}/retry`, { method: 'POST' }),
   previewFilename: (data) => request('/downloads/preview-filename', { method: 'POST', body: data }),
   diskSpace: () => request('/downloads/disk-space'),
+  clearFinished: () => request('/downloads/finished', { method: 'DELETE' }),
 }
 
 // Schedules
