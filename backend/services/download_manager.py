@@ -429,11 +429,19 @@ class DownloadManager:
 
                 if download.status == DownloadStatus.DOWNLOADING.value:
                     try:
-                        is_complete = (
+                        if input_file.is_file() and download.file_size:
+                            is_complete = download.downloaded_bytes >= int(download.file_size)
+                        elif (
                             input_file.is_file()
-                            and download.file_size
-                            and download.downloaded_bytes >= int(download.file_size)
-                        )
+                            and download.file_size == 0
+                            and download.downloaded_bytes > 0
+                        ):
+                            # Chunked stream (no Content-Length). The DB records
+                            # downloaded_bytes as written; if on-disk size matches, the
+                            # download finished cleanly before the crash.
+                            is_complete = input_file.stat().st_size == download.downloaded_bytes
+                        else:
+                            is_complete = False
                     except Exception:
                         is_complete = False
 

@@ -44,19 +44,15 @@ def _make_recovery_session(downloads, settings=None):
 class RecoverUnknownLengthTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_length_partial_file_preserves_bytes_on_recovery(self):
         """
-        BUG: recover_incomplete_downloads resets downloaded_bytes=0 for every
-        incomplete DOWNLOADING record, including streams where the provider sent no
-        Content-Length (file_size=0).
+        recover_incomplete_downloads must not reset downloaded_bytes=0 for a partial
+        chunked (unknown Content-Length) download when a partial file exists on disk.
 
-        Root cause: `and download.file_size` is falsy when file_size=0, so
-        is_complete is always False for unknown-length downloads. The code then
-        unconditionally resets downloaded_bytes=0, discarding partial progress.
+        Scenario: 4096 bytes written to disk; the DB had recorded 8192 bytes before the
+        crash (the download was still in progress). The DB value is stale; the on-disk
+        size is the truth. After recovery downloaded_bytes must equal the on-disk size
+        (4096), not 0 (the old buggy reset) and not 8192 (the stale DB value).
 
-        For a near-the-window-edge recording this means: restart -> full re-download
-        required -> catchup window closes before re-download finishes -> recording lost.
-
-        Fix: when file_size==0 and a non-empty partial file exists on disk, set
-        downloaded_bytes to the actual on-disk size instead of resetting to 0.
+        disk_size < downloaded_bytes → partial, not complete → re-queue as PENDING.
         """
         with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
             f.write(b"\x00" * 4096)
@@ -67,7 +63,7 @@ class RecoverUnknownLengthTests(unittest.IsolatedAsyncioTestCase):
             download.status = DownloadStatus.DOWNLOADING.value
             download.output_path = tmp_path
             download.file_size = 0
-            download.downloaded_bytes = 4096
+            download.downloaded_bytes = 8192  # stale DB value, more than what's on disk
             download.error_message = None
 
             manager = DownloadManager()
@@ -81,19 +77,18 @@ class RecoverUnknownLengthTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await manager.recover_incomplete_downloads()
 
-            # The partial file has 4096 bytes on disk.
-            # After recovery the DB must reflect that, not 0.
+            # downloaded_bytes must reflect the on-disk size (4096), not 0 or the stale 8192.
             self.assertEqual(
                 download.downloaded_bytes,
                 4096,
-                "downloaded_bytes must reflect the on-disk partial file size when "
-                "file_size=0 (unknown-length stream). Resetting to 0 loses progress "
-                "and forces a full re-download that may exceed the catchup window.",
+                "downloaded_bytes must be set to on-disk size when file_size=0 and "
+                "disk_size < downloaded_bytes (partial stream). Resetting to 0 loses "
+                "progress; keeping the stale DB value would send a bad Range offset.",
             )
             self.assertEqual(
                 download.status,
                 DownloadStatus.PENDING.value,
-                "Unknown-length partial download must be requeued as PENDING.",
+                "Partial chunked download (disk_size < downloaded_bytes) must be requeued as PENDING.",
             )
         finally:
             os.unlink(tmp_path)
