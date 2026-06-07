@@ -126,7 +126,7 @@ function DownloadCard({
       <Stack gap="xs">
         <Group justify="space-between" wrap="nowrap">
           <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
-            <Text fw={500} truncate>
+            <Text fw={500}>
               {download.program_title}
             </Text>
             <Text size="sm" c="dimmed" truncate>
