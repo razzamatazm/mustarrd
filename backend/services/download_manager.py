@@ -906,6 +906,8 @@ class DownloadManager:
             if delete_original and original_path != completed_path and original_file.exists():
                 original_file.unlink()
 
+            # Only remove known ComSkip/FFmpeg working files.
+            # .xml/.srt/.ass/.vtt are user subtitle/metadata files, never ComSkip outputs.
             patterns = [
                 f"{stem}_seg*.ts",
                 f"{stem}.concat.txt",
@@ -914,10 +916,6 @@ class DownloadManager:
                 f"{stem}.logo",
                 f"{stem}.csv",
                 f"{stem}.vdr",
-                f"{stem}.xml",
-                f"{stem}.srt",
-                f"{stem}.ass",
-                f"{stem}.vtt",
             ]
             if not keep_logs:
                 patterns.extend([
