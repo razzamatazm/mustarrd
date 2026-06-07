@@ -38,7 +38,9 @@ def _friendly_connection_error(e: Exception) -> str:
         return "Provider rejected login. Check your username and password."
     if "HTTP 5" in msg:
         return "Provider server error. Try again later."
-    return msg or "Connection failed."
+    # Truncate raw fallthrough so a stray library exception cannot store a wall of
+    # text or a URL-carrying error string in the card.
+    return (msg[:200] + "...") if len(msg) > 200 else (msg or "Connection failed.")
 
 
 class EPGIngestManager:
