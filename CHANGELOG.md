@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Downloads history has a new "Clear finished" button
+
+**What you would notice:** There is now a "Clear finished" button on the Downloads page. Clicking it removes all completed and failed entries from the history list in one step, after a confirmation prompt to prevent accidents. Cancelled entries stay in the list in case you want to retry them.
+
+**What changed:** A new button lets you bulk-remove completed and failed history entries. Your actual downloaded files on disk are not affected.
+
+---
+
+### Improved: Completed schedule cards no longer show a confusing "Download ID" number
+
+**What you would notice:** When a scheduled recording finished, the card used to show "Recording finished. Download ID: 42" below the status. That number is an internal identifier that means nothing to most users, and the tooltip explaining it was invisible on phones. The Download and Play buttons right below already tell you the recording is ready. The ID line has been removed.
+
+**What changed:** The completed-recording card no longer displays the internal download ID.
+
+---
+
+### Fixed: Downloads with program titles in Chinese, Japanese, Korean, or Arabic no longer fail immediately
+
+**What you would notice:** If you downloaded a program with a title made mostly or entirely of Chinese, Japanese, Korean, or Arabic characters, the download would fail right away with a file error. This happened because those characters each take up more space in a filename than Latin letters do, and Mustarrd was not accounting for that when checking the length limit. Downloads with non-Latin titles now complete normally.
+
+**What changed:** When building a filename, Mustarrd now measures length the same way your filesystem does (in bytes), so it trims long titles correctly for all languages.
+
+---
+
 ### Fixed: The "Enable transcoding" toggle in Settings now works
 
 **What you would notice:** If you had "Enable transcoding" turned off in Settings, Mustarrd was ignoring that setting and running every catchup download through ffmpeg anyway. Your files were being transcoded to MKV even though you had transcoding disabled. Downloads now respect the setting: with transcoding off, Mustarrd saves the raw .ts file directly to your completed folder.

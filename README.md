@@ -91,6 +91,7 @@ Then open **http://localhost:4177** in your browser.
 - Go to the **Downloads** page to see active downloads with progress bars
 - A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
 - Failed downloads can be retried from the same page
+- Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries stay so you can retry them)
 
 | Desktop | Mobile |
 |---------|--------|
