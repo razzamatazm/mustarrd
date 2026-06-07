@@ -33,9 +33,11 @@ class FileNamer:
         sanitized = re.sub(r'\s+', ' ', sanitized)
         # Remove leading/trailing spaces and dots
         sanitized = sanitized.strip(' .') or "unknown-program"
-        # Limit length
-        if len(sanitized) > 200:
-            sanitized = sanitized[:200]
+        # Limit to 200 UTF-8 bytes so CJK/Arabic titles don't exceed Linux
+        # NAME_MAX (255 bytes) when combined with an extension.
+        encoded = sanitized.encode("utf-8")
+        if len(encoded) > 200:
+            sanitized = encoded[:200].decode("utf-8", errors="ignore").rstrip() or "unknown-program"
         return sanitized
 
     @staticmethod

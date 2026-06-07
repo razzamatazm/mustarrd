@@ -59,6 +59,26 @@ class SanitizeFilenameTests(unittest.TestCase):
         result = FileNamer.sanitize_filename("​‌")
         self.assertEqual(result, "unknown-program")
 
+    def test_cjk_long_title_within_200_utf8_bytes(self):
+        # 80 CJK chars × 3 bytes/char = 240 bytes; must be truncated to ≤200 bytes
+        # Without the fix, 200-char limit passes but 240-byte filename causes ENAMETOOLONG
+        title = "中" * 80
+        result = FileNamer.sanitize_filename(title)
+        self.assertLessEqual(len(result.encode("utf-8")), 200)
+
+    def test_ascii_200_char_limit_preserved(self):
+        # ASCII: 1 byte/char, so 200-byte and 200-char limits are identical
+        title = "A" * 250
+        result = FileNamer.sanitize_filename(title)
+        self.assertLessEqual(len(result.encode("utf-8")), 200)
+        self.assertEqual(len(result), 200)
+
+    def test_mixed_ascii_cjk_within_200_utf8_bytes(self):
+        # Mix of ASCII + CJK where total bytes would exceed 200 without the fix
+        title = "Show: " + "中" * 70  # 6 + 210 = 216 bytes
+        result = FileNamer.sanitize_filename(title)
+        self.assertLessEqual(len(result.encode("utf-8")), 200)
+
 
 if __name__ == "__main__":
     unittest.main()
