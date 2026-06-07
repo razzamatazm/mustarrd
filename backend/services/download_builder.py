@@ -18,9 +18,13 @@ def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, dateti
     start_timestamp = program.get("start_timestamp")
     stop_timestamp = program.get("stop_timestamp")
 
-    if start_timestamp and stop_timestamp:
-        program_start_utc = datetime.fromtimestamp(int(start_timestamp), tz=timezone.utc)
-        program_end_utc = datetime.fromtimestamp(int(stop_timestamp), tz=timezone.utc)
+    # Treat 0 as "not set": legacy rows created before the timestamp columns
+    # existed have start_timestamp=0 (the column default from ALTER TABLE).
+    ts_start = int(start_timestamp) if start_timestamp is not None else 0
+    ts_stop = int(stop_timestamp) if stop_timestamp is not None else 0
+    if ts_start and ts_stop:
+        program_start_utc = datetime.fromtimestamp(ts_start, tz=timezone.utc)
+        program_end_utc = datetime.fromtimestamp(ts_stop, tz=timezone.utc)
         duration_minutes = int((program_end_utc - program_start_utc).total_seconds() / 60)
     else:
         start_time = program.get("start_time")
@@ -29,6 +33,12 @@ def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, dateti
             raise ValueError("Program has no valid start or end time")
         program_start_utc = datetime.fromisoformat(start_time)
         program_end_utc = datetime.fromisoformat(end_time)
+        # Naive datetimes from our DB are stored in UTC. Stamp them so that
+        # .timestamp() does not misinterpret them as local server time.
+        if program_start_utc.tzinfo is None:
+            program_start_utc = program_start_utc.replace(tzinfo=timezone.utc)
+        if program_end_utc.tzinfo is None:
+            program_end_utc = program_end_utc.replace(tzinfo=timezone.utc)
         duration_minutes = int((program_end_utc - program_start_utc).total_seconds() / 60)
 
     if program.get("start_time") and program.get("end_time"):

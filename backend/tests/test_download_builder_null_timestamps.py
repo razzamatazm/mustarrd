@@ -61,6 +61,39 @@ class ParseProgramTimesNullTests(unittest.TestCase):
         _, _, duration, _, _ = _parse_program_times(program)
         self.assertEqual(duration, 60)
 
+    def test_legacy_zero_timestamps_naive_datetime_treated_as_utc(self):
+        """start_timestamp=0 (legacy row default) + naive DB datetime must be treated as UTC.
+
+        Bug: naive datetimes from our DB are in UTC. When start_timestamp=0 caused
+        the code to fall back to fromisoformat(), .timestamp() interpreted the result
+        as local server time. On non-UTC servers this stored incorrect timestamps.
+        """
+        import datetime
+        program = {
+            "start_timestamp": 0,
+            "stop_timestamp": 0,
+            "start_time": "2026-03-30T17:00:00",
+            "end_time": "2026-03-30T18:00:00",
+        }
+        start, end, duration, _, _ = _parse_program_times(program)
+        self.assertEqual(start.tzinfo, datetime.timezone.utc)
+        self.assertEqual(end.tzinfo, datetime.timezone.utc)
+        self.assertEqual(start.hour, 17)
+        self.assertEqual(end.hour, 18)
+        self.assertEqual(duration, 60)
+
+    def test_none_timestamps_naive_datetime_treated_as_utc(self):
+        """start_timestamp=None with naive DB datetime must also be treated as UTC."""
+        import datetime
+        program = {
+            "start_time": "2026-06-07T20:00:00",
+            "end_time": "2026-06-07T22:00:00",
+        }
+        start, end, duration, _, _ = _parse_program_times(program)
+        self.assertEqual(start.tzinfo, datetime.timezone.utc)
+        self.assertEqual(end.tzinfo, datetime.timezone.utc)
+        self.assertEqual(duration, 120)
+
 
 if __name__ == "__main__":
     unittest.main()
