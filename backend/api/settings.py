@@ -156,7 +156,7 @@ async def get_settings(
         await session.commit()
         await session.refresh(settings)
 
-    if settings.min_free_space_gb is None:
+    if settings.min_free_space_gb is None or settings.min_free_space_gb < 1:
         settings.min_free_space_gb = 25
         session.add(settings)
         await session.commit()
