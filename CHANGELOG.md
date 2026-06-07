@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Failed downloads now show a plain-English reason instead of a technical error
+
+**What you would notice:** When a download failed, the error shown in the Downloads history was often a raw Python exception or an empty string that gave no useful information. You might see something like `<class 'asyncio.TimeoutError'>` or nothing at all. Failed downloads now show a short, readable message: "Connection timed out," "Not enough disk space," "Provider refused the request (403)," "Server not reachable," and so on. The message appears in the Downloads list next to the failed item.
+
+**What changed:** A new internal function maps the most common failure types to short plain-language descriptions at both places in the download process where failures are caught. Unknown errors fall back to showing the raw message as before.
+
+---
+
+### Fixed: Downloads no longer fail when your IPTV password contains special characters like # or /
+
+**What you would notice:** If your IPTV provider gave you a password containing characters like `#`, `?`, `/`, or a space, every catchup and timeshift download would silently fail. The URL Mustarrd sent to your provider was cut off at the special character, so the provider received a truncated or garbled credential and rejected it with a 401 or 404 error. Your credentials looked correct in Settings, but downloads kept failing with no useful message. This is now fixed for any combination of characters in your username or password.
+
+**What changed:** The four URL builders that handle stream, timeshift, on-demand video, and series downloads now encode your username and password before placing them in the request URL. Characters that have special meaning in a URL, such as `#`, `?`, `/`, and spaces, are replaced with their safe equivalents before being sent to your provider. A similar fix was made earlier for the API and guide-update URLs; this completes the same fix for the download URLs.
+
+---
+
 ### Fixed: Browse and program guide now work with providers that label their responses incorrectly
 
 **What you would notice:** On some IPTV providers, especially older or budget PHP-based panels, opening Browse would show no channels, the program guide would fail to refresh and stay stale, and adding your account details would fail with a generic error. Everything looked correct in your settings and the provider itself was working. The underlying cause was that the provider's server was sending valid data but labeling it as plain text in the response header instead of JSON. Mustarrd was rejecting the data because of that incorrect label rather than reading what was actually inside it.
