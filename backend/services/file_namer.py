@@ -145,7 +145,7 @@ class FileNamer:
                     "title": episode_title, "date": date_str, "channel": channel_name,
                 }
                 custom = s.get("tv_template")
-                if custom:
+                if custom and episode_title:
                     template = custom
                 elif episode_title:
                     template = self._DEFAULT_TEMPLATES["tv"]

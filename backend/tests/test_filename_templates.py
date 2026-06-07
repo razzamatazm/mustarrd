@@ -70,6 +70,16 @@ class TemplateWiringTests(unittest.TestCase):
         )
         self.assertEqual(result, "Breaking Bad - S01E01.ts")
 
+    def test_tv_no_subtitle_with_default_tv_template_set(self):
+        # AppSettings always ships a default tv_template, so settings will always
+        # have tv_template set. The no-subtitle branch must still be used when
+        # episode_title is empty, even when tv_template is present.
+        settings = {"tv_template": "{show} - S{season:02d}E{episode:02d} - {title}"}
+        result = FileNamer().generate_filename(
+            _prog("Breaking Bad S01E01"), _channel(), "tv_show", settings
+        )
+        self.assertEqual(result, "Breaking Bad - S01E01.ts")
+
     def test_tv_with_subtitle_includes_episode_title(self):
         result = FileNamer().generate_filename(
             _prog("Breaking Bad S01E01 - Pilot"), _channel(), "tv_show"
