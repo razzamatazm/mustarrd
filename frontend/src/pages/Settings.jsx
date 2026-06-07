@@ -793,7 +793,7 @@ export default function Settings() {
         <Divider variant="dashed" />
 
         <Stack gap="md">
-          <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Recording Format</Text>
+          <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Concurrency</Text>
 
           <NumberInput
             label="Max Concurrent Post-Processing"
@@ -812,6 +812,12 @@ export default function Settings() {
               </Text>
             </Alert>
           )}
+        </Stack>
+
+        <Divider variant="dashed" />
+
+        <Stack gap="md">
+          <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Recording Format</Text>
 
           <Select
             label="Recording Format"
