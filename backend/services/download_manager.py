@@ -1086,6 +1086,16 @@ class DownloadManager:
             needs_restart = False
 
             async with http_session.get(url, headers=request_headers) as response:
+                if response.status == 416 and offset > 0:
+                    # Range past EOF: the partial file on disk is already complete.
+                    # Returning offset (non-zero) lets _execute_download move it to
+                    # the completed folder without deleting it.
+                    await self._broadcast_log(
+                        download_id,
+                        "Provider returned 416 (Range Not Satisfiable); "
+                        "file already complete on disk.",
+                    )
+                    return offset
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 

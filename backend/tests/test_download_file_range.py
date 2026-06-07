@@ -474,5 +474,55 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
+    async def test_416_on_resume_treats_file_as_complete(self):
+        """
+        HTTP 416 (Range Not Satisfiable) when offset>0 means the Range request
+        started past EOF: the file on disk is already complete. _download_file
+        must return offset (non-zero) without modifying the file.
+
+        Before the fix: 416 raised Exception, the _execute_download except-handler
+        called os.unlink(output_path), destroying the complete recording.
+        """
+        offset = 1024
+        content = b"\x47" * offset
+
+        response = _make_aiohttp_response(416, [])
+        response.reason = "Range Not Satisfiable"
+        _mock_session, client_cm = _make_aiohttp_client_session(response)
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(content)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
+                )
+
+            self.assertEqual(
+                total,
+                offset,
+                "HTTP 416 on resume must return offset so _execute_download "
+                "treats the file as non-empty and moves it to completed.",
+            )
+            with open(tmp_path, "rb") as fh:
+                actual = fh.read()
+            self.assertEqual(
+                actual,
+                content,
+                "HTTP 416 on resume must not modify the complete file on disk.",
+            )
+        finally:
+            os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()
