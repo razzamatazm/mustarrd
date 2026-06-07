@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Movies and Series page no longer blank on some providers
+
+**What you would notice:** On certain IPTV providers, opening the Movies or Series page showed nothing at all. There was no error message. The page was simply empty, even though your provider had content available. This is now fixed.
+
+**What changed:** Some IPTV providers send their movie and series listings in a slightly different format than expected. Mustarrd already handled this for the Live TV channel list, but the same fix had not been applied to Movies and Series. All four affected lists (movie categories, movie titles, series categories, and series titles) now handle both formats correctly.
+
+---
+
+### Fixed: Movies and series downloads now check available disk space before starting
+
+**What you would notice:** On a system running low on disk space, trying to download a movie or series episode would start the download and potentially fill your drive. The same disk-space guard that already blocked catchup downloads did not apply to movies or series. Now it does. If you do not have enough free space (based on the threshold you set in Settings), the download will be blocked immediately with a clear message: how much space is free and how much is required.
+
+**What changed:** The movie and series download endpoints now run the same preflight disk-space check that catchup downloads already used. If free space is below your configured minimum, the download is rejected before any data is transferred.
+
+---
+
 ### Fixed: Long programs that started just before the catchup window edge now appear correctly
 
 **What you would notice:** Some programs, particularly long ones like movies or extended sports broadcasts, would be missing from the Catchup page even though most of the program was well within your provider's catchup window. There was no error and no indication the program existed. You would see a gap in the guide where the program should be. These programs now appear alongside everything else and can be downloaded normally.
