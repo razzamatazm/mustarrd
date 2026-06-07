@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Red badge on the Downloads menu item shows how many recordings have failed
+
+**What you would notice:** Before this change, there was no way to know a recording had failed without manually opening the Downloads page. You might not notice a failed recording for days. A small red badge now appears on the Downloads item in the sidebar as soon as a recording permanently fails. The badge shows the number of failures since you last visited Downloads. Opening the Downloads page clears the badge. The existing yellow badge that shows how many downloads are currently in progress continues to work alongside it.
+
+**What changed:** A new backend endpoint counts permanent failures since a given time. The frontend reads a stored timestamp of your last Downloads visit and uses it to request the count. The badge updates automatically each time the page loads.
+
+---
+
+### Fixed: Catchup programs now show correctly on providers that omit archive flags from individual guide entries
+
+**What you would notice:** On some IPTV providers, channels are configured to allow catchup, but individual program entries in the guide do not carry their own "has archive" flag. Before this fix, Mustarrd treated those programs as unavailable for download: the yellow catchup border did not appear, and clicking the program gave no download option. The Catchup page could appear completely empty even when catchup was fully working. Programs on these providers now correctly show the catchup border and can be downloaded.
+
+**What changed:** When a program entry from the live guide does not include its own archive flag, Mustarrd now falls back to the archive setting of the channel itself. This matches how the program guide background refresh already handled the same situation. Providers that do include per-program archive flags are not affected.
+
+---
+
 ### Fixed: Failed downloads now show a plain-English reason instead of a technical error
 
 **What you would notice:** When a download failed, the error shown in the Downloads history was often a raw Python exception or an empty string that gave no useful information. You might see something like `<class 'asyncio.TimeoutError'>` or nothing at all. Failed downloads now show a short, readable message: "Connection timed out," "Not enough disk space," "Provider refused the request (403)," "Server not reachable," and so on. The message appears in the Downloads list next to the failed item.
