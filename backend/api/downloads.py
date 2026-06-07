@@ -235,18 +235,30 @@ async def get_disk_space(
     folder = app_settings.download_folder if app_settings else settings.default_download_folder
     min_free_gb = app_settings.min_free_space_gb if app_settings else 25
 
-    if not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True)
+    _unavailable = {
+        "disk_free_bytes": None,
+        "disk_free_gb": None,
+        "min_free_space_gb": min_free_gb,
+        "is_low": False,
+        "unavailable": True,
+    }
 
-    usage = await asyncio.to_thread(shutil.disk_usage, folder)
-    free_bytes = usage.free
-    free_gb = free_bytes / (1024 ** 3)
+    if not os.path.exists(folder):
+        return _unavailable
+
+    try:
+        usage = await asyncio.to_thread(shutil.disk_usage, folder)
+        free_bytes = usage.free
+        free_gb = free_bytes / (1024 ** 3)
+    except Exception:
+        return _unavailable
 
     return {
         "disk_free_bytes": free_bytes,
         "disk_free_gb": round(free_gb, 1),
         "min_free_space_gb": min_free_gb,
         "is_low": free_gb < min_free_gb,
+        "unavailable": False,
     }
 
 

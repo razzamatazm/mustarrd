@@ -8,6 +8,7 @@ import {
   Badge,
   ActionIcon,
   Menu,
+  Modal,
   Tabs,
   Loader,
   Alert,
@@ -338,6 +339,7 @@ export default function Downloads() {
   const queryClient = useQueryClient()
   const [localProgress, setLocalProgress] = useState({})
   const [localLogs, setLocalLogs] = useState({})
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
   const isDesktop = Boolean(desktopApi?.openFileLocation && desktopApi?.playFile)
 
@@ -540,7 +542,7 @@ export default function Downloads() {
     <Stack>
       <Group justify="space-between" align="center">
         <Title order={2}>Downloads</Title>
-        {diskSpace && (
+        {diskSpace && !diskSpace.unavailable && (
           <Badge
             color={diskSpace.is_low ? 'red' : 'gray'}
             variant={diskSpace.is_low ? 'filled' : 'light'}
@@ -620,7 +622,7 @@ export default function Downloads() {
                   variant="subtle"
                   color="red"
                   leftSection={<IconTrash size={14} />}
-                  onClick={() => clearFinishedMutation.mutate()}
+                  onClick={() => setClearConfirmOpen(true)}
                   loading={clearFinishedMutation.isPending}
                 >
                   Clear finished
@@ -644,6 +646,32 @@ export default function Downloads() {
           )}
         </Tabs.Panel>
       </Tabs>
+
+      <Modal
+        opened={clearConfirmOpen}
+        onClose={() => setClearConfirmOpen(false)}
+        title="Clear finished downloads?"
+        size="sm"
+      >
+        <Text size="sm">
+          This removes all completed and failed entries from history. Cancelled downloads stay so you can retry them.
+        </Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setClearConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            loading={clearFinishedMutation.isPending}
+            onClick={() => {
+              setClearConfirmOpen(false)
+              clearFinishedMutation.mutate()
+            }}
+          >
+            Clear finished
+          </Button>
+        </Group>
+      </Modal>
     </Stack>
   )
 }
