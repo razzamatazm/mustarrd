@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Long programs that started just before the catchup window edge now appear correctly
+
+**What you would notice:** Some programs, particularly long ones like movies or extended sports broadcasts, would be missing from the Catchup page even though most of the program was well within your provider's catchup window. There was no error and no indication the program existed. You would see a gap in the guide where the program should be. These programs now appear alongside everything else and can be downloaded normally.
+
+**What changed:** Mustarrd was filtering catchup programs by checking whether the program started within the archive window. This incorrectly excluded any program that began just before the window boundary but finished well inside it. The check now uses the program end time instead, so a program is included as long as it finished within the window, regardless of when it started.
+
+---
+
 ### Improved: Settings now rejects invalid values and explains what is accepted
 
 **What you would notice:** Before this change, if you typed an unsupported format like "avi" into the Transcode Format field or left Minimum Free Space set to 0, Mustarrd would save the value silently and every transcoded download would fail with a confusing FFmpeg error, or the disk-space guard would be disabled entirely with no warning. Settings now shows a clear error immediately when a value is not accepted. If your saved configuration already has 0 in the Minimum Free Space field (possible on older installs), Mustarrd now silently corrects it to 25 GB so you can open and save Settings without hitting an error.
