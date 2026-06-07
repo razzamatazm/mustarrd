@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Account cards now say "Enabled" and "Disabled" instead of "Active" and "Inactive"
+
+**What you would notice:** The status badge on each account card used to read "ACTIVE" in green when an account was turned on. This sat next to the red "Unreachable" dot that appears when Mustarrd cannot reach your provider. Seeing a green "ACTIVE" badge next to a red failure dot was confusing: the green badge looked like everything was working, but the red dot said it was not. The badge now reads "ENABLED" when the account is turned on, and "DISABLED" when it is turned off. "Enabled" describes whether the account is switched on in Mustarrd, not whether the connection to your provider is currently working. The red "Unreachable" dot separately tells you about the connection.
+
+**What changed:** The label on the account status badge was updated to use "Enabled" and "Disabled" instead of "Active" and "Inactive." Colors and behavior are unchanged.
+
+---
+
 ### Fixed: Settings no longer accepts negative recording padding values
 
 **What you would notice:** Before this fix, you could save a negative number for "Default pre-padding" or "Default post-padding" in Settings and Mustarrd would silently accept it. A negative padding value shifted the recording start time in the wrong direction and shortened the captured duration, causing recordings to miss content or fail without any clear explanation. Mustarrd now rejects negative values immediately and returns an error, so your padding settings always behave as expected.
