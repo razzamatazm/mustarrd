@@ -538,6 +538,11 @@ export default function Settings() {
       description: 'Wrap the stream in an MKV file without re-encoding. Fast and lossless.',
     },
     {
+      value: 'remux_mp4',
+      label: 'MP4 container (fast, no re-encode)',
+      description: 'Wrap the stream in an MP4 file without re-encoding. Fast and lossless.',
+    },
+    {
       value: 'transcode_mkv',
       label: 'MKV (re-encode with ffmpeg)',
       description: 'Re-encode to MKV using ffmpeg. Slower but fixes compatibility issues.',
@@ -562,7 +567,7 @@ export default function Settings() {
   function getRecordingFormat(data) {
     if (!data) return 'keep_original'
     if (!data.transcode_enabled) return 'keep_original'
-    if (data.remux_only) return 'remux_mkv'
+    if (data.remux_only) return data.transcode_format === 'mp4' ? 'remux_mp4' : 'remux_mkv'
     const isMp4 = data.transcode_format === 'mp4'
     if (data.comskip_enabled) return isMp4 ? 'transcode_mp4_comskip' : 'transcode_comskip'
     return isMp4 ? 'transcode_mp4' : 'transcode_mkv'
@@ -572,6 +577,7 @@ export default function Settings() {
     const patches = {
       keep_original: { transcode_enabled: false, remux_only: false, comskip_enabled: false },
       remux_mkv: { transcode_enabled: true, remux_only: true, comskip_enabled: false, transcode_format: 'mkv' },
+      remux_mp4: { transcode_enabled: true, remux_only: true, comskip_enabled: false, transcode_format: 'mp4' },
       transcode_mkv: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mkv' },
       transcode_mp4: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mp4' },
       transcode_comskip: { transcode_enabled: true, remux_only: false, comskip_enabled: true, transcode_format: 'mkv' },
@@ -814,7 +820,7 @@ export default function Settings() {
               value: f.value,
               label: f.label,
               disabled:
-                ['remux_mkv', 'transcode_mkv', 'transcode_mp4'].includes(f.value) && !ffmpegReady
+                ['remux_mkv', 'remux_mp4', 'transcode_mkv', 'transcode_mp4'].includes(f.value) && !ffmpegReady
                   ? true
                   : ['transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && (!ffmpegReady || !comskipReady)
                   ? true
