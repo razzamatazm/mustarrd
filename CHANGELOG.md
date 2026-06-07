@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Deleting a scheduled recording now asks for confirmation
+
+**What you would notice:** Clicking Delete on a scheduled recording used to remove it immediately with no warning. A single misclick meant the schedule was gone and you had to go back to Browse to re-schedule the show. Deleting a schedule now shows a confirmation row at the bottom of the card with a red "Yes, delete" button and a plain "Cancel" button. Works on both desktop and mobile.
+
+**What changed:** A confirmation step was added to the scheduled recording delete action. No recording logic was changed.
+
+---
+
+### Fixed: ComSkip recording formats are now selectable before the comskip binary is installed
+
+**What you would notice:** If you had not yet installed or configured a comskip binary, opening the Recording Format dropdown showed "MKV + skip commercials" and "MP4 + skip commercials" grayed out and unclickable. The field for entering a custom binary path only appears after selecting one of those formats, so there was no way to get started. Both formats are now selectable whenever ffmpeg is available. Selecting one reveals the binary path and INI path fields, along with a note explaining that comskip was not found and where to enter the path.
+
+**What changed:** The ComSkip format options now require only ffmpeg to be available, not a comskip binary already in the system PATH. The alert message was also updated to explain what to do when the binary is not found.
+
+---
+
 ### Fixed: A disabled user can no longer reactivate their account using an old setup link
 
 **What you would notice:** If an admin disabled a user account, that user could still visit the original setup link, which was valid for 24 hours, and reactivate their account without the admin knowing. Mustarrd now blocks that path and shows an error immediately.
