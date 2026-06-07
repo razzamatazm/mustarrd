@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from auth import require_admin, require_admin_or_download_user, AuthContext
 from database import get_session
-from models import AppSettings, XtreamAccount
+from models import AppSettings, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
+from services.download_manager import download_manager
 from services.epg_ingest_manager import epg_ingest_manager
 from services.account_credentials import (
     encrypt_account_password,
@@ -205,8 +206,41 @@ async def delete_account(
     if app_settings and app_settings.default_account_id == account.id:
         app_settings.default_account_id = None
 
+    active_schedule_statuses = [
+        ScheduledStatus.SCHEDULED.value,
+        ScheduledStatus.QUEUED.value,
+        ScheduledStatus.DOWNLOADING.value,
+        ScheduledStatus.PROCESSING.value,
+        ScheduledStatus.PAUSED_LOW_SPACE.value,
+    ]
+    sched_result = await session.execute(
+        select(ScheduledRecording).where(
+            ScheduledRecording.account_id == account.id,
+            ScheduledRecording.status.in_(active_schedule_statuses),
+        )
+    )
+    for sched in sched_result.scalars().all():
+        sched.status = ScheduledStatus.CANCELLED.value
+        sched.status_message = "Account deleted"
+
+    active_download_statuses = [
+        DownloadStatus.PENDING.value,
+        DownloadStatus.DOWNLOADING.value,
+        DownloadStatus.PROCESSING.value,
+    ]
+    dl_result = await session.execute(
+        select(Download).where(
+            Download.account_id == account.id,
+            Download.status.in_(active_download_statuses),
+        )
+    )
+    active_dl_ids = [d.id for d in dl_result.scalars().all()]
+
     await session.delete(account)
     await session.commit()
+
+    for dl_id in active_dl_ids:
+        await download_manager.cancel_download(dl_id)
 
     return {"status": "deleted"}
 

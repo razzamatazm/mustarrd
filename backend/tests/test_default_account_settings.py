@@ -116,15 +116,19 @@ class DefaultAccountSettingsTests(unittest.IsolatedAsyncioTestCase):
         account = XtreamAccount(id=5, name="Primary", server_url="http://example", username="user", password="")
         app_settings = AppSettings()
         app_settings.default_account_id = 5
+        _empty_list = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
         session = AsyncMock()
         session.execute = AsyncMock(
             side_effect=[
                 _ScalarResult(account),
                 _ScalarResult(app_settings),
+                _empty_list,
+                _empty_list,
             ]
         )
 
-        result = await delete_account(5, None, session)
+        with patch("api.accounts.download_manager"):
+            result = await delete_account(5, None, session)
 
         self.assertIsNone(app_settings.default_account_id)
         self.assertEqual(result, {"status": "deleted"})
