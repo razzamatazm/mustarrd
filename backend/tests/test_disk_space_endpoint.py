@@ -21,14 +21,17 @@ class DiskSpaceResponseTests(unittest.TestCase):
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def _make_endpoint(self, free_bytes, min_free_gb, folder="/tmp"):
+    def _make_endpoint(self, free_bytes, min_free_gb, folder="/tmp", folder_exists=True, app_settings_none=False):
         from api.downloads import get_disk_space
         from unittest.mock import MagicMock, AsyncMock, patch
         import shutil
 
-        app_settings = MagicMock()
-        app_settings.download_folder = folder
-        app_settings.min_free_space_gb = min_free_gb
+        if app_settings_none:
+            app_settings = None
+        else:
+            app_settings = MagicMock()
+            app_settings.download_folder = folder
+            app_settings.min_free_space_gb = min_free_gb
 
         scalar_mock = MagicMock()
         scalar_mock.scalar_one_or_none = MagicMock(return_value=app_settings)
@@ -38,12 +41,11 @@ class DiskSpaceResponseTests(unittest.TestCase):
 
         auth = MagicMock()
 
-        usage = shutil.disk_usage.__class__
         disk_result = MagicMock()
         disk_result.free = free_bytes
 
         with patch("api.downloads.shutil.disk_usage", return_value=disk_result):
-            with patch("api.downloads.os.path.exists", return_value=True):
+            with patch("api.downloads.os.path.exists", return_value=folder_exists):
                 result = self._run(get_disk_space(_auth=auth, session=session))
         return result
 
@@ -74,6 +76,19 @@ class DiskSpaceResponseTests(unittest.TestCase):
         free_bytes = int(15.75 * 1024 ** 3)
         result = self._make_endpoint(free_bytes=free_bytes, min_free_gb=25)
         self.assertEqual(result["disk_free_gb"], round(15.75, 1))
+
+    def test_missing_folder_returns_not_available(self):
+        result = self._make_endpoint(free_bytes=50 * 1024 ** 3, min_free_gb=25, folder_exists=False)
+        self.assertFalse(result["available"])
+        self.assertIsNone(result["disk_free_bytes"])
+        self.assertIsNone(result["disk_free_gb"])
+        self.assertFalse(result["is_low"])
+
+    def test_no_app_settings_uses_defaults(self):
+        result = self._make_endpoint(free_bytes=50 * 1024 ** 3, min_free_gb=0, app_settings_none=True)
+        self.assertEqual(result["min_free_space_gb"], 25)
+        self.assertIn("disk_free_gb", result)
+        self.assertTrue(result["available"])
 
 
 if __name__ == "__main__":

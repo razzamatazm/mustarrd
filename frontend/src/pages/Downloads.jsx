@@ -525,13 +525,14 @@ export default function Downloads() {
         <Title order={2}>Downloads</Title>
         {diskSpace && (
           <Badge
-            color={diskSpace.is_low ? 'red' : 'gray'}
-            variant={diskSpace.is_low ? 'filled' : 'light'}
+            color={diskSpace.available === false ? 'orange' : diskSpace.is_low ? 'red' : 'gray'}
+            variant={diskSpace.available === false || diskSpace.is_low ? 'filled' : 'light'}
             leftSection={<IconDatabase size={12} />}
             size="lg"
           >
-            {diskSpace.disk_free_gb} GB free
-            {diskSpace.is_low ? ': Low disk space' : ''}
+            {diskSpace.available === false
+              ? 'Recording drive not found'
+              : `${diskSpace.disk_free_gb} GB free${diskSpace.is_low ? ': Low disk space' : ''}`}
           </Badge>
         )}
       </Group>
