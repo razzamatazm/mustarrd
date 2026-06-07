@@ -140,11 +140,11 @@ function ScheduleCard({
         </Group>
 
         <Text size="xs" c="dimmed">
-          Airs: {startTime || 'Unknown'} - {endTime || 'Unknown'} ({formatDuration(totalDuration)})
+          Airs: {startTime || 'Unknown'} - {endTime || 'Unknown'} ({formatDuration(schedule.duration_minutes || 0)})
         </Text>
 
         <Text size="xs" c="dimmed">
-          Download starts: {availableAt || 'Unknown'}
+          Download starts: {availableAt || 'Unknown'} ({formatDuration(totalDuration)} recording)
         </Text>
 
         {schedule.status_message && (
