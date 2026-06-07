@@ -190,14 +190,12 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
           <Badge variant="outline" size="sm" color="blue">
             Catchup: up to {catchupSummary.maxDays} days
           </Badge>
-        ) : (
-          <Badge variant="outline" size="sm" color="gray">
-            Catchup: none reported
+        ) : null}
+        {Number(account?.guide_offset_hours || 0) !== 0 && (
+          <Badge variant="light" size="sm" color="grape">
+            {getGuideOffsetLabel(account)}
           </Badge>
         )}
-        <Badge variant="light" size="sm" color="grape">
-          {getGuideOffsetLabel(account)}
-        </Badge>
         {account.max_connections && (
           <Badge variant="outline" size="sm">
             {account.active_connections || 0}/{account.max_connections} connections
