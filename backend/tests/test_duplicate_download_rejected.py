@@ -13,6 +13,7 @@ matching account_id, channel_id, start_timestamp, stop_timestamp and returns 409
 import asyncio
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,7 +22,11 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from fastapi import HTTPException
-from models import DownloadStatus
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+from database import Base
+from models import Download, DownloadStatus
 
 
 def _make_download(account_id=1, channel_id="ch1", start_ts=1000, stop_ts=2000):
@@ -155,6 +160,108 @@ class DuplicateDownloadTests(unittest.TestCase):
         """FAILED download is terminal: re-requesting is allowed."""
         result = _call_create_download(existing_download=None)
         self.assertEqual(result["id"], 1)
+
+
+class DuplicateDownloadQueryTests(unittest.IsolatedAsyncioTestCase):
+    """Integration tests: run the real duplicate-check SQL against in-memory SQLite.
+
+    Cleo review feedback: mock-only tests never exercise the actual WHERE clause.
+    These tests seed real Download rows and run the same query used in create_download.
+    """
+
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    _active_statuses = [
+        DownloadStatus.PENDING.value,
+        DownloadStatus.DOWNLOADING.value,
+        DownloadStatus.PROCESSING.value,
+    ]
+
+    def _make_row(self, status, account_id=1, channel_id="ch1", start_ts=1000, stop_ts=2000):
+        return Download(
+            account_id=account_id,
+            channel_id=channel_id,
+            channel_name="Test Channel",
+            program_title="Show",
+            program_start=datetime(2024, 1, 1, 20, 0),
+            program_end=datetime(2024, 1, 1, 21, 0),
+            start_timestamp=start_ts,
+            stop_timestamp=stop_ts,
+            duration_minutes=60,
+            source_url="http://provider.test/ts",
+            output_path="/downloads/show.ts",
+            status=status,
+        )
+
+    async def _run_query(self, session, account_id=1, channel_id="ch1", start_ts=1000, stop_ts=2000):
+        result = await session.execute(
+            select(Download.id).where(
+                Download.account_id == account_id,
+                Download.channel_id == channel_id,
+                Download.start_timestamp == start_ts,
+                Download.stop_timestamp == stop_ts,
+                Download.status.in_(self._active_statuses),
+            ).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def test_pending_row_found(self):
+        """Real query returns an ID when a matching PENDING row exists."""
+        async with self.session_factory() as session:
+            session.add(self._make_row(DownloadStatus.PENDING.value))
+            await session.commit()
+        async with self.session_factory() as session:
+            found = await self._run_query(session)
+        self.assertIsNotNone(found)
+
+    async def test_two_active_rows_does_not_raise(self):
+        """Two identical active rows (corrupted state) must not raise.
+
+        Before fix: select(Download) without limit(1) raised MultipleResultsFound
+        on scalar_one_or_none(), returning HTTP 500 instead of 409.
+        After fix: limit(1) ensures at most one row is returned.
+        """
+        async with self.session_factory() as session:
+            session.add(self._make_row(DownloadStatus.PENDING.value))
+            session.add(self._make_row(DownloadStatus.DOWNLOADING.value))
+            await session.commit()
+        async with self.session_factory() as session:
+            found = await self._run_query(session)
+        self.assertIsNotNone(found)
+
+    async def test_completed_row_not_matched(self):
+        """COMPLETED is terminal: the real WHERE clause excludes it, returns None."""
+        async with self.session_factory() as session:
+            session.add(self._make_row(DownloadStatus.COMPLETED.value))
+            await session.commit()
+        async with self.session_factory() as session:
+            found = await self._run_query(session)
+        self.assertIsNone(found)
+
+    async def test_failed_row_not_matched(self):
+        """FAILED is terminal: the real WHERE clause excludes it, returns None."""
+        async with self.session_factory() as session:
+            session.add(self._make_row(DownloadStatus.FAILED.value))
+            await session.commit()
+        async with self.session_factory() as session:
+            found = await self._run_query(session)
+        self.assertIsNone(found)
+
+    async def test_different_channel_not_matched(self):
+        """Active row for a different channel does not block the new request."""
+        async with self.session_factory() as session:
+            session.add(self._make_row(DownloadStatus.PENDING.value, channel_id="other"))
+            await session.commit()
+        async with self.session_factory() as session:
+            found = await self._run_query(session)
+        self.assertIsNone(found)
 
 
 if __name__ == "__main__":

@@ -373,13 +373,13 @@ async def create_download(
         DownloadStatus.PROCESSING.value,
     ]
     _dup = await session.execute(
-        select(Download).where(
+        select(Download.id).where(
             Download.account_id == download.account_id,
             Download.channel_id == download.channel_id,
             Download.start_timestamp == download.start_timestamp,
             Download.stop_timestamp == download.stop_timestamp,
             Download.status.in_(_active),
-        )
+        ).limit(1)
     )
     if _dup.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="A download for this program is already active.")
