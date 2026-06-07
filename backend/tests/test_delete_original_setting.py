@@ -56,9 +56,9 @@ class DeleteOriginalSettingTests(unittest.TestCase):
         original, completed = self._make_files("Show S01E01.ts", "Show S01E01.mkv")
 
         # Simulate the call from _execute_post_process with delete_original=False.
-        # The current signature is _cleanup_working_files(original, completed, keep_logs).
-        # There is no way to pass delete_original=False at all — the parameter does not exist.
-        self.dm._cleanup_working_files(original, completed, keep_logs=False)
+        # After the fix adds the parameter, this call must preserve the original.
+        # Currently FAILS because the parameter does not exist and cleanup always deletes.
+        self.dm._cleanup_working_files(original, completed, keep_logs=False, delete_original=False)
 
         self.assertTrue(
             os.path.exists(original),
