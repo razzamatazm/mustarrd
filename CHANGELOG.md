@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Downloading from Browse now checks available disk space before starting
+
+**What you would notice:** Settings lets you configure a minimum free disk space threshold (default 25 GB). That limit protected scheduled recordings but was ignored for manual downloads you started by clicking Download in Browse. If your disk was nearly full, the download would start, run until your storage ran out, leave a partial file behind, and show a cryptic error like "No space left on device." Now Browse checks free space before queuing the download. If there is not enough room, you see a clear message straight away: "Not enough disk space to start this download. 5.0 GB free, 25 GB required." No partial file is written.
+
+**What changed:** The manual download endpoint now performs the same free-space check that scheduled recordings already used, and returns a clear error instead of letting the download fail mid-transfer.
+
+---
+
 ### Fixed: Enabling ComSkip can no longer be silently undone by a second settings change
 
 **What you would notice:** ComSkip requires transcoding to be on and remux-only mode to be off in order to cut commercials. Previously, if you made two separate settings changes, for example first enabling ComSkip and then separately disabling transcoding, Mustarrd would save the invalid combination without warning. ComSkip would run and mark the commercial segments, but the file would not actually be cut, leaving all commercials in the final recording with no error message. Both settings are now kept consistent: if ComSkip is on, transcoding stays on and remux-only stays off, no matter the order of your changes.
