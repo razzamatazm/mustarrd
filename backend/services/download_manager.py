@@ -465,7 +465,13 @@ class DownloadManager:
 
                     download.status = DownloadStatus.PENDING.value
                     download.progress = 0.0
-                    download.downloaded_bytes = 0
+                    if download.file_size == 0 and input_file.is_file():
+                        try:
+                            download.downloaded_bytes = input_file.stat().st_size
+                        except Exception:
+                            download.downloaded_bytes = 0
+                    else:
+                        download.downloaded_bytes = 0
                     download.file_size = 0
                     download.error_message = None
                     recovered_download_ids.append(download.id)
