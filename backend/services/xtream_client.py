@@ -1,7 +1,7 @@
 import aiohttp
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urljoin, urlencode
+from urllib.parse import urljoin, urlencode, quote
 
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
@@ -164,18 +164,26 @@ class XtreamClient:
         """
         raw_provider_start = (provider_start or "").strip()
         date_str = raw_provider_start or start_time.strftime("%Y-%m-%d:%H-%M")
-        return f"{self.server_url}/timeshift/{self.username}/{self.password}/{duration_minutes}/{date_str}/{stream_id}.ts"
+        u = quote(self.username, safe="")
+        p = quote(self.password, safe="")
+        return f"{self.server_url}/timeshift/{u}/{p}/{duration_minutes}/{date_str}/{stream_id}.ts"
 
     def build_stream_url(self, stream_id: str, extension: str = "ts") -> str:
         """Build live stream URL."""
-        return f"{self.server_url}/live/{self.username}/{self.password}/{stream_id}.{extension}"
+        u = quote(self.username, safe="")
+        p = quote(self.password, safe="")
+        return f"{self.server_url}/live/{u}/{p}/{stream_id}.{extension}"
 
     def build_vod_url(self, vod_id: str, extension: Optional[str] = None) -> str:
         """Build VOD movie URL."""
         ext = (extension or "mp4").lstrip(".") or "mp4"
-        return f"{self.server_url}/movie/{self.username}/{self.password}/{vod_id}.{ext}"
+        u = quote(self.username, safe="")
+        p = quote(self.password, safe="")
+        return f"{self.server_url}/movie/{u}/{p}/{vod_id}.{ext}"
 
     def build_series_url(self, episode_id: str, extension: Optional[str] = None) -> str:
         """Build VOD series episode URL."""
         ext = (extension or "mp4").lstrip(".") or "mp4"
-        return f"{self.server_url}/series/{self.username}/{self.password}/{episode_id}.{ext}"
+        u = quote(self.username, safe="")
+        p = quote(self.password, safe="")
+        return f"{self.server_url}/series/{u}/{p}/{episode_id}.{ext}"
