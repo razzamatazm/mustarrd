@@ -14,6 +14,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: ComSkip failures now mark the recording as Failed instead of saving it full of commercials
+
+**What you would notice:** If ComSkip ran into an unexpected error while processing a recording (for example, if the binary crashed, a file was unreadable, or an internal error occurred), Mustarrd was silently ignoring the error and saving the file anyway with all commercials still included. The download would show as Completed with no indication that commercial removal had failed. Now, if ComSkip fails unexpectedly, the recording is marked as Failed and shows a clear error message, so you know to check what went wrong.
+
+**What changed:** An error-handling block in post-processing that was swallowing ComSkip exceptions now lets them through so the download is correctly marked as Failed instead of silently completing with commercials intact.
+
+---
+
+### Fixed: Scheduled recordings on non-UTC servers now store the correct times
+
+**What you would notice:** If your Unraid server or host machine is set to a timezone other than UTC (for example, US/Eastern, Europe/London, or Australia/Sydney), scheduled recordings could fail before the program had even aired. Mustarrd would calculate a start time that was off by your UTC offset and decide the catchup window had already passed. The scheduler would mark those recordings as Failed with a "catchup window has passed" message even for shows scheduled in the future. This is now fixed.
+
+**What changed:** Two corrections were made to how recording times are stored. A fallback path was reading the server's local clock without converting to UTC, causing times to be wrong on non-UTC servers by the server's timezone offset. Timestamps sent as an empty or non-numeric value by some providers are also now handled correctly.
+
+---
+
+### Fixed: ComSkip temporary files left behind on channels with brackets in the name
+
+**What you would notice:** If your provider uses channel names containing square brackets, such as [BBC One HD] or [Sky Sports], temporary files created by ComSkip during commercial removal were not being cleaned up after the recording finished. These small files (.edl, .log, and similar) would accumulate quietly in your downloads folder over time. The cleanup now works correctly for all channel names.
+
+**What changed:** The file cleanup step was treating square brackets in channel names as a pattern wildcard instead of literal characters. It now escapes them so the correct files are matched and deleted.
+
+---
+
+### Fixed: Program guide no longer fails on a specific kind of corrupt data from some providers
+
+**What you would notice:** A previous update made Mustarrd resilient to corrupt guide data from your provider, but one narrow case could still cause the guide refresh to fail silently and leave your program listings stale. This happened when a provider's server restarted mid-response or a network proxy injected an error page into a compressed data stream. The guide now handles this case the same way it handles other corrupt responses and continues refreshing on the next scheduled cycle.
+
+**What changed:** An additional error type that Python raises for gzip data with a valid start but corrupt body is now caught alongside the cases handled by the earlier fix.
+
+---
+
 ### Fixed: Downloading from Browse now checks available disk space before starting
 
 **What you would notice:** Settings lets you configure a minimum free disk space threshold (default 25 GB). That limit protected scheduled recordings but was ignored for manual downloads you started by clicking Download in Browse. If your disk was nearly full, the download would start, run until your storage ran out, leave a partial file behind, and show a cryptic error like "No space left on device." Now Browse checks free space before queuing the download. If there is not enough room, you see a clear message straight away: "Not enough disk space to start this download. 5.0 GB free, 25 GB required." No partial file is written.
