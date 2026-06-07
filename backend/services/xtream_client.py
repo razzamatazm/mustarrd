@@ -103,7 +103,8 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get VOD categories: HTTP {response.status}")
-            return await response.json(content_type=None)
+            data = await response.json(content_type=None)
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_vod_streams(self, category_id: Optional[str] = None) -> list:
         """Get VOD (movies) streams."""
@@ -112,7 +113,8 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get VOD streams: HTTP {response.status}")
-            return await response.json(content_type=None)
+            data = await response.json(content_type=None)
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_vod_info(self, vod_id: str) -> dict:
         """Get VOD (movie) details."""
@@ -130,7 +132,8 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get series categories: HTTP {response.status}")
-            return await response.json(content_type=None)
+            data = await response.json(content_type=None)
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_series(self, category_id: Optional[str] = None) -> list:
         """Get series list."""
@@ -139,7 +142,8 @@ class XtreamClient:
         async with session.get(url, timeout=VOD_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get series: HTTP {response.status}")
-            return await response.json(content_type=None)
+            data = await response.json(content_type=None)
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_series_info(self, series_id: str) -> dict:
         """Get series details (seasons + episodes)."""
