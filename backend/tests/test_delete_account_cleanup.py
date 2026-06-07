@@ -80,11 +80,13 @@ class DeleteAccountScheduleCleanupTests(unittest.IsolatedAsyncioTestCase):
             _scalar_one(app_settings),
             _scalar_list(schedules),
             _scalar_list(active_downloads),
+            AsyncMock(),  # delete(EPGProgram)
         ])
 
         with patch("api.accounts.download_manager") as mock_dm:
-            mock_dm.cancel_download = AsyncMock()
-            result = await delete_account(account.id, None, session)
+            with patch("api.accounts.epg_service"):
+                mock_dm.cancel_download = AsyncMock()
+                result = await delete_account(account.id, None, session)
 
         return session, mock_dm, result
 

@@ -124,11 +124,13 @@ class DefaultAccountSettingsTests(unittest.IsolatedAsyncioTestCase):
                 _ScalarResult(app_settings),
                 _empty_list,
                 _empty_list,
+                AsyncMock(),  # delete(EPGProgram)
             ]
         )
 
         with patch("api.accounts.download_manager"):
-            result = await delete_account(5, None, session)
+            with patch("api.accounts.epg_service"):
+                result = await delete_account(5, None, session)
 
         self.assertIsNone(app_settings.default_account_id)
         self.assertEqual(result, {"status": "deleted"})
