@@ -20,6 +20,7 @@ from auth import (
 from config import settings
 from database import get_session
 from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
+from services.disk_space import check_disk_space
 from services.download_manager import download_manager
 from services.file_namer import file_namer
 from services.epg_service import epg_service
@@ -367,30 +368,7 @@ async def create_download(
 
     # Scheduled recordings check free space in scheduled_manager; ad-hoc downloads
     # must enforce the same guard here or the threshold is silently bypassed.
-    settings_result = await session.execute(select(AppSettings))
-    app_settings_row = settings_result.scalar_one_or_none()
-    download_folder = (
-        app_settings_row.download_folder
-        if app_settings_row and app_settings_row.download_folder
-        else settings.default_download_folder
-    )
-    min_free_gb = (
-        app_settings_row.min_free_space_gb
-        if app_settings_row and app_settings_row.min_free_space_gb is not None
-        else 25
-    )
-    if min_free_gb and min_free_gb > 0 and await asyncio.to_thread(os.path.exists, download_folder):
-        usage = await asyncio.to_thread(shutil.disk_usage, download_folder)
-        free_gb = usage.free / (1024 ** 3)
-        if free_gb < min_free_gb:
-            raise HTTPException(
-                status_code=507,
-                detail=(
-                    f"Not enough disk space to start this download. "
-                    f"{free_gb:.1f} GB free, {min_free_gb} GB required. "
-                    f"Free up space or lower the minimum free space setting."
-                ),
-            )
+    await check_disk_space(session)
 
     # Queue the download
     download = await download_manager.queue_download(download)

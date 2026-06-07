@@ -72,8 +72,8 @@ def _call_create_download(free_bytes, min_free_gb=25, folder_exists=True):
     disk_result.free = free_bytes
 
     with patch("api.downloads.build_download_from_program", new=AsyncMock(return_value=_make_fake_download())), \
-         patch("api.downloads.shutil.disk_usage", return_value=disk_result), \
-         patch("api.downloads.os.path.exists", return_value=folder_exists), \
+         patch("services.disk_space.shutil.disk_usage", return_value=disk_result), \
+         patch("services.disk_space.os.path.exists", return_value=folder_exists), \
          patch("api.downloads.download_manager.queue_download", new=AsyncMock(return_value=_make_fake_download())), \
          patch("api.downloads._attach_requested_by", new=AsyncMock(return_value=[{"id": 1}])):
         return asyncio.run(
