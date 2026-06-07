@@ -32,6 +32,26 @@ def _make_stale_schedule(hours_ago: int = 48) -> ScheduledRecording:
     )
 
 
+def _make_schedule_with_padding(post_padding_minutes: int, stop_offset_seconds: int) -> ScheduledRecording:
+    """Create a schedule whose program ended `stop_offset_seconds` seconds ago with post-padding."""
+    now = datetime.now(timezone.utc)
+    end = now - timedelta(seconds=stop_offset_seconds)
+    start = end - timedelta(hours=1)
+    return ScheduledRecording(
+        account_id=1,
+        channel_id="103",
+        channel_name="Test Channel",
+        program_title="Padded Show",
+        program_start=start.replace(tzinfo=None),
+        program_end=end.replace(tzinfo=None),
+        start_timestamp=int(start.timestamp()),
+        stop_timestamp=int(end.timestamp()),
+        duration_minutes=60,
+        post_padding_minutes=post_padding_minutes,
+        status=ScheduledStatus.SCHEDULED.value,
+    )
+
+
 def _make_recent_schedule(minutes_ago: int = 5) -> ScheduledRecording:
     now = datetime.now(timezone.utc)
     end = now - timedelta(minutes=minutes_ago)
@@ -162,6 +182,26 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
             schedule.status_message.lower(),
             "status_message must explain the catchup window, not a raw provider error.",
         )
+
+    async def test_post_padding_does_not_rescue_expired_recording(self):
+        """post_padding must not push an expired recording back inside the catchup window.
+
+        Program ended 1 day + 1 second ago (expired on a 1-day window). With 30 minutes
+        of post-padding, available_at falls just inside the boundary — but the program
+        itself is expired and must be marked FAILED, not dispatched.
+        """
+        archive_days = 1
+        # Program ended 1 second past the archive boundary
+        stop_offset = int(timedelta(days=archive_days).total_seconds()) + 1
+        schedule = _make_schedule_with_padding(post_padding_minutes=30, stop_offset_seconds=stop_offset)
+        dispatched = await self._run_queue(schedule, archive_days=archive_days)
+
+        self.assertEqual(
+            dispatched,
+            [],
+            "Expired recording must not dispatch even when post_padding shifts available_at inside the window.",
+        )
+        self.assertEqual(schedule.status, ScheduledStatus.FAILED.value)
 
     async def test_recent_schedule_still_dispatched(self):
         """Sanity: a schedule whose show ended 5 minutes ago must still fire."""

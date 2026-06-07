@@ -65,8 +65,9 @@ class ScheduledManager:
                 if available_at <= now_utc:
                     archive_days = await self._get_catchup_window_days(session, schedule)
                     catchup_expiry = now_utc - timedelta(days=archive_days)
-                    if available_at <= catchup_expiry:
-                        age = now_utc - available_at
+                    program_end_utc = available_at - timedelta(minutes=int(schedule.post_padding_minutes or 0))
+                    if program_end_utc <= catchup_expiry:
+                        age = now_utc - program_end_utc
                         total_hours = int(age.total_seconds() / 3600)
                         age_str = f"about {age.days} days" if age.days >= 2 else f"about {total_hours} hours"
                         schedule.status = ScheduledStatus.FAILED.value
