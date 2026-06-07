@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Scheduled recordings no longer get stuck showing "Failed" after a successful retry
+
+**What you would notice:** If a download briefly failed and then automatically retried and finished successfully, the Schedules page could still show the recording as permanently Failed, with no way to clear it. Reloading the page would not help. The recording was actually fine on disk, but the status display was wrong and would stay wrong forever.
+
+**What changed:** Loading the Schedules page was secretly writing the download status back to the database on every page load. If you happened to load the page during the brief window between a failure and a successful retry, the failure was permanently stamped onto the schedule record. The Schedules page now only reads data. The schedule status is updated correctly by the download process itself when a recording finishes, fails, or is cancelled.
+
+---
+
 ### Improved: Downloads history has a new "Clear finished" button
 
 **What you would notice:** There is now a "Clear finished" button on the Downloads page. Clicking it removes all completed and failed entries from the history list in one step, after a confirmation prompt to prevent accidents. Cancelled entries stay in the list in case you want to retry them.
