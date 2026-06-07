@@ -2,13 +2,14 @@ import asyncio
 import mimetypes
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, conint
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete as sql_delete
+from sqlalchemy import func, select, delete as sql_delete
 from typing import Optional
 
 from auth import (
@@ -185,6 +186,23 @@ async def _attach_requested_by(
             }
         )
     return rows
+
+
+@router.get("/failed-count")
+async def get_failed_download_count(
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+    since: Optional[float] = Query(default=None),
+):
+    """Count permanently failed downloads since a given Unix timestamp in milliseconds."""
+    query = select(func.count()).select_from(Download).where(Download.status == DownloadStatus.FAILED.value)
+    if not auth.is_admin:
+        query = query.where(Download.requested_by_user_id == auth.user_id)
+    if since is not None:
+        cutoff = datetime.utcfromtimestamp(since / 1000.0)
+        query = query.where(Download.created_at >= cutoff)
+    result = await session.execute(query)
+    return {"count": result.scalar() or 0}
 
 
 @router.get("")

@@ -364,6 +364,11 @@ export default function Downloads() {
   })
 
   useEffect(() => {
+    localStorage.setItem('mustarrd_downloads_visited', String(Date.now()))
+    queryClient.invalidateQueries({ queryKey: ['downloads', 'failed-count'] })
+  }, [queryClient])
+
+  useEffect(() => {
     const ws = createDownloadWebSocket((data) => {
       if (data.type === 'progress') {
         setLocalProgress((prev) => ({

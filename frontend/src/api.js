@@ -128,6 +128,10 @@ export const downloadsApi = {
   previewFilename: (data) => request('/downloads/preview-filename', { method: 'POST', body: data }),
   diskSpace: () => request('/downloads/disk-space'),
   clearFinished: () => request('/downloads/finished', { method: 'DELETE' }),
+  failedCount: (since) => {
+    const params = since != null ? `?since=${since}` : ''
+    return request(`/downloads/failed-count${params}`)
+  },
 }
 
 // Schedules

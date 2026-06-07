@@ -104,6 +104,18 @@ function App() {
     enabled: Boolean(authStatus?.authenticated),
   })
 
+  // Fetch failed download count for nav badge (clears when user visits Downloads)
+  const { data: failedCountData } = useQuery({
+    queryKey: ['downloads', 'failed-count'],
+    queryFn: () => {
+      const since = localStorage.getItem('mustarrd_downloads_visited')
+      return downloadsApi.failedCount(since ? Number(since) : null)
+    },
+    refetchInterval: 60000,
+    enabled: Boolean(authStatus?.authenticated),
+  })
+  const failedDownloadsCount = failedCountData?.count ?? 0
+
   const { data: epgStatus } = useQuery({
     queryKey: ['epg', 'status'],
     queryFn: epgApi.status,
@@ -290,6 +302,7 @@ function App() {
       label: 'Downloads',
       to: '/downloads',
       badge: activeDownloads > 0 ? activeDownloads : null,
+      failedBadge: failedDownloadsCount > 0 ? failedDownloadsCount : null,
       authOnly: true,
     },
     { icon: IconCalendar, label: 'Scheduled', to: '/scheduled', authOnly: true },
@@ -385,25 +398,49 @@ function App() {
               label={item.label}
               leftSection={<item.icon size={20} />}
               rightSection={
-                item.badge ? (
-                  <Box
-                    style={{
-                      minWidth: 20,
-                      height: 20,
-                      borderRadius: '50%',
-                      background: '#f59f00',
-                      color: '#1a1b1e',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      lineHeight: 1,
-                      padding: '0 5px',
-                    }}
-                  >
-                    {item.badge}
-                  </Box>
+                (item.badge || item.failedBadge) ? (
+                  <Group gap={4} wrap="nowrap">
+                    {item.failedBadge ? (
+                      <Box
+                        style={{
+                          minWidth: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          background: '#fa5252',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          padding: '0 5px',
+                        }}
+                      >
+                        {item.failedBadge}
+                      </Box>
+                    ) : null}
+                    {item.badge ? (
+                      <Box
+                        style={{
+                          minWidth: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          background: '#f59f00',
+                          color: '#1a1b1e',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          padding: '0 5px',
+                        }}
+                      >
+                        {item.badge}
+                      </Box>
+                    ) : null}
+                  </Group>
                 ) : null
               }
               style={{ borderRadius: 8, marginBottom: 4 }}
