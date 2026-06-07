@@ -11,7 +11,7 @@ Mustarrd connects to your IPTV provider and lets you download past programs. Thi
 
 - **Browse past programs:** scroll back through your provider's program guide (EPG) and see what's available to download
 - **Commercial skip:** ComSkip integration removes commercials before saving
-- **Remux to MKV:** TS playback sucks. MKV is a much easier container to skip through
+- **Flexible output formats:** save recordings as-is (.ts), remux to MKV or MP4, or re-encode with FFmpeg for smaller files
 - **Download from On Demand:** If your provider provides on demand listings, you can grab those too!
 - **Scheduled recordings:** set programs to download automatically when they air
 - **Smart file naming:** TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
