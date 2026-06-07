@@ -54,23 +54,15 @@ class LiveEPGHasArchiveFallbackTests(unittest.TestCase):
             e["has_archive"] = has_archive
         return e
 
-    def test_missing_has_archive_defaults_false(self):
-        """
-        BUG: When the provider omits has_archive from EPG entries, _process_epg_entry
-        returns has_archive=False. For a channel with tv_archive=1 this is wrong:
-        missing should fall back to True so get_past_programs does not silently
-        discard every program on the Catchup page.
+    def test_missing_has_archive_uses_channel_fallback(self):
+        """When provider omits has_archive, has_archive_fallback=True propagates through."""
+        result = self.svc._process_epg_entry(self._entry(), has_archive_fallback=True)
+        self.assertTrue(result["has_archive"])
 
-        This assertion documents the broken current behavior and is expected to FAIL
-        until _process_epg_entry accepts a has_archive_fallback parameter and
-        callers on archive channels pass has_archive_fallback=True.
-        """
+    def test_missing_has_archive_defaults_false_without_fallback(self):
+        """Without a fallback, absent has_archive still defaults to False."""
         result = self.svc._process_epg_entry(self._entry())
-        self.assertTrue(
-            result["has_archive"],
-            "has_archive should default True for archive channels when the field is absent; "
-            "currently defaults False, causing silent empty Catchup pages",
-        )
+        self.assertFalse(result["has_archive"])
 
     def test_explicit_zero_stays_false(self):
         """Explicit has_archive=0 must still produce False (provider said no)."""
