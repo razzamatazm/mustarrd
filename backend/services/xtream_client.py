@@ -166,24 +166,28 @@ class XtreamClient:
         date_str = raw_provider_start or start_time.strftime("%Y-%m-%d:%H-%M")
         u = quote(self.username, safe="")
         p = quote(self.password, safe="")
-        return f"{self.server_url}/timeshift/{u}/{p}/{duration_minutes}/{date_str}/{stream_id}.ts"
+        sid = quote(str(stream_id), safe="")
+        return f"{self.server_url}/timeshift/{u}/{p}/{duration_minutes}/{date_str}/{sid}.ts"
 
     def build_stream_url(self, stream_id: str, extension: str = "ts") -> str:
         """Build live stream URL."""
         u = quote(self.username, safe="")
         p = quote(self.password, safe="")
-        return f"{self.server_url}/live/{u}/{p}/{stream_id}.{extension}"
+        sid = quote(str(stream_id), safe="")
+        return f"{self.server_url}/live/{u}/{p}/{sid}.{extension}"
 
     def build_vod_url(self, vod_id: str, extension: Optional[str] = None) -> str:
         """Build VOD movie URL."""
         ext = (extension or "mp4").lstrip(".") or "mp4"
         u = quote(self.username, safe="")
         p = quote(self.password, safe="")
-        return f"{self.server_url}/movie/{u}/{p}/{vod_id}.{ext}"
+        vid = quote(str(vod_id), safe="")
+        return f"{self.server_url}/movie/{u}/{p}/{vid}.{ext}"
 
     def build_series_url(self, episode_id: str, extension: Optional[str] = None) -> str:
         """Build VOD series episode URL."""
         ext = (extension or "mp4").lstrip(".") or "mp4"
         u = quote(self.username, safe="")
         p = quote(self.password, safe="")
-        return f"{self.server_url}/series/{u}/{p}/{episode_id}.{ext}"
+        eid = quote(str(episode_id), safe="")
+        return f"{self.server_url}/series/{u}/{p}/{eid}.{ext}"

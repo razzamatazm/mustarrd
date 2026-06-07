@@ -59,6 +59,29 @@ class PathUrlEncodingTests(unittest.TestCase):
         url = self._client(username="my user").build_vod_url("10")
         self.assertIn("%20", url)
 
+    # --- slash in stream/vod/episode ID ---
+
+    def test_slash_in_stream_id_encoded(self):
+        url = self._client().build_stream_url("123/456")
+        self.assertIn("%2F", url)
+        # encoded id sits between the two surrounding slashes
+        self.assertIn("/123%2F456.ts", url)
+
+    def test_slash_in_timeshift_stream_id_encoded(self):
+        url = self._client().build_timeshift_url("123/456", self._ts(), 60)
+        self.assertIn("%2F", url)
+        self.assertIn("/123%2F456.ts", url)
+
+    def test_slash_in_vod_id_encoded(self):
+        url = self._client().build_vod_url("123/456")
+        self.assertIn("%2F", url)
+        self.assertIn("/123%2F456.mp4", url)
+
+    def test_slash_in_series_id_encoded(self):
+        url = self._client().build_series_url("123/456", "mkv")
+        self.assertIn("%2F", url)
+        self.assertIn("/123%2F456.mkv", url)
+
     # --- normal credentials pass through intact ---
 
     def test_normal_credentials_unchanged(self):
