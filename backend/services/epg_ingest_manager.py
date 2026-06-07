@@ -210,12 +210,7 @@ class EPGIngestManager:
                         for stream_id, info in channel_maps["stream_info"].items():
                             archive_days = int(info.get("archive_days") or 0)
                             if archive_days <= 0:
-                                await session.execute(
-                                    delete(EPGProgram).where(
-                                        EPGProgram.account_id == account.id,
-                                        EPGProgram.channel_id == stream_id,
-                                    )
-                                )
+                                # archive window unknown: preserve existing rows
                                 continue
                             channel_cutoff = now_utc - timedelta(days=archive_days)
                             await session.execute(
@@ -440,13 +435,11 @@ class EPGIngestManager:
             start_utc = start_dt.astimezone(timezone.utc)
             end_utc = end_dt.astimezone(timezone.utc)
             archive_days = int(stream_info[stream_id].get("archive_days") or 0)
-            if archive_days <= 0:
-                elem.clear()
-                continue
-            channel_cutoff = now_utc - timedelta(days=archive_days)
-            if end_utc < channel_cutoff:
-                elem.clear()
-                continue
+            if archive_days > 0:
+                channel_cutoff = now_utc - timedelta(days=archive_days)
+                if end_utc < channel_cutoff:
+                    elem.clear()
+                    continue
 
             duration_minutes = int((end_utc - start_utc).total_seconds() / 60)
             if duration_minutes <= 0:
