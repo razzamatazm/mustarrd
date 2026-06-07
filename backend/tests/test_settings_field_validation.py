@@ -160,5 +160,79 @@ class DefaultPaddingValidationTests(unittest.TestCase):
         self.assertIsNone(m.default_post_padding_minutes)
 
 
+class DefaultPaddingNormalizationTests(unittest.IsolatedAsyncioTestCase):
+    """Stored negative padding must be coerced to the default at GET time.
+
+    Before fix: the normalization only caught None; a negative stored via the old
+    (unvalidated) API passed through unchanged.  Because SettingsUpdate now requires
+    ge=0, the UI would read the negative, post it back, and receive a 422, locking
+    the operator out of the settings page entirely.
+    After fix: the condition also catches values < 0 and resets pre to 1, post to 5.
+    """
+
+    def _make_session(self, settings):
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_ScalarResult(settings))
+        return session
+
+    def _fake_config_dir(self):
+        fake = MagicMock()
+        fake.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
+        return fake
+
+    async def _call_get_settings(self, settings):
+        session = self._make_session(settings)
+        with patch("api.settings.is_docker_env", return_value=False), \
+             patch("api.settings.is_desktop_env", return_value=False), \
+             patch("api.settings.ensure_config_files", return_value=self._fake_config_dir()):
+            return await get_settings(None, session)
+
+    async def test_negative_pre_padding_normalizes_to_1(self):
+        settings = AppSettings()
+        settings.download_folder = "/downloads"
+        settings.completed_folder = "/completed"
+        settings.default_pre_padding_minutes = -5
+
+        result = await self._call_get_settings(settings)
+
+        self.assertEqual(settings.default_pre_padding_minutes, 1)
+        self.assertEqual(result["default_pre_padding_minutes"], 1)
+
+    async def test_negative_post_padding_normalizes_to_5(self):
+        settings = AppSettings()
+        settings.download_folder = "/downloads"
+        settings.completed_folder = "/completed"
+        settings.default_post_padding_minutes = -3
+
+        result = await self._call_get_settings(settings)
+
+        self.assertEqual(settings.default_post_padding_minutes, 5)
+        self.assertEqual(result["default_post_padding_minutes"], 5)
+
+    async def test_valid_padding_not_overwritten(self):
+        settings = AppSettings()
+        settings.download_folder = "/downloads"
+        settings.completed_folder = "/completed"
+        settings.default_pre_padding_minutes = 2
+        settings.default_post_padding_minutes = 10
+
+        result = await self._call_get_settings(settings)
+
+        self.assertEqual(result["default_pre_padding_minutes"], 2)
+        self.assertEqual(result["default_post_padding_minutes"], 10)
+
+    async def test_zero_padding_not_overwritten(self):
+        settings = AppSettings()
+        settings.download_folder = "/downloads"
+        settings.completed_folder = "/completed"
+        settings.default_pre_padding_minutes = 0
+        settings.default_post_padding_minutes = 0
+
+        result = await self._call_get_settings(settings)
+
+        self.assertEqual(result["default_pre_padding_minutes"], 0)
+        self.assertEqual(result["default_post_padding_minutes"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
