@@ -6,6 +6,54 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Enabling ComSkip can no longer be silently undone by a second settings change
+
+**What you would notice:** ComSkip requires transcoding to be on and remux-only mode to be off in order to cut commercials. Previously, if you made two separate settings changes, for example first enabling ComSkip and then separately disabling transcoding, Mustarrd would save the invalid combination without warning. ComSkip would run and mark the commercial segments, but the file would not actually be cut, leaving all commercials in the final recording with no error message. Both settings are now kept consistent: if ComSkip is on, transcoding stays on and remux-only stays off, no matter the order of your changes.
+
+**What changed:** The settings enforcement now checks the full final state after all changes are applied, not just the fields in the current request.
+
+---
+
+### Improved: Scheduled recording cards now have clearer time labels
+
+**What you would notice:** On the Scheduled Recordings page, each recording card used to show "Slot" and "Expected start" for the time fields, which were confusing. "Slot" is internal jargon, and there was a duplicate time line on the card. The times are now labeled clearly: "Airs: [start time] - [end time] ([show duration])" shows when the program airs, and "Download starts: [time] ([recording duration])" shows when Mustarrd will begin downloading, including any padding you set.
+
+**What changed:** Two time labels on schedule cards were rewritten and one duplicate line was removed.
+
+---
+
+### Fixed: Searching the program guide no longer shows programs you cannot download
+
+**What you would notice:** When you searched across all channels in Browse, programs that your provider had marked as not available for catchup would still appear in the results. Clicking them to start a download did nothing, with no error or explanation. These programs are now hidden from search results, so you only see what you can actually download.
+
+**What changed:** The search results now exclude past programs your provider has flagged as unavailable for catchup. Future programs (for scheduling) are still included regardless of this flag.
+
+---
+
+### Fixed: Browse and the program guide no longer crash on certain IPTV providers
+
+**What you would notice:** On some IPTV providers, opening Browse or waiting for the program guide to refresh would produce a server error and channels would not load at all. These providers send their channel and category lists in an unusual format that Mustarrd was not prepared to handle. Browse and the program guide now work correctly on these providers.
+
+**What changed:** Mustarrd now handles both the standard and the unusual format that some providers use when sending channel and category lists.
+
+---
+
+### Improved: Browse now shows clearer messages when no channels are found
+
+**What you would notice:** When you open Browse and no channels have loaded yet, it now says "No channels available yet." When you search and nothing matches what you typed, it now says "No channels match your search." Previously both states showed the same generic message, making it hard to tell whether something was wrong or you simply had an empty result.
+
+**What changed:** Two distinct messages were written: one for the empty state and one for empty search results.
+
+---
+
+### Fixed: Corrupt or incomplete guide data from your provider no longer silently stales your program guide
+
+**What you would notice:** If your provider sent back a corrupt or incomplete compressed guide file (which can happen during a provider restart or a network hiccup mid-transfer), Mustarrd would mark the account as unhealthy and stop refreshing the guide with no explanation. The guide would sit stale indefinitely. Mustarrd now handles the bad data gracefully and treats it as an empty response, so the guide continues refreshing on the next cycle.
+
+**What changed:** The compressed guide data handler now catches decompression errors instead of letting them crash the guide refresh job.
+
+---
+
 ### Fixed: Scheduled recordings no longer get stuck showing "Failed" after a successful retry
 
 **What you would notice:** If a download briefly failed and then automatically retried and finished successfully, the Schedules page could still show the recording as permanently Failed, with no way to clear it. Reloading the page would not help. The recording was actually fine on disk, but the status display was wrong and would stay wrong forever.
