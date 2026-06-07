@@ -19,7 +19,7 @@ from auth import (
 )
 from config import settings
 from database import get_session
-from models import AppSettings, Download, DownloadStatus, XtreamAccount, User
+from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
 from services.download_manager import download_manager
 from services.file_namer import file_namer
 from services.epg_service import epg_service
@@ -204,6 +204,28 @@ async def get_failed_download_count(
         query = query.where(Download.completed_at >= cutoff)
     result = await session.execute(query)
     return {"count": result.scalar() or 0}
+
+
+@router.get("/upcoming")
+async def get_upcoming_recordings(
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """List scheduled and paused-low-space recordings sorted by air date."""
+    query = (
+        select(ScheduledRecording)
+        .where(
+            ScheduledRecording.status.in_([
+                ScheduledStatus.SCHEDULED.value,
+                ScheduledStatus.PAUSED_LOW_SPACE.value,
+            ])
+        )
+        .order_by(ScheduledRecording.program_start.asc())
+    )
+    if not auth.is_admin:
+        query = query.where(ScheduledRecording.requested_by_user_id == auth.user_id)
+    result = await session.execute(query)
+    return [r.to_dict() for r in result.scalars().all()]
 
 
 @router.get("")

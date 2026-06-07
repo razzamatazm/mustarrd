@@ -35,6 +35,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconDatabase,
+  IconCalendar,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -363,6 +364,12 @@ export default function Downloads() {
     refetchInterval: 30000,
   })
 
+  const { data: upcomingRecordings } = useQuery({
+    queryKey: ['downloads', 'upcoming'],
+    queryFn: downloadsApi.upcoming,
+    refetchInterval: 30000,
+  })
+
   useEffect(() => {
     localStorage.setItem('mustarrd_downloads_visited', String(Date.now()))
     queryClient.invalidateQueries({ queryKey: ['downloads', 'failed-count'] })
@@ -566,6 +573,9 @@ export default function Downloads() {
           <Tabs.Tab value="active" leftSection={<IconDownload size={16} />}>
             Active {activeDownloads.length > 0 && `(${activeDownloads.length})`}
           </Tabs.Tab>
+          <Tabs.Tab value="upcoming" leftSection={<IconCalendar size={16} />}>
+            Upcoming {upcomingRecordings?.length > 0 && `(${upcomingRecordings.length})`}
+          </Tabs.Tab>
           <Tabs.Tab value="history" leftSection={<IconClock size={16} />}>
             History {historyDownloads.length > 0 && `(${historyDownloads.length})`}
           </Tabs.Tab>
@@ -602,6 +612,48 @@ export default function Downloads() {
                   onPlayFile={handlePlayFile}
                   guideOffsetHours={accountGuideOffsets[Number(download.account_id)] || 0}
                 />
+              ))}
+            </Stack>
+          )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="upcoming" pt="md">
+          {!upcomingRecordings || upcomingRecordings.length === 0 ? (
+            <Card shadow="sm" padding="xl" radius="md" withBorder>
+              <Stack align="center" gap="md">
+                <IconCalendar size={48} opacity={0.3} />
+                <Text c="dimmed" ta="center">
+                  No upcoming recordings.
+                </Text>
+                <Text c="dimmed" ta="center" size="sm">
+                  Schedule a show from the Browse page and it will appear here.
+                </Text>
+              </Stack>
+            </Card>
+          ) : (
+            <Stack gap="sm">
+              {upcomingRecordings.map((rec) => (
+                <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
+                  <Group justify="space-between" wrap="nowrap">
+                    <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
+                      <Text fw={500} truncate>{rec.program_title}</Text>
+                      <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
+                      <Group gap="xs">
+                        <Text size="xs" c="dimmed">
+                          {rec.program_start
+                            ? dayjs(rec.program_start).format('ddd MMM D, YYYY h:mm A')
+                            : 'Unknown time'}
+                        </Text>
+                        <Text size="xs" c="dimmed">({formatDuration(rec.duration_minutes)})</Text>
+                      </Group>
+                    </Stack>
+                    {rec.status === 'paused_low_space' && (
+                      <Badge color="orange" variant="light" size="sm">
+                        Low disk space
+                      </Badge>
+                    )}
+                  </Group>
+                </Card>
               ))}
             </Stack>
           )}
