@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +52,8 @@ async def search_epg(
 
     pattern = _build_like_pattern(q.lower())
     now_utc = datetime.now(timezone.utc)
+    offset_hours = int(account.guide_offset_hours or 0)
+    threshold = now_utc - timedelta(hours=offset_hours)
     result = await session.execute(
         select(EPGProgram)
         .where(
@@ -61,7 +63,7 @@ async def search_epg(
                 func.lower(EPGProgram.description).like(pattern, escape="\\"),
             ),
             or_(
-                EPGProgram.end_time > now_utc,
+                EPGProgram.end_time > threshold,
                 EPGProgram.has_archive == True,
             ),
         )
