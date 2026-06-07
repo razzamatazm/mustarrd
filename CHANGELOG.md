@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Browse and program guide now work with providers that label their responses incorrectly
+
+**What you would notice:** On some IPTV providers, especially older or budget PHP-based panels, opening Browse would show no channels, the program guide would fail to refresh and stay stale, and adding your account details would fail with a generic error. Everything looked correct in your settings and the provider itself was working. The underlying cause was that the provider's server was sending valid data but labeling it as plain text in the response header instead of JSON. Mustarrd was rejecting the data because of that incorrect label rather than reading what was actually inside it.
+
+**What changed:** Mustarrd now reads the content of each response to determine what it contains, rather than relying on the server's Content-Type header. Any provider that returns valid data with a "text/plain" or "text/html" header now works correctly.
+
+---
+
+### Fixed: Scheduled recordings no longer fail immediately on providers that send "0" as text instead of a number
+
+**What you would notice:** If your provider sent the program start time as the text "0" instead of the number 0, Mustarrd would calculate a start time in the year 1970 and immediately mark the scheduled recording as Failed with a "catchup window has passed" message. This could affect some providers even for shows scheduled in the future.
+
+**What changed:** Start and stop timestamps from the provider are now converted to numbers before being used. The text "0", an empty value, or any non-numeric value all correctly fall back to using the show's scheduled start and end times from the program guide.
+
+---
+
 ### Fixed: Subtitle files next to recordings are no longer deleted by ComSkip post-processing
 
 **What you would notice:** If you placed subtitle files (`.srt`, `.vtt`, `.ass`) or metadata files (`.xml`) in the same folder as your recordings and then ran a download with ComSkip enabled, those files would silently vanish after post-processing finished. There was no warning and no way to recover them. Subtitle files in your recording folders are now left alone.
