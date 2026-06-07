@@ -725,10 +725,12 @@ class DownloadManager:
                 else:
                     download.error_message = None
 
+                delete_original = (settings.delete_original_after_transcode if settings is not None else True)
                 self._cleanup_working_files(
                     original_path,
                     completed_path,
-                    keep_logs=bool(warnings)
+                    keep_logs=bool(warnings),
+                    delete_original=delete_original,
                 )
 
                 download.status = DownloadStatus.COMPLETED.value
@@ -870,14 +872,14 @@ class DownloadManager:
         shutil.move(path, dest)
         return dest
 
-    def _cleanup_working_files(self, original_path: str, completed_path: str, keep_logs: bool) -> None:
+    def _cleanup_working_files(self, original_path: str, completed_path: str, keep_logs: bool, delete_original: bool = True) -> None:
         try:
             original_file = Path(original_path)
             base_dir = original_file.parent
             stem = original_file.stem
             completed_real = os.path.realpath(os.path.abspath(completed_path))
 
-            if original_path != completed_path and original_file.exists():
+            if delete_original and original_path != completed_path and original_file.exists():
                 original_file.unlink()
 
             patterns = [
