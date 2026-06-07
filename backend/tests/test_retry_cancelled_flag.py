@@ -97,6 +97,33 @@ class RetryCancelledFlagTests(unittest.IsolatedAsyncioTestCase):
             "retry_download must clear stale _cancelled flag for FAILED downloads too.",
         )
 
+    async def test_retry_clears_completed_at(self):
+        """
+        retry_download must set completed_at = None so that a re-failure after
+        retry stamps a fresh completed_at.
+
+        Without this, a download that fails at T1, is retried, then fails again
+        at T2 keeps completed_at=T1. The failure badge uses completed_at >= last
+        visit, so if last visit is between T1 and T2 the re-failure is invisible.
+        """
+        from datetime import datetime
+
+        manager = DownloadManager()
+        dl_id = 9
+
+        download = _make_cancelled_download(dl_id)
+        download.status = DownloadStatus.FAILED.value
+        download.completed_at = datetime(2020, 1, 1)
+
+        with patch("services.download_manager.async_session_maker", _make_session_maker(download)):
+            result = await manager.retry_download(dl_id)
+
+        self.assertTrue(result)
+        self.assertIsNone(
+            download.completed_at,
+            "retry_download must clear completed_at so a re-failure stamps a fresh timestamp.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

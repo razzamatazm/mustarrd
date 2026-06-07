@@ -1311,6 +1311,7 @@ class DownloadManager:
                 download.progress = 0
                 download.downloaded_bytes = 0
                 download.error_message = None
+                download.completed_at = None
                 await session.commit()
 
                 self._cancelled.discard(download_id)
