@@ -604,6 +604,52 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
+    async def test_416_with_text_body_and_oversized_local_file_still_restarts(self):
+        """
+        416 + Content-Range smaller than offset (oversized local file) must restart
+        from byte 0, even when the 416 response body has Content-Type: text/html.
+        Many providers send a small HTML body with 416 responses.
+
+        Before the fix: the text/* guard at line 1122 ran unconditionally, so a
+        text/html 416 body aborted with "error page" instead of falling through to
+        the re-request.
+        """
+        offset = 2048
+        remote_total = 900
+        full_content = b"\x47" * remote_total
+
+        response_416 = _make_aiohttp_response(416, [], content_range=f"bytes */{remote_total}")
+        response_416.reason = "Range Not Satisfiable"
+        response_416.headers["Content-Type"] = "text/html; charset=utf-8"
+
+        response_200 = _make_aiohttp_response(200, [full_content])
+
+        _mock_session, client_cm = _make_aiohttp_client_session_multi([response_416, response_200])
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(b"\x00" * offset)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
+                )
+
+            self.assertEqual(total, remote_total)
+            with open(tmp_path, "rb") as fh:
+                self.assertEqual(fh.read(), full_content)
+        finally:
+            os.unlink(tmp_path)
+
+
     async def test_restart_after_416_rejects_text_content_type(self):
         """
         416 triggers restart from byte 0. If the provider then returns an error

@@ -1119,7 +1119,7 @@ class DownloadManager:
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 
                 content_type = response.headers.get("Content-Type", "")
-                if content_type.lower().startswith("text/"):
+                if not needs_restart and content_type.lower().startswith("text/"):
                     raise Exception(
                         f"Provider returned an error page (Content-Type: {content_type}). "
                         "The catchup window may have expired or be unavailable."
