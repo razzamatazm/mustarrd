@@ -526,6 +526,8 @@ class DownloadManager:
                         continue
 
                     download.status = DownloadStatus.FAILED.value
+                    if not download.completed_at:
+                        download.completed_at = datetime.utcnow()
                     download.error_message = "Recovery failed: missing input file for post-processing."
                     await self._sync_schedule_status(session, download.id, DownloadStatus.FAILED.value)
                     await self._broadcast_log(download.id, download.error_message, level="error")
@@ -663,6 +665,8 @@ class DownloadManager:
                 download = result.scalar_one_or_none()
                 if download:
                     download.status = DownloadStatus.FAILED.value
+                    if not download.completed_at:
+                        download.completed_at = datetime.utcnow()
                     download.error_message = _friendly_error(e)
                     await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
@@ -810,6 +814,8 @@ class DownloadManager:
                 download = result.scalar_one_or_none()
                 if download:
                     download.status = DownloadStatus.FAILED.value
+                    if not download.completed_at:
+                        download.completed_at = datetime.utcnow()
                     download.error_message = _friendly_error(e)
                     await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()

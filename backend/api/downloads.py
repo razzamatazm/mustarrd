@@ -198,9 +198,10 @@ async def get_failed_download_count(
     query = select(func.count()).select_from(Download).where(Download.status == DownloadStatus.FAILED.value)
     if not auth.is_admin:
         query = query.where(Download.requested_by_user_id == auth.user_id)
+    query = query.where(Download.completed_at.is_not(None))
     if since is not None:
         cutoff = datetime.utcfromtimestamp(since / 1000.0)
-        query = query.where(Download.created_at >= cutoff)
+        query = query.where(Download.completed_at >= cutoff)
     result = await session.execute(query)
     return {"count": result.scalar() or 0}
 

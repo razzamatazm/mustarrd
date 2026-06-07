@@ -1,10 +1,11 @@
 """
 Tests for GET /api/downloads/failed-count.
 
-Returns {"count": N} where N is the number of permanently FAILED downloads,
-optionally filtered to those created at or after a given Unix timestamp in
-milliseconds (the `since` query parameter).  A non-admin user sees only their
-own downloads.
+Returns {"count": N} where N is the number of permanently FAILED downloads
+that have completed_at set and, optionally, completed_at >= a cutoff derived
+from the `since` query parameter (a Unix timestamp in milliseconds).
+
+A non-admin user sees only their own downloads.
 """
 import asyncio
 import sys
@@ -85,11 +86,17 @@ class FailedCountTests(unittest.TestCase):
         stmt = captured.get("stmt")
         self.assertIsNotNone(stmt)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-        self.assertIn(DownloadStatus.FAILED.value, compiled)
-        self.assertNotIn(DownloadStatus.COMPLETED.value, compiled)
-        self.assertNotIn(DownloadStatus.PENDING.value, compiled)
+        self.assertIn(f"'{DownloadStatus.FAILED.value}'", compiled)
+        self.assertNotIn(f"'{DownloadStatus.COMPLETED.value}'", compiled)
+        self.assertNotIn(f"'{DownloadStatus.PENDING.value}'", compiled)
 
-    def test_since_param_adds_created_at_filter(self):
+    def test_since_param_adds_completed_at_filter(self):
+        """The cutoff must filter by completed_at, not created_at.
+
+        Downloads enqueued before the user last visited Downloads but failing
+        afterward must still show in the badge. created_at is the enqueue time;
+        completed_at is the failure time.
+        """
         from api.downloads import get_failed_download_count
         session, captured = self._capture_session()
         auth = self._make_admin_auth()
@@ -98,11 +105,15 @@ class FailedCountTests(unittest.TestCase):
         stmt = captured.get("stmt")
         self.assertIsNotNone(stmt)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-        # The cutoff should be present as a datetime value in the query
-        expected_cutoff = datetime.utcfromtimestamp(since_ms / 1000.0)
-        self.assertIn(str(expected_cutoff.year), compiled)
+        self.assertIn("completed_at", compiled.lower())
+        self.assertNotIn("created_at", compiled.lower())
 
-    def test_no_since_param_omits_date_filter(self):
+    def test_no_since_param_still_filters_completed_at_not_null(self):
+        """Without a since cutoff, query must still require completed_at IS NOT NULL.
+
+        FAILED rows with no completed_at are legacy rows where failure time was
+        not stamped. Excluding them keeps the badge count reliable.
+        """
         from api.downloads import get_failed_download_count
         session, captured = self._capture_session()
         auth = self._make_admin_auth()
@@ -110,8 +121,7 @@ class FailedCountTests(unittest.TestCase):
         stmt = captured.get("stmt")
         self.assertIsNotNone(stmt)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-        # No year-like date filter when since is absent
-        self.assertNotIn("created_at", compiled.lower().replace("downloads.created_at", "PLACEHOLDER"))
+        self.assertIn("completed_at", compiled.lower())
 
     def test_non_admin_query_scoped_to_user(self):
         from api.downloads import get_failed_download_count

@@ -108,8 +108,12 @@ function App() {
   const { data: failedCountData } = useQuery({
     queryKey: ['downloads', 'failed-count'],
     queryFn: () => {
-      const since = localStorage.getItem('mustarrd_downloads_visited')
-      return downloadsApi.failedCount(since ? Number(since) : null)
+      let since = localStorage.getItem('mustarrd_downloads_visited')
+      if (!since) {
+        since = String(Date.now())
+        localStorage.setItem('mustarrd_downloads_visited', since)
+      }
+      return downloadsApi.failedCount(Number(since))
     },
     refetchInterval: 60000,
     enabled: Boolean(authStatus?.authenticated),
