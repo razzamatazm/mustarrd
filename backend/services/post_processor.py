@@ -1410,17 +1410,12 @@ class PostProcessor:
                 input_file.with_suffix(".logo"),
                 input_file.with_suffix(".csv"),
                 input_file.with_suffix(".vdr"),
-                input_file.with_suffix(".xml"),
-                input_file.with_suffix(".srt"),
-                input_file.with_suffix(".ass"),
-                input_file.with_suffix(".vtt"),
             ]
             if edl_path:
                 edl_file = Path(edl_path)
                 candidates.append(edl_file)
                 if edl_file.stem != input_file.stem:
-                    for suffix in [".txt", ".log", ".logo", ".csv", ".vdr", ".xml",
-                                   ".srt", ".ass", ".vtt"]:
+                    for suffix in [".txt", ".log", ".logo", ".csv", ".vdr"]:
                         candidates.append(edl_file.with_suffix(suffix))
             for path in candidates:
                 if path.exists():
