@@ -1015,15 +1015,32 @@ class DownloadManager:
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 
-                resuming = response.status == 206 and offset > 0
-
                 total_size = response.content_length or 0
+                range_start = None
                 if response.status == 206:
                     content_range = response.headers.get("Content-Range")
-                    if content_range and "/" in content_range:
-                        total_part = content_range.split("/")[-1].strip()
-                        if total_part.isdigit():
-                            total_size = int(total_part)
+                    if content_range:
+                        # Parse start byte from "bytes <start>-<end>/<total>"
+                        try:
+                            byte_range = content_range.split("/")[0].strip()
+                            if byte_range.lower().startswith("bytes "):
+                                byte_range = byte_range[6:]
+                            start_str = byte_range.split("-")[0].strip()
+                            if start_str.isdigit():
+                                range_start = int(start_str)
+                        except Exception:
+                            pass
+                        if "/" in content_range:
+                            total_part = content_range.split("/")[-1].strip()
+                            if total_part.isdigit():
+                                total_size = int(total_part)
+
+                # Only resume if server confirmed it started at the requested offset.
+                # If Content-Range is present but starts elsewhere, the provider silently
+                # returned data from a different position; appending would corrupt the file.
+                range_mismatch = range_start is not None and range_start != offset
+                resuming = response.status == 206 and offset > 0 and not range_mismatch
+
                 if total_size > 0:
                     await self._broadcast_log(
                         download_id,
@@ -1046,10 +1063,17 @@ class DownloadManager:
                     downloaded = 0
                     file_mode = "wb"
                     if offset > 0:
-                        await self._broadcast_log(
-                            download_id,
-                            "Provider did not honour Range request; re-downloading from start."
-                        )
+                        if range_mismatch:
+                            await self._broadcast_log(
+                                download_id,
+                                f"Provider returned Content-Range start {range_start:,} "
+                                f"instead of requested {offset:,}; re-downloading from start."
+                            )
+                        else:
+                            await self._broadcast_log(
+                                download_id,
+                                "Provider did not honour Range request; re-downloading from start."
+                            )
 
                 last_progress_update = 0
 

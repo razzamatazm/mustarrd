@@ -309,6 +309,48 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             os.unlink(tmp_path)
 
+    async def test_206_content_range_start_mismatch_restarts(self):
+        """
+        A 206 response where Content-Range start != requested offset means the provider
+        returned data from the wrong position. _download_file must fall back to 'wb'
+        mode and restart from 0 rather than appending corrupted data.
+        """
+        existing = b"\x00" * 4096
+        # Provider returns 206 but Content-Range says it started at byte 0, not 4096
+        new_data = b"\x47" * 512
+        response = _make_aiohttp_response(206, [new_data], content_range="bytes 0-511/10000")
+        _mock_session, client_cm = _make_aiohttp_client_session(response)
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(existing)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=4096
+                )
+
+            # Must restart: return value is only new bytes (no offset added)
+            self.assertEqual(
+                total,
+                512,
+                "Content-Range start mismatch must trigger restart; return value must not include offset.",
+            )
+            # File must be overwritten (truncated), not appended
+            with open(tmp_path, "rb") as fh:
+                contents = fh.read()
+            self.assertEqual(contents, new_data, "File must be overwritten when Content-Range start != offset.")
+        finally:
+            os.unlink(tmp_path)
+
     async def test_no_range_header_when_offset_zero(self):
         """offset=0 (normal download) must not send a Range header."""
         new_data = b"\x47" * 256
