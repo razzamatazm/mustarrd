@@ -1160,9 +1160,10 @@ class DownloadManager:
                 else:
                     await log_callback("Comskip: no commercials detected.")
             except Exception as e:
-                await log_callback(f"Comskip error: {e}")
-                warnings.append(f"Comskip failed: {e}")
-                logger.exception("Comskip error (continuing anyway)")
+                logger.exception("Comskip error")
+                raise RuntimeError(
+                    f"ComSkip failed: {e}. Recording not saved to avoid producing a file with commercials intact."
+                ) from e
 
         # Transcode if enabled (and not already done by commercial removal)
         if will_transcode and not commercials_removed:
