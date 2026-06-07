@@ -1232,6 +1232,7 @@ class DownloadManager:
                 DownloadStatus.PROCESSING.value,
             ]:
                 download.status = DownloadStatus.CANCELLED.value
+                await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                 await session.commit()
                 return True
 

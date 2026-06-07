@@ -137,5 +137,98 @@ class SyncScheduleStatusTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class CancelDownloadSyncTests(unittest.IsolatedAsyncioTestCase):
+    """
+    Regression tests for cancel_download not syncing linked ScheduledRecording.
+
+    Before the fix, cancel_download() committed DownloadStatus.CANCELLED to the
+    Download row but never called _sync_schedule_status, leaving the linked
+    ScheduledRecording.status as 'queued' or 'downloading'. create_schedule() then
+    treated that stale row as still active in its duplicate check, blocking any
+    re-schedule after a user cancel.
+    """
+
+    async def test_cancel_download_syncs_schedule_status(self):
+        """cancel_download must update linked ScheduledRecording to CANCELLED."""
+        download = MagicMock()
+        download.id = 5
+        download.status = DownloadStatus.PENDING.value
+
+        schedule = _make_schedule(download_id=5, status=ScheduledStatus.QUEUED.value)
+
+        download_result = MagicMock()
+        download_result.scalar_one_or_none.return_value = download
+
+        schedule_result = MagicMock()
+        schedule_result.scalar_one_or_none.return_value = schedule
+
+        call_count = [0]
+
+        async def execute(stmt):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return download_result
+            return schedule_result
+
+        session = AsyncMock()
+        session.execute = execute
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_session_maker():
+            yield session
+
+        manager = DownloadManager()
+
+        with patch("services.download_manager.async_session_maker", mock_session_maker):
+            result = await manager.cancel_download(5)
+
+        self.assertTrue(result)
+        self.assertEqual(download.status, DownloadStatus.CANCELLED.value)
+        self.assertEqual(
+            schedule.status,
+            DownloadStatus.CANCELLED.value,
+            "cancel_download must sync linked ScheduledRecording.status to CANCELLED.",
+        )
+        session.commit.assert_called_once()
+
+    async def test_cancel_download_no_linked_schedule_still_commits(self):
+        """cancel_download must still cancel the download when no schedule is linked."""
+        download = MagicMock()
+        download.id = 9
+        download.status = DownloadStatus.PENDING.value
+
+        download_result = MagicMock()
+        download_result.scalar_one_or_none.return_value = download
+
+        schedule_result = MagicMock()
+        schedule_result.scalar_one_or_none.return_value = None
+
+        call_count = [0]
+
+        async def execute(stmt):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return download_result
+            return schedule_result
+
+        session = AsyncMock()
+        session.execute = execute
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_session_maker():
+            yield session
+
+        manager = DownloadManager()
+
+        with patch("services.download_manager.async_session_maker", mock_session_maker):
+            result = await manager.cancel_download(9)
+
+        self.assertTrue(result)
+        self.assertEqual(download.status, DownloadStatus.CANCELLED.value)
+        session.commit.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
