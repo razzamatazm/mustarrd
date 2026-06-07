@@ -1087,16 +1087,35 @@ class DownloadManager:
 
             async with http_session.get(url, headers=request_headers) as response:
                 if response.status == 416 and offset > 0:
-                    # Range past EOF: the partial file on disk is already complete.
-                    # Returning offset (non-zero) lets _execute_download move it to
-                    # the completed folder without deleting it.
-                    await self._broadcast_log(
-                        download_id,
-                        "Provider returned 416 (Range Not Satisfiable); "
-                        "file already complete on disk.",
-                    )
-                    return offset
-                if response.status not in (200, 206):
+                    # 416 means the Range start is past the resource end.
+                    # Parse Content-Range: bytes */TOTAL to find the real remote size.
+                    remote_total = None
+                    cr_header = response.headers.get("Content-Range", "")
+                    if cr_header.startswith("bytes */"):
+                        try:
+                            remote_total = int(cr_header[len("bytes */"):].strip())
+                        except ValueError:
+                            pass
+                    if remote_total is not None and remote_total < offset:
+                        # Local file is larger than the remote resource: stale or
+                        # corrupt partial. Re-download from byte 0.
+                        needs_restart = True
+                        await self._broadcast_log(
+                            download_id,
+                            f"Provider returned 416; local file ({offset} B) exceeds "
+                            f"remote size ({remote_total} B). Re-downloading from start.",
+                        )
+                    else:
+                        # offset == remote_total or no Content-Range: file is complete.
+                        await self._broadcast_log(
+                            download_id,
+                            "Provider returned 416 (Range Not Satisfiable); "
+                            "file already complete on disk.",
+                        )
+                        return offset
+                if needs_restart:
+                    pass  # fall through to the re-request block below
+                elif response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 
                 content_type = response.headers.get("Content-Type", "")
@@ -1137,7 +1156,9 @@ class DownloadManager:
                     and range_start == offset
                 )
 
-                if response.status == 206 and offset > 0 and not resuming:
+                if needs_restart:
+                    pass  # 416 + oversized local file: skip streaming, re-request below
+                elif response.status == 206 and offset > 0 and not resuming:
                     # The 206 body starts at an unknown or wrong offset, not byte 0.
                     # Writing it with 'wb' would produce a silently truncated file.
                     # Release this connection without reading the body, then re-request

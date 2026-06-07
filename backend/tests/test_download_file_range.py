@@ -524,5 +524,85 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
+    async def test_416_with_content_range_matching_offset_treats_as_complete(self):
+        """
+        416 + Content-Range: bytes */N where N == offset: remote confirms file is
+        exactly the right size. Must return offset without touching the file.
+        """
+        offset = 1024
+        content = b"\x47" * offset
+
+        response = _make_aiohttp_response(416, [], content_range=f"bytes */{offset}")
+        response.reason = "Range Not Satisfiable"
+        _mock_session, client_cm = _make_aiohttp_client_session(response)
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(content)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
+                )
+
+            self.assertEqual(total, offset, "416 with matching Content-Range must return offset.")
+            with open(tmp_path, "rb") as fh:
+                self.assertEqual(fh.read(), content, "File must be unchanged.")
+        finally:
+            os.unlink(tmp_path)
+
+    async def test_416_with_content_range_smaller_than_offset_restarts(self):
+        """
+        416 + Content-Range: bytes */N where N < offset: local file is larger than
+        the remote resource (stale partial). Must re-download from byte 0.
+
+        Before the fix: no Content-Range check; oversized local file was treated as
+        complete and moved to the completed folder, producing a corrupt recording.
+        """
+        offset = 2048
+        remote_total = 900
+        full_content = b"\x47" * remote_total
+
+        response_416 = _make_aiohttp_response(416, [], content_range=f"bytes */{remote_total}")
+        response_416.reason = "Range Not Satisfiable"
+        response_200 = _make_aiohttp_response(200, [full_content])
+        _mock_session, client_cm = _make_aiohttp_client_session_multi([response_416, response_200])
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(b"\x00" * offset)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=offset
+                )
+
+            self.assertEqual(
+                total,
+                remote_total,
+                "416 with remote_total < offset must restart; return value is remote content length.",
+            )
+            with open(tmp_path, "rb") as fh:
+                self.assertEqual(fh.read(), full_content, "File must be overwritten with full content.")
+        finally:
+            os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()
