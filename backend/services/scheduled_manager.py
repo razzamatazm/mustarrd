@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from database import async_session_maker
@@ -56,10 +56,21 @@ class ScheduledManager:
             download_folder = settings.download_folder if settings and settings.download_folder else app_settings.default_download_folder
             min_free_gb = settings.min_free_space_gb if settings and settings.min_free_space_gb is not None else 25
 
+            catchup_expiry = now_utc - timedelta(hours=24)
             ready = []
             for schedule in schedules:
                 available_at = schedule.available_at_utc()
                 if not available_at:
+                    continue
+                if available_at <= catchup_expiry:
+                    hours_ago = int((now_utc - available_at).total_seconds() / 3600)
+                    schedule.status = ScheduledStatus.FAILED.value
+                    schedule.status_message = (
+                        f"Program is no longer available for catchup — "
+                        f"it aired about {hours_ago} hours ago, "
+                        f"which is past the typical catchup window."
+                    )
+                    schedule.updated_at = datetime.utcnow()
                     continue
                 if available_at <= now_utc:
                     ready.append(schedule)

@@ -13,15 +13,11 @@ from api.schedules import ScheduleCreate
 
 class SchedulePaddingBoundsTests(unittest.TestCase):
     """
-    BUG: pre_padding_minutes and post_padding_minutes are constrained only
-    with conint(ge=0) — no upper bound. A value of 10000 is accepted silently.
-    In build_download_from_program the padded_duration sanity check tests the
-    raw program duration, not the padded value, so padded_duration=20060 minutes
-    (~14 days) is passed to FFmpeg. A single malicious or mistaken request locks
-    the download slot for days.
+    Regression tests for unbounded pre/post padding.
 
-    These tests currently FAIL because no ValidationError is raised for large
-    padding values. After the fix (conint(ge=0, le=120) or similar) they pass.
+    pre_padding_minutes and post_padding_minutes are constrained with
+    conint(ge=0, le=120). A value above 120 raises ValidationError so
+    a malformed or malicious request cannot lock a download slot for days.
     """
 
     _VALID_PROGRAM = {
@@ -40,22 +36,12 @@ class SchedulePaddingBoundsTests(unittest.TestCase):
         )
 
     def test_pre_padding_upper_bound_enforced(self):
-        """
-        pre_padding_minutes=10000 must raise ValidationError.
-
-        Currently FAILS: ScheduleCreate accepts 10000 without error.
-        Fix: add an upper bound (e.g. le=120) to conint on pre_padding_minutes.
-        """
+        """pre_padding_minutes above 120 must raise ValidationError."""
         with self.assertRaises(ValidationError):
             self._make(pre_padding_minutes=10000)
 
     def test_post_padding_upper_bound_enforced(self):
-        """
-        post_padding_minutes=10000 must raise ValidationError.
-
-        Currently FAILS: ScheduleCreate accepts 10000 without error.
-        Fix: add an upper bound (e.g. le=120) to conint on post_padding_minutes.
-        """
+        """post_padding_minutes above 120 must raise ValidationError."""
         with self.assertRaises(ValidationError):
             self._make(post_padding_minutes=10000)
 

@@ -23,8 +23,8 @@ class ScheduleCreate(BaseModel):
     channel_name: str
     program: dict
     custom_filename: Optional[str] = None
-    pre_padding_minutes: Optional[conint(ge=0)] = 0
-    post_padding_minutes: Optional[conint(ge=0)] = 0
+    pre_padding_minutes: Optional[conint(ge=0, le=120)] = 0
+    post_padding_minutes: Optional[conint(ge=0, le=120)] = 0
 
 
 def _parse_program(program: dict) -> tuple[datetime, datetime, int, int, int, str | None, str | None]:

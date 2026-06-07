@@ -86,14 +86,11 @@ def _make_session_maker(schedule, settings_obj=None):
 
 class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
     """
-    BUG: _queue_ready_recordings dispatches any SCHEDULED/PAUSED_LOW_SPACE
-    recording where available_at <= now_utc with no upper-bound check. After
-    a server outage or disk-full pause longer than the provider's catchup
-    window, stale schedules fire unconditionally. The download fails with a
-    raw provider error and gives the user no actionable context.
+    Regression tests for stale schedule dispatch.
 
-    These tests currently FAIL because stale schedules are dispatched.
-    After the fix (add an expiry guard before dispatching) they pass.
+    _queue_ready_recordings now marks any schedule whose catchup window has
+    expired (available_at more than 24 hours in the past) as FAILED with a
+    plain-English status_message instead of dispatching it unconditionally.
     """
 
     async def _run_queue(self, schedule) -> list:
@@ -126,14 +123,7 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
         return queued
 
     async def test_48_hour_old_schedule_not_dispatched(self):
-        """
-        A schedule whose stop_timestamp is 48 hours in the past must NOT be
-        dispatched: the provider's catchup window (typically 24-48 hours) has
-        almost certainly expired.
-
-        Currently FAILS: the schedule IS dispatched unconditionally regardless
-        of age. Fix: add an expiry guard in _queue_ready_recordings.
-        """
+        """A schedule that ended 48 hours ago must not be dispatched."""
         schedule = _make_stale_schedule(hours_ago=48)
         dispatched = await self._run_queue(schedule)
 
@@ -146,14 +136,7 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_48_hour_old_schedule_marked_failed_not_silent(self):
-        """
-        A stale schedule must be marked FAILED with a plain-English message,
-        not silently left in SCHEDULED status indefinitely.
-
-        Currently FAILS: the stale schedule is dispatched (wrong), or left
-        in SCHEDULED with no change.
-        Fix: mark status=FAILED with a human-readable status_message.
-        """
+        """A stale schedule must be marked FAILED with a plain-English status_message."""
         schedule = _make_stale_schedule(hours_ago=48)
         await self._run_queue(schedule)
 
