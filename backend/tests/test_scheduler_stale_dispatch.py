@@ -88,12 +88,13 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
     """
     Regression tests for stale schedule dispatch.
 
-    _queue_ready_recordings now marks any schedule whose catchup window has
-    expired (available_at more than 24 hours in the past) as FAILED with a
-    plain-English status_message instead of dispatching it unconditionally.
+    _queue_ready_recordings marks a schedule as FAILED only when
+    available_at is older than the channel's actual catchup window
+    (fetched from the provider). Falls back to 30 days if the provider
+    is unreachable.
     """
 
-    async def _run_queue(self, schedule) -> list:
+    async def _run_queue(self, schedule, archive_days: int = 1) -> list:
         """Run _queue_ready_recordings and return list of dispatched download IDs."""
         queued: list = []
 
@@ -117,45 +118,55 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
             patch("services.scheduled_manager.build_download_from_program", new=fake_build),
             patch("services.scheduled_manager.download_manager", fake_dm),
             patch.object(manager, "_get_free_space_gb", return_value=100.0),
+            patch.object(
+                manager,
+                "_get_catchup_window_days",
+                new=AsyncMock(return_value=archive_days),
+            ),
         ):
             await manager._queue_ready_recordings()
 
         return queued
 
-    async def test_48_hour_old_schedule_not_dispatched(self):
-        """A schedule that ended 48 hours ago must not be dispatched."""
+    async def test_past_catchup_window_not_dispatched(self):
+        """Schedule older than the provider's catchup window must not be dispatched."""
         schedule = _make_stale_schedule(hours_ago=48)
-        dispatched = await self._run_queue(schedule)
+        dispatched = await self._run_queue(schedule, archive_days=1)
 
         self.assertEqual(
             dispatched,
             [],
-            "Schedule that ended 48 hours ago must not be dispatched. "
-            "Currently _queue_ready_recordings fires it unconditionally, "
-            "producing a FAILED download with a cryptic provider error.",
+            "Schedule that ended 48 hours ago must not dispatch on a 1-day catchup window.",
         )
 
-    async def test_48_hour_old_schedule_marked_failed_not_silent(self):
-        """A stale schedule must be marked FAILED with a plain-English status_message."""
+    async def test_within_catchup_window_still_dispatched(self):
+        """Schedule within a multi-day catchup window must dispatch even if it ended 2 days ago."""
         schedule = _make_stale_schedule(hours_ago=48)
-        await self._run_queue(schedule)
+        dispatched = await self._run_queue(schedule, archive_days=7)
 
-        self.assertIn(
-            schedule.status,
-            [ScheduledStatus.FAILED.value, ScheduledStatus.CANCELLED.value],
-            f"Stale schedule must end up FAILED or CANCELLED with a user-readable "
-            f"status_message. Currently status is '{schedule.status}'.",
+        self.assertEqual(
+            dispatched,
+            [99],
+            "A schedule that ended 2 days ago must still dispatch when the channel has a 7-day catchup window.",
         )
-        self.assertIsNotNone(
-            schedule.status_message,
-            "status_message must explain why the schedule was not dispatched "
-            "(e.g. 'Program too old for catchup').",
+
+    async def test_stale_schedule_marked_failed_with_catchup_message(self):
+        """Stale schedule must be marked FAILED with a message that mentions catchup."""
+        schedule = _make_stale_schedule(hours_ago=48)
+        await self._run_queue(schedule, archive_days=1)
+
+        self.assertEqual(schedule.status, ScheduledStatus.FAILED.value)
+        self.assertIsNotNone(schedule.status_message)
+        self.assertIn(
+            "catchup",
+            schedule.status_message.lower(),
+            "status_message must explain the catchup window, not a raw provider error.",
         )
 
     async def test_recent_schedule_still_dispatched(self):
         """Sanity: a schedule whose show ended 5 minutes ago must still fire."""
         schedule = _make_recent_schedule(minutes_ago=5)
-        dispatched = await self._run_queue(schedule)
+        dispatched = await self._run_queue(schedule, archive_days=1)
 
         self.assertEqual(
             dispatched,
