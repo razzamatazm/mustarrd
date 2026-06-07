@@ -644,7 +644,7 @@ export default function Downloads() {
                 <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
                   <Group justify="space-between" wrap="nowrap">
                     <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
-                      <Text fw={500} truncate>{rec.program_title}</Text>
+                      <Text fw={500}>{rec.program_title}</Text>
                       <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
                       <Group gap="xs">
                         <Text size="xs" c="dimmed">
