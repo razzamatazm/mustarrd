@@ -384,5 +384,71 @@ class DownloadFileRangeTests(unittest.IsolatedAsyncioTestCase):
             os.unlink(tmp_path)
 
 
+    @unittest.expectedFailure
+    async def test_206_no_content_range_falls_back_to_restart(self):
+        """
+        BUG: A 206 response with no Content-Range header causes false resume.
+
+        Root cause: when the server returns 206 but omits the Content-Range header,
+        range_start stays None.  The mismatch guard is:
+            range_mismatch = range_start is not None and range_start != offset
+        Since range_start is None, range_mismatch is False, so resuming evaluates to
+        True.  The file is opened in 'ab' mode even though we have no confirmation
+        that the server is sending from the right position.  A buggy or proxied IPTV
+        provider that returns 206 from byte 0 (without Content-Range) would cause the
+        partial file to grow from offset+0 to offset+server_full_size, producing a
+        corrupt recording.
+
+        Expected fix: treat absent Content-Range as "position unknown" and fall back
+        to restart ('wb', downloaded=0), the same as a Content-Range mismatch.
+        Guard should be:
+            resuming = status==206 and offset>0 and range_start is not None
+                       and range_start == offset
+        """
+        existing = b"\x00" * 4096
+        # Provider returns 206 but NO Content-Range header (RFC violation, common in
+        # cheap IPTV catchup implementations and some transparent proxies).
+        new_data = b"\x47" * 512
+        response = _make_aiohttp_response(206, [new_data])  # content_range=None
+        _mock_session, client_cm = _make_aiohttp_client_session(response)
+
+        manager = DownloadManager()
+        db_session = _make_db_session()
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(existing)
+            tmp_path = f.name
+
+        try:
+            with (
+                patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+            ):
+                total = await manager._download_file(
+                    "http://provider/stream", tmp_path, 1, db_session, offset=4096
+                )
+
+            # Must fall back to restart: file overwritten, return value is only new bytes.
+            self.assertEqual(
+                total,
+                512,
+                "206 with no Content-Range must restart (return new bytes only, not offset+new). "
+                "Currently returns 4096+512 because range_start=None bypasses the mismatch guard, "
+                "treating absent Content-Range as a confirmed resume.",
+            )
+            with open(tmp_path, "rb") as fh:
+                contents = fh.read()
+            self.assertEqual(
+                contents,
+                new_data,
+                "File must be overwritten when Content-Range is absent, not appended. "
+                "Currently the partial file is opened 'ab' and the server's bytes "
+                "(from an unknown position) are appended, corrupting the recording.",
+            )
+        finally:
+            os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()
