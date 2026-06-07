@@ -430,6 +430,7 @@ class DownloadManager:
                             if not download.completed_at:
                                 download.completed_at = datetime.utcnow()
                             download.error_message = None
+                            await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
                             await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
@@ -449,6 +450,7 @@ class DownloadManager:
                         if not download.completed_at:
                             download.completed_at = datetime.utcnow()
                         download.error_message = None
+                        await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
                         await self._broadcast_log(download.id, "Recovered after restart: marked completed.")
                         continue
 
@@ -472,6 +474,7 @@ class DownloadManager:
                             if not download.completed_at:
                                 download.completed_at = datetime.utcnow()
                             download.error_message = None
+                            await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
                             await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
@@ -489,11 +492,13 @@ class DownloadManager:
                         if not download.completed_at:
                             download.completed_at = datetime.utcnow()
                         download.error_message = None
+                        await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
                         await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
                     download.status = DownloadStatus.FAILED.value
                     download.error_message = "Recovery failed: missing input file for post-processing."
+                    await self._sync_schedule_status(session, download.id, DownloadStatus.FAILED.value)
                     await self._broadcast_log(download.id, download.error_message, level="error")
 
             await session.commit()

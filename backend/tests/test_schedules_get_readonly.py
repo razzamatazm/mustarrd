@@ -230,5 +230,118 @@ class CancelDownloadSyncTests(unittest.IsolatedAsyncioTestCase):
         session.commit.assert_called_once()
 
 
+class RecoveryScheduleSyncTests(unittest.IsolatedAsyncioTestCase):
+    """
+    Regression tests: recover_incomplete_downloads must sync linked ScheduledRecording.
+
+    Before the fix, restart-recovery set terminal Download.status (COMPLETED/FAILED)
+    without calling _sync_schedule_status, leaving the ScheduledRecording at
+    'queued'/'downloading'. create_schedule() then blocked re-scheduling with a 409.
+    """
+
+    async def _make_recovery_session(self, downloads, settings=None):
+        settings_result = MagicMock()
+        settings_result.scalar_one_or_none.return_value = settings
+
+        downloads_result = MagicMock()
+        downloads_result.scalars.return_value.all.return_value = downloads
+
+        call_count = [0]
+
+        async def execute(stmt):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return settings_result
+            return downloads_result
+
+        session = AsyncMock()
+        session.execute = execute
+        session.commit = AsyncMock()
+        return session
+
+    async def test_recovery_failed_syncs_schedule_to_failed(self):
+        """PROCESSING download with no recoverable file syncs schedule to FAILED on restart-recovery."""
+        download = MagicMock()
+        download.id = 20
+        download.status = DownloadStatus.PROCESSING.value
+        download.output_path = "/tmp/nonexistent_recovery_test_99999.ts"
+        download.is_vod = True  # skip _needs_post_processing branch
+
+        session = await self._make_recovery_session([download])
+
+        @asynccontextmanager
+        async def mock_session_maker():
+            yield session
+
+        manager = DownloadManager()
+        sync_calls = []
+
+        async def spy_sync(sess, dl_id, status):
+            sync_calls.append((dl_id, status))
+
+        manager._sync_schedule_status = spy_sync
+
+        with (
+            patch("services.download_manager.async_session_maker", mock_session_maker),
+            patch.object(manager, "_broadcast_log", AsyncMock()),
+            patch.object(manager, "_broadcast_progress", AsyncMock()),
+        ):
+            await manager.recover_incomplete_downloads()
+
+        self.assertIn(
+            (20, DownloadStatus.FAILED.value),
+            sync_calls,
+            "Recovery must call _sync_schedule_status with FAILED when input file is missing.",
+        )
+
+    async def test_recovery_completed_syncs_schedule_to_completed(self):
+        """PROCESSING download already in completed folder syncs schedule to COMPLETED on restart-recovery."""
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            tmp_path = f.name
+        try:
+            download = MagicMock()
+            download.id = 21
+            download.status = DownloadStatus.PROCESSING.value
+            download.output_path = tmp_path
+            download.completed_at = None
+            download.error_message = None
+            download.is_vod = True
+
+            session = await self._make_recovery_session([download])
+
+            @asynccontextmanager
+            async def mock_session_maker():
+                yield session
+
+            manager = DownloadManager()
+            sync_calls = []
+
+            async def spy_sync(sess, dl_id, status):
+                sync_calls.append((dl_id, status))
+
+            manager._sync_schedule_status = spy_sync
+
+            with (
+                patch("services.download_manager.async_session_maker", mock_session_maker),
+                patch.object(manager, "_broadcast_log", AsyncMock()),
+                patch.object(manager, "_broadcast_progress", AsyncMock()),
+                patch.object(manager, "_path_is_under", return_value=True),
+                patch.object(manager, "_resolve_completed_folder", return_value=os.path.dirname(tmp_path)),
+                patch.object(manager, "_resolve_download_folder", return_value="/tmp/downloads_test"),
+            ):
+                await manager.recover_incomplete_downloads()
+
+            self.assertIn(
+                (21, DownloadStatus.COMPLETED.value),
+                sync_calls,
+                "Recovery must call _sync_schedule_status with COMPLETED when file is in completed folder.",
+            )
+        finally:
+            os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     unittest.main()
