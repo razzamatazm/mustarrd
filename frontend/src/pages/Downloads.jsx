@@ -648,7 +648,7 @@ export default function Downloads() {
                       <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
                       <Group gap="xs">
                         <Text size="xs" c="dimmed">
-                          {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}
+                          Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}
                         </Text>
                         <Text size="xs" c="dimmed">({formatDuration(rec.duration_minutes)})</Text>
                       </Group>
