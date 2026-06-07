@@ -826,9 +826,7 @@ export default function Settings() {
               value: f.value,
               label: f.label,
               disabled:
-                ['remux_mkv', 'remux_mp4', 'transcode_mkv', 'transcode_mp4'].includes(f.value) && !ffmpegReady
-                  ? true
-                  : ['transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && (!ffmpegReady || !comskipReady)
+                ['remux_mkv', 'remux_mp4', 'transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && !ffmpegReady
                   ? true
                   : false,
             }))}
@@ -847,7 +845,7 @@ export default function Settings() {
           {!comskipReady && (currentFormat === 'transcode_comskip' || currentFormat === 'transcode_mp4_comskip') && (
             <Alert color="yellow" variant="light">
               <Text size="sm">
-                Comskip is unavailable. See{' '}
+                Comskip binary not found in the default PATH. Enter the path to your comskip binary below, or see{' '}
                 <a href="https://github.com/erikkaashoek/Comskip" target="_blank" rel="noopener noreferrer">
                   github.com/erikkaashoek/Comskip
                 </a>{' '}
