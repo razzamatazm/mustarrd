@@ -22,6 +22,25 @@ from services.log_stream import backend_log_stream
 logger = logging.getLogger(__name__)
 
 
+def _friendly_connection_error(e: Exception) -> str:
+    """Translate a connection exception into a short, user-readable string."""
+    import aiohttp
+    msg = str(e)
+    if isinstance(e, asyncio.TimeoutError):
+        return "Connection timed out."
+    if isinstance(e, aiohttp.ClientConnectorError):
+        return "Cannot reach provider. Check the server URL."
+    if isinstance(e, aiohttp.ClientError):
+        return "Network error. Try again later."
+    if "Invalid credentials" in msg:
+        return "Invalid credentials. Check your username and password."
+    if "Authentication failed" in msg or "HTTP 401" in msg or "HTTP 403" in msg:
+        return "Provider rejected login. Check your username and password."
+    if "HTTP 5" in msg:
+        return "Provider server error. Try again later."
+    return msg or "Connection failed."
+
+
 class EPGIngestManager:
     def __init__(self):
         self._running = False
@@ -91,7 +110,7 @@ class EPGIngestManager:
             except Exception as exc:
                 self._status["last_error"] = str(exc)
                 await self._log(f"Account EPG refresh failed: {exc}", level="error", account=account)
-                await self._update_connection_status(account.id, ok=False)
+                await self._update_connection_status(account.id, ok=False, error=_friendly_connection_error(exc))
                 raise
             finally:
                 self._status.update({
@@ -143,7 +162,7 @@ class EPGIngestManager:
                 })
                 logger.exception("Error refreshing XMLTV for account %s", account.id)
                 await self._log(f"EPG refresh failed: {exc}", level="error", account=account)
-                await self._update_connection_status(account.id, ok=False)
+                await self._update_connection_status(account.id, ok=False, error=_friendly_connection_error(exc))
 
         self._status.update({
             "running": False,
@@ -345,7 +364,7 @@ class EPGIngestManager:
             account=account
         )
 
-    async def _update_connection_status(self, account_id: int, ok: bool) -> None:
+    async def _update_connection_status(self, account_id: int, ok: bool, error: str | None = None) -> None:
         try:
             async with async_session_maker() as session:
                 result = await session.execute(
@@ -355,6 +374,7 @@ class EPGIngestManager:
                 if account:
                     account.last_connection_ok = ok
                     account.last_connection_checked_at = datetime.now(timezone.utc)
+                    account.last_connection_error = error if not ok else None
                     await session.commit()
         except Exception:
             logger.exception("Failed to update connection status for account %s", account_id)

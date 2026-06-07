@@ -27,6 +27,7 @@ class XtreamAccount(Base):
     catchup_fallback_offset_minutes: Mapped[int] = mapped_column(Integer, default=0)
     last_connection_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     last_connection_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_connection_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     def to_dict(self):
         return {
@@ -44,4 +45,5 @@ class XtreamAccount(Base):
             "guide_offset_hours": int(self.guide_offset_hours or 0),
             "last_connection_ok": self.last_connection_ok,
             "last_connection_checked_at": self.last_connection_checked_at.isoformat() + "Z" if self.last_connection_checked_at else None,
+            "last_connection_error": self.last_connection_error,
         }

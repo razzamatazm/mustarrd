@@ -96,6 +96,9 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "xtream_accounts", "last_connection_checked_at"):
         await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN last_connection_checked_at DATETIME"))
 
+    if not await _column_exists(conn, "xtream_accounts", "last_connection_error"):
+        await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN last_connection_error TEXT"))
+
 
 async def _migrate_legacy_account_passwords() -> None:
     from models import XtreamAccount

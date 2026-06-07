@@ -210,41 +210,48 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
         )}
       </Group>
 
-      <Group mt="xs" gap={6} align="center">
-        <Box
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            flexShrink: 0,
-            backgroundColor:
+      <Stack mt="xs" gap={2}>
+        <Group gap={6} align="center">
+          <Box
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              flexShrink: 0,
+              backgroundColor:
+                account.last_connection_ok === true
+                  ? 'var(--mantine-color-green-6)'
+                  : account.last_connection_ok === false
+                  ? 'var(--mantine-color-red-6)'
+                  : 'var(--mantine-color-gray-5)',
+            }}
+          />
+          <Text
+            size="xs"
+            c={
               account.last_connection_ok === true
-                ? 'var(--mantine-color-green-6)'
+                ? 'green'
                 : account.last_connection_ok === false
-                ? 'var(--mantine-color-red-6)'
-                : 'var(--mantine-color-gray-5)',
-          }}
-        />
-        <Text
-          size="xs"
-          c={
-            account.last_connection_ok === true
-              ? 'green'
+                ? 'red'
+                : 'dimmed'
+            }
+          >
+            {account.last_connection_ok === true
+              ? 'Connected'
               : account.last_connection_ok === false
-              ? 'red'
-              : 'dimmed'
-          }
-        >
-          {account.last_connection_ok === true
-            ? 'Connected'
-            : account.last_connection_ok === false
-            ? 'Unreachable'
-            : 'Not checked yet'}
-          {account.last_connection_checked_at
-            ? ` · ${timeAgo(account.last_connection_checked_at)}`
-            : ''}
-        </Text>
-      </Group>
+              ? 'Unreachable'
+              : 'Not checked yet'}
+            {account.last_connection_checked_at
+              ? ` · ${timeAgo(account.last_connection_checked_at)}`
+              : ''}
+          </Text>
+        </Group>
+        {account.last_connection_ok === false && account.last_connection_error && (
+          <Text size="xs" c="dimmed" ml={14}>
+            {account.last_connection_error}
+          </Text>
+        )}
+      </Stack>
     </Card>
   )
 }

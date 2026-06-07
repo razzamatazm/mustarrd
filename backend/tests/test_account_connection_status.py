@@ -40,6 +40,39 @@ class ConnectionStatusUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(db_account.last_connection_ok)
         self.assertIsNotNone(db_account.last_connection_checked_at)
 
+    async def test_failure_stores_error_message(self):
+        """_update_connection_status stores the error string when ok=False."""
+        manager = EPGIngestManager()
+        db_account = MagicMock()
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=db_account)))
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.epg_ingest_manager.async_session_maker", return_value=session):
+            await manager._update_connection_status(account_id=1, ok=False, error="Invalid credentials. Check your username and password.")
+
+        self.assertEqual(db_account.last_connection_error, "Invalid credentials. Check your username and password.")
+
+    async def test_success_clears_error_message(self):
+        """_update_connection_status clears last_connection_error when ok=True."""
+        manager = EPGIngestManager()
+        db_account = MagicMock()
+        db_account.last_connection_error = "Previous error"
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=db_account)))
+        session.commit = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.epg_ingest_manager.async_session_maker", return_value=session):
+            await manager._update_connection_status(account_id=1, ok=True)
+
+        self.assertIsNone(db_account.last_connection_error)
+
     async def test_success_sets_last_connection_ok_true(self):
         """EPG refresh success writes last_connection_ok=True to the account."""
         manager = EPGIngestManager()
@@ -91,7 +124,11 @@ class ConnectionStatusUpdateTests(unittest.IsolatedAsyncioTestCase):
 
             await manager._refresh_all_accounts()
 
-        mock_status.assert_called_once_with(account.id, ok=False)
+        mock_status.assert_called_once()
+        call = mock_status.call_args
+        self.assertEqual(call.args[0], account.id)
+        self.assertFalse(call.kwargs["ok"])
+        self.assertIsNotNone(call.kwargs.get("error"))
 
 
 class AccountToDictTimestampTests(unittest.TestCase):
