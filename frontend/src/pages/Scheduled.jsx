@@ -79,6 +79,7 @@ function ScheduleCard({
   onOpenFileLocation,
   onPlayFile,
 }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const activeStatuses = ['scheduled', 'queued', 'downloading', 'processing', 'paused_low_space']
   const isActive = activeStatuses.includes(schedule.status)
   const canDelete = !isActive
@@ -129,7 +130,7 @@ function ScheduleCard({
                   <Menu.Item
                     color="red"
                     leftSection={<IconTrash size={14} />}
-                    onClick={() => onDelete(schedule)}
+                    onClick={() => setConfirmingDelete(true)}
                   >
                     Delete
                   </Menu.Item>
@@ -196,6 +197,26 @@ function ScheduleCard({
                 </Button>
               </>
             )}
+          </Group>
+        )}
+
+        {confirmingDelete && (
+          <Group gap="xs" justify="flex-end" pt={4} style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}>
+            <Text size="sm" c="dimmed">Delete this schedule?</Text>
+            <Button
+              size="xs"
+              color="red"
+              onClick={() => { onDelete(schedule); setConfirmingDelete(false) }}
+            >
+              Yes, delete
+            </Button>
+            <Button
+              size="xs"
+              variant="subtle"
+              onClick={() => setConfirmingDelete(false)}
+            >
+              Cancel
+            </Button>
           </Group>
         )}
       </Stack>
