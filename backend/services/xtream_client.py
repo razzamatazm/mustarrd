@@ -54,7 +54,8 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get categories: HTTP {response.status}")
-            return await response.json()
+            data = await response.json()
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_live_streams(self, category_id: Optional[str] = None) -> list:
         """Get list of live streams/channels."""
@@ -63,7 +64,8 @@ class XtreamClient:
         async with session.get(url) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get streams: HTTP {response.status}")
-            return await response.json()
+            data = await response.json()
+            return list(data.values()) if isinstance(data, dict) else data
 
     async def get_epg(self, stream_id: str) -> list:
         """Get full EPG for a specific channel."""
