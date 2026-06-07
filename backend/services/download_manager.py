@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import aiofiles
+import glob as glob_module
 import logging
 import os
 import shutil
@@ -901,6 +902,9 @@ class DownloadManager:
             original_file = Path(original_path)
             base_dir = original_file.parent
             stem = original_file.stem
+            # Escape glob special chars ([, ], ?) in the stem so channel names like
+            # "[BBC HD]" don't silently fail to match or accidentally match unrelated files.
+            escaped_stem = glob_module.escape(stem)
             completed_real = os.path.realpath(os.path.abspath(completed_path))
 
             if delete_original and original_path != completed_path and original_file.exists():
@@ -909,18 +913,18 @@ class DownloadManager:
             # Only remove known ComSkip/FFmpeg working files.
             # .xml/.srt/.ass/.vtt are user subtitle/metadata files, never ComSkip outputs.
             patterns = [
-                f"{stem}_seg*.ts",
-                f"{stem}.concat.txt",
-                f"{stem}.edl",
-                f"{stem}.txt",
-                f"{stem}.logo",
-                f"{stem}.csv",
-                f"{stem}.vdr",
+                f"{escaped_stem}_seg*.ts",
+                f"{escaped_stem}.concat.txt",
+                f"{escaped_stem}.edl",
+                f"{escaped_stem}.txt",
+                f"{escaped_stem}.logo",
+                f"{escaped_stem}.csv",
+                f"{escaped_stem}.vdr",
             ]
             if not keep_logs:
                 patterns.extend([
-                    f"{stem}.log",
-                    f"{stem}.*.ffmpeg.log",
+                    f"{escaped_stem}.log",
+                    f"{escaped_stem}.*.ffmpeg.log",
                 ])
 
             for pattern in patterns:
