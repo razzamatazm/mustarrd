@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Whole-hour durations now show as "1h" instead of "1h 0m"
+
+**What you would notice:** Any recording that is exactly one hour, two hours, and so on used to display its duration as "1h 0m" on the Scheduled and Downloads pages. The trailing "0m" added no useful information. Those durations now show as "1h", "2h", and so on. Recordings with a partial hour, like "1h 30m" or "45m", are not affected.
+
+**What changed:** The duration display on the Scheduled page and the Downloads > Upcoming tab now drops the "0m" when there are no extra minutes. No recording logic was changed.
+
+---
+
 ### Improved: Settings now groups post-processing options under clearer headings
 
 **What you would notice:** In Settings, the Post-Processing section previously showed "Max Concurrent Post-Processing" under a heading labelled "RECORDING FORMAT," which made it look like a format setting when it is not. The concurrent jobs control now lives under its own "CONCURRENCY" heading, and "RECORDING FORMAT" covers only the format-related options (output format, hardware acceleration, delete original, and ComSkip settings). The options themselves are unchanged; only the grouping is clearer.
