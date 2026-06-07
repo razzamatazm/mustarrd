@@ -445,21 +445,23 @@ export default function AccountsSection({ showTitle = true }) {
     <Stack>
       <Group justify="space-between">
         {showTitle ? <Title order={2}>Accounts</Title> : <Title order={4}>Accounts</Title>}
-        <Group>
-          <Button
-            variant="light"
-            color="orange"
-            leftSection={<IconRefresh size={16} />}
-            onClick={handleForceRefresh}
-            loading={forceRefreshMutation.isPending}
-            disabled={Boolean(epgStatus?.running)}
-          >
-            Force EPG Refresh
-          </Button>
-          <Button leftSection={<IconPlus size={16} />} onClick={handleAddClick}>
-            Add Account
-          </Button>
-        </Group>
+        {accounts?.length > 0 && (
+          <Group>
+            <Button
+              variant="light"
+              color="orange"
+              leftSection={<IconRefresh size={16} />}
+              onClick={handleForceRefresh}
+              loading={forceRefreshMutation.isPending}
+              disabled={Boolean(epgStatus?.running)}
+            >
+              Force EPG Refresh
+            </Button>
+            <Button leftSection={<IconPlus size={16} />} onClick={handleAddClick}>
+              Add Another Account
+            </Button>
+          </Group>
+        )}
       </Group>
 
       {accounts?.length === 0 ? (
