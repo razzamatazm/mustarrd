@@ -11,7 +11,6 @@ import {
   Tabs,
   Loader,
   Alert,
-  Tooltip,
   Button,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -161,14 +160,6 @@ function ScheduleCard({
           <Alert color="yellow" variant="light" p="xs">
             <Text size="xs">{schedule.status_message}</Text>
           </Alert>
-        )}
-
-        {schedule.download_status && schedule.download_status === 'completed' && schedule.download_id && (
-          <Tooltip label="Recording completed. View it in Downloads for file details.">
-            <Text size="xs" c="dimmed" truncate>
-              Recording finished. Download ID: {schedule.download_id}
-            </Text>
-          </Tooltip>
         )}
 
         {schedule.download_status === 'completed' && schedule.download_id && (
