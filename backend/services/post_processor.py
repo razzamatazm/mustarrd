@@ -788,13 +788,10 @@ class PostProcessor:
         input_file = Path(input_path)
         output_path = input_file.with_suffix(f".{output_format.value}")
 
-        # TS output always uses -c copy regardless of hw_accel, so TS-to-TS is always a
-        # no-op. Without this guard, non-CPU hw_accel misses the check below, ffmpeg
-        # writes to the same path as its input, and truncates the recording to 0 bytes.
-        if output_format == OutputFormat.TS and input_file.suffix.lower() == ".ts":
-            return str(input_path)
-        # If same format and no transcoding needed, skip
-        if input_file.suffix.lower() == f".{output_format.value}" and hw_accel == HardwareAccel.CPU:
+        # Same input and output format is always a no-op regardless of hw_accel.
+        # Without this guard, non-CPU hw_accel falls through and ffmpeg writes to the
+        # same path as its input, truncating the recording to 0 bytes before reading.
+        if input_file.suffix.lower() == f".{output_format.value}":
             return str(input_path)
 
         if not self.ffmpeg_available:
