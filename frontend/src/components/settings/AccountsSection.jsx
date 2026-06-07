@@ -142,9 +142,11 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
               Default
             </Badge>
           )}
-          <Badge color={account.is_active ? 'green' : 'gray'} variant="light">
-            {account.is_active ? 'Enabled' : 'Disabled'}
-          </Badge>
+          {!account.is_active && (
+            <Badge color="gray" variant="light">
+              Disabled
+            </Badge>
+          )}
           <Menu shadow="md" width={150}>
             <Menu.Target>
               <ActionIcon variant="subtle">
