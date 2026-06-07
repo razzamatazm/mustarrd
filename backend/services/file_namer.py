@@ -32,7 +32,7 @@ class FileNamer:
         # Remove multiple spaces
         sanitized = re.sub(r'\s+', ' ', sanitized)
         # Remove leading/trailing spaces and dots
-        sanitized = sanitized.strip(' .')
+        sanitized = sanitized.strip(' .') or "unknown-program"
         # Limit length
         if len(sanitized) > 200:
             sanitized = sanitized[:200]

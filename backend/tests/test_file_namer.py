@@ -37,6 +37,28 @@ class SanitizeFilenameTests(unittest.TestCase):
         self.assertNotIn('\\', result)
         self.assertNotIn('?', result)
 
+    def test_all_dots_returns_fallback(self):
+        # "..." strips to "" -> was producing hidden file ".ts"; must return fallback instead
+        result = FileNamer.sanitize_filename("...")
+        self.assertEqual(result, "unknown-program")
+
+    def test_all_spaces_returns_fallback(self):
+        result = FileNamer.sanitize_filename("   ")
+        self.assertEqual(result, "unknown-program")
+
+    def test_all_control_chars_returns_fallback(self):
+        result = FileNamer.sanitize_filename("\x00\x00")
+        self.assertEqual(result, "unknown-program")
+
+    def test_dots_and_spaces_returns_fallback(self):
+        result = FileNamer.sanitize_filename(".. ..")
+        self.assertEqual(result, "unknown-program")
+
+    def test_invisible_unicode_only_returns_fallback(self):
+        # Zero-width space + zero-width non-joiner -> stripped -> fallback
+        result = FileNamer.sanitize_filename("​‌")
+        self.assertEqual(result, "unknown-program")
+
 
 if __name__ == "__main__":
     unittest.main()
