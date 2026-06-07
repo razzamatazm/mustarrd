@@ -522,13 +522,64 @@ export default function Settings() {
   }
 
   const handleChange = (field, value) => {
-    setFormData((prev) => {
-      const next = { ...prev, [field]: value }
-      if (field === 'comskip_enabled' && value) {
-        next.transcode_enabled = true
-      }
-      return next
-    })
+    setFormData((prev) => ({ ...prev, [field]: value }))
+    setHasChanges(true)
+  }
+
+  const RECORDING_FORMATS = [
+    {
+      value: 'keep_original',
+      label: 'Keep original (.ts)',
+      description: 'No processing. The raw .ts file is kept as downloaded.',
+    },
+    {
+      value: 'remux_mkv',
+      label: 'MKV container (fast, no re-encode)',
+      description: 'Wrap the stream in an MKV file without re-encoding. Fast and lossless.',
+    },
+    {
+      value: 'transcode_mkv',
+      label: 'MKV (re-encode with ffmpeg)',
+      description: 'Re-encode to MKV using ffmpeg. Slower but fixes compatibility issues.',
+    },
+    {
+      value: 'transcode_mp4',
+      label: 'MP4 (re-encode with ffmpeg)',
+      description: 'Re-encode to MP4 using ffmpeg. Best compatibility with most devices and media players.',
+    },
+    {
+      value: 'transcode_comskip',
+      label: 'MKV + skip commercials',
+      description: 'Re-encode to MKV and remove commercials with ComSkip.',
+    },
+    {
+      value: 'transcode_mp4_comskip',
+      label: 'MP4 + skip commercials',
+      description: 'Re-encode to MP4 and remove commercials with ComSkip.',
+    },
+  ]
+
+  function getRecordingFormat(data) {
+    if (!data) return 'keep_original'
+    if (!data.transcode_enabled) return 'keep_original'
+    if (data.remux_only) return 'remux_mkv'
+    const isMp4 = data.transcode_format === 'mp4'
+    if (data.comskip_enabled) return isMp4 ? 'transcode_mp4_comskip' : 'transcode_comskip'
+    return isMp4 ? 'transcode_mp4' : 'transcode_mkv'
+  }
+
+  function handleFormatChange(value) {
+    const patches = {
+      keep_original: { transcode_enabled: false, remux_only: false, comskip_enabled: false },
+      remux_mkv: { transcode_enabled: true, remux_only: true, comskip_enabled: false, transcode_format: 'mkv' },
+      transcode_mkv: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mkv' },
+      transcode_mp4: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mp4' },
+      transcode_comskip: { transcode_enabled: true, remux_only: false, comskip_enabled: true, transcode_format: 'mkv' },
+      transcode_mp4_comskip: { transcode_enabled: true, remux_only: false, comskip_enabled: true, transcode_format: 'mp4' },
+    }
+    const patch = patches[value]
+    if (!patch) return
+    setFormData((prev) => ({ ...prev, ...patch }))
     setHasChanges(true)
   }
 
@@ -685,181 +736,172 @@ export default function Settings() {
     </Stack>
   )
 
-  const renderProcessing = () => (
-    <Stack gap="lg">
-      <Stack gap={2}>
-        <Text fw={600} size="lg">Post-Processing</Text>
-        <Text size="sm" c="dimmed">Transcoding and commercial removal after download completes</Text>
-      </Stack>
+  const renderProcessing = () => {
+    const currentFormat = getRecordingFormat(formData)
+    const isTranscoding = currentFormat !== 'keep_original'
+    const isFullTranscode = ['transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(currentFormat)
+    const ffmpegReady = toolsStatus?.ffmpeg?.available
+    const comskipReady = toolsStatus?.comskip?.available
 
-      {toolsStatus && (
-        <Stack gap="xs">
-          <Group gap="md">
-            <Badge
-              color={toolsStatus.ffmpeg?.available ? 'green' : 'red'}
-              variant="light"
-              leftSection={toolsStatus.ffmpeg?.available ? <IconCheck size={12} /> : <IconX size={12} />}
-            >
-              ffmpeg {toolsStatus.ffmpeg?.available ? 'ready' : 'unavailable'}
-            </Badge>
-            <Badge
-              color={toolsStatus.comskip?.available ? 'green' : 'red'}
-              variant="light"
-              leftSection={toolsStatus.comskip?.available ? <IconCheck size={12} /> : <IconX size={12} />}
-            >
-              Comskip {toolsStatus.comskip?.available ? 'ready' : 'unavailable'}
-            </Badge>
-          </Group>
-          {toolsStatus.ffmpeg?.error && (
-            <Text size="xs" c="red">ffmpeg error: {toolsStatus.ffmpeg.error}</Text>
+    return (
+      <Stack gap="lg">
+        <Stack gap={2}>
+          <Text fw={600} size="lg">Post-Processing</Text>
+          <Text size="sm" c="dimmed">How Mustarrd processes recordings after download</Text>
+        </Stack>
+
+        {toolsStatus && (
+          <Stack gap="xs">
+            <Group gap="md">
+              <Badge
+                color={ffmpegReady ? 'green' : 'red'}
+                variant="light"
+                leftSection={ffmpegReady ? <IconCheck size={12} /> : <IconX size={12} />}
+              >
+                ffmpeg {ffmpegReady ? 'ready' : 'unavailable'}
+              </Badge>
+              <Badge
+                color={comskipReady ? 'green' : 'red'}
+                variant="light"
+                leftSection={comskipReady ? <IconCheck size={12} /> : <IconX size={12} />}
+              >
+                Comskip {comskipReady ? 'ready' : 'unavailable'}
+              </Badge>
+            </Group>
+            {toolsStatus.ffmpeg?.error && (
+              <Text size="xs" c="red">ffmpeg error: {toolsStatus.ffmpeg.error}</Text>
+            )}
+            {toolsStatus.comskip?.error && (
+              <Text size="xs" c="red">Comskip error: {toolsStatus.comskip.error}</Text>
+            )}
+            {toolsStatus.vaapi?.enabled && (
+              <Text size="xs" c="dimmed">
+                VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}
+                {toolsStatus.vaapi.source ? ` (${toolsStatus.vaapi.source})` : ''}
+                {toolsStatus.vaapi.kernel_driver ? `, kernel: ${toolsStatus.vaapi.kernel_driver}` : ''}
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        <Divider variant="dashed" />
+
+        <Stack gap="md">
+          <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Recording Format</Text>
+
+          <NumberInput
+            label="Max Concurrent Post-Processing"
+            description="How many files can be processed at once (recommended: 1)"
+            min={1}
+            max={10}
+            value={formData.max_concurrent_post_processing ?? 1}
+            onChange={(val) => handleChange('max_concurrent_post_processing', val)}
+          />
+
+          {(formData.max_concurrent_post_processing ?? 1) > 1 && (
+            <Alert icon={<IconAlertCircle size={16} />} color="yellow" variant="light">
+              <Text size="sm">
+                Running multiple conversions at once can saturate your CPU/GPU and disk. Some GPUs also have limited
+                concurrent encoding sessions.
+              </Text>
+            </Alert>
           )}
-          {toolsStatus.comskip?.error && (
-            <Text size="xs" c="red">comskip error: {toolsStatus.comskip.error}</Text>
+
+          <Select
+            label="Recording Format"
+            description={RECORDING_FORMATS.find(f => f.value === currentFormat)?.description}
+            data={RECORDING_FORMATS.map(f => ({
+              value: f.value,
+              label: f.label,
+              disabled:
+                ['remux_mkv', 'transcode_mkv', 'transcode_mp4'].includes(f.value) && !ffmpegReady
+                  ? true
+                  : ['transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && (!ffmpegReady || !comskipReady)
+                  ? true
+                  : false,
+            }))}
+            value={currentFormat}
+            onChange={handleFormatChange}
+          />
+
+          {!ffmpegReady && currentFormat !== 'keep_original' && (
+            <Alert color="yellow" variant="light">
+              <Text size="sm">
+                ffmpeg is unavailable. The Docker image includes ffmpeg; install or fix it manually if running locally.
+              </Text>
+            </Alert>
           )}
-          {toolsStatus.vaapi?.enabled && (
+
+          {!comskipReady && (currentFormat === 'transcode_comskip' || currentFormat === 'transcode_mp4_comskip') && (
+            <Alert color="yellow" variant="light">
+              <Text size="sm">
+                Comskip is unavailable. See{' '}
+                <a href="https://github.com/erikkaashoek/Comskip" target="_blank" rel="noopener noreferrer">
+                  github.com/erikkaashoek/Comskip
+                </a>{' '}
+                for installation instructions.
+              </Text>
+            </Alert>
+          )}
+
+          {isFullTranscode && (
+            <Select
+              label="Hardware Acceleration"
+              description="Use GPU for faster encoding"
+              data={toolsStatus?.hardware_accels?.map(hw => ({
+                value: hw.id,
+                label: hw.name,
+                disabled: !hw.available,
+              })) || [{ value: 'cpu', label: 'CPU (Software)' }]}
+              value={formData.hw_accel || 'cpu'}
+              onChange={(val) => handleChange('hw_accel', val)}
+            />
+          )}
+
+          {toolsStatus?.vaapi?.enabled && formData.hw_accel === 'vaapi' && isFullTranscode && (
             <Text size="xs" c="dimmed">
-              VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}
-              {toolsStatus.vaapi.source ? ` (${toolsStatus.vaapi.source})` : ''}
-              {toolsStatus.vaapi.kernel_driver ? `, kernel: ${toolsStatus.vaapi.kernel_driver}` : ''}
+              Active VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}.
+              {toolsStatus.vaapi.source ? ` Source: ${toolsStatus.vaapi.source}.` : ''}
             </Text>
+          )}
+
+          {isTranscoding && (
+            <SettingRow
+              label="Delete original after processing"
+              description="Remove the source .ts file once processing is complete"
+            >
+              <Switch
+                checked={formData.delete_original_after_transcode !== false}
+                onChange={(e) => handleChange('delete_original_after_transcode', e.currentTarget.checked)}
+              />
+            </SettingRow>
+          )}
+
+          {(currentFormat === 'transcode_comskip' || currentFormat === 'transcode_mp4_comskip') && (
+            <Stack gap="xs">
+              <Text size="xs" c="dimmed">
+                Commercials are detected and removed, then the result is saved as {currentFormat === 'transcode_mp4_comskip' ? 'MP4' : 'MKV'}.
+              </Text>
+              <TextInput
+                label="Comskip Binary Path (optional)"
+                description="Custom path to the comskip binary"
+                placeholder="/usr/local/bin/comskip"
+                value={formData.comskip_path || ''}
+                onChange={(e) => handleChange('comskip_path', e.target.value || null)}
+              />
+              <TextInput
+                label="Comskip INI Path (optional)"
+                description="Custom comskip.ini file (leave blank to use the app default)"
+                placeholder="/path/to/comskip.ini"
+                value={formData.comskip_ini_path || ''}
+                onChange={(e) => handleChange('comskip_ini_path', e.target.value || null)}
+              />
+            </Stack>
           )}
         </Stack>
-      )}
-
-      <Divider variant="dashed" />
-
-      <Stack gap="md">
-        <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Transcoding</Text>
-        <NumberInput
-          label="Max Concurrent Post-Processing"
-          description="How many files can be processed at once (recommended: 1)"
-          min={1}
-          max={10}
-          value={formData.max_concurrent_post_processing ?? 1}
-          onChange={(val) => handleChange('max_concurrent_post_processing', val)}
-        />
-
-        {(formData.max_concurrent_post_processing ?? 1) > 1 && (
-          <Alert icon={<IconAlertCircle size={16} />} color="yellow" variant="light">
-            <Text size="sm">
-              Running multiple conversions at once can saturate your CPU/GPU and disk. Some GPUs also have limited
-              concurrent encoding sessions.
-            </Text>
-          </Alert>
-        )}
-
-        <Select
-          label="Output Format"
-          data={[
-            { value: 'mp4', label: 'MP4 (H.264 + AAC)' },
-            { value: 'mkv', label: 'MKV (best compatibility)' },
-            { value: 'ts', label: 'TS (keep original)' },
-          ]}
-          value={formData.transcode_format || 'mkv'}
-          onChange={(val) => handleChange('transcode_format', val)}
-        />
-
-        <SettingRow
-          label="Remux only (no re-encode)"
-          description="Faster and lossless; may show minor glitches at cut points"
-        >
-          <Switch
-            checked={formData.remux_only !== false}
-            onChange={(e) => handleChange('remux_only', e.currentTarget.checked)}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="Delete original after processing"
-          description="Remove the source file once transcoding is complete"
-        >
-          <Switch
-            checked={formData.delete_original_after_transcode !== false}
-            onChange={(e) => handleChange('delete_original_after_transcode', e.currentTarget.checked)}
-          />
-        </SettingRow>
-
-        {!formData.remux_only && (
-          <Select
-            label="Hardware Acceleration"
-            description="Use GPU for faster encoding"
-            data={toolsStatus?.hardware_accels?.map(hw => ({
-              value: hw.id,
-              label: hw.name,
-              disabled: !hw.available,
-            })) || [{ value: 'cpu', label: 'CPU (Software)' }]}
-            value={formData.hw_accel || 'cpu'}
-            onChange={(val) => handleChange('hw_accel', val)}
-          />
-        )}
-
-        {!toolsStatus?.ffmpeg?.available && (
-          <Alert color="yellow" variant="light">
-            <Text size="sm">
-              ffmpeg is unavailable. The Docker image includes ffmpeg; install or fix it manually if running locally.
-            </Text>
-          </Alert>
-        )}
-
-        {toolsStatus?.vaapi?.enabled && formData.hw_accel === 'vaapi' && !formData.remux_only && (
-          <Text size="xs" c="dimmed">
-            Active VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}.
-            {toolsStatus.vaapi.source ? ` Source: ${toolsStatus.vaapi.source}.` : ''}
-          </Text>
-        )}
       </Stack>
-
-      <Divider variant="dashed" />
-
-      <Stack gap="md">
-        <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>Commercial Detection</Text>
-        <SettingRow
-          label="Enable Comskip"
-          description="Automatically detect and remove commercials from recordings"
-        >
-          <Switch
-            checked={formData.comskip_enabled || false}
-            onChange={(e) => handleChange('comskip_enabled', e.currentTarget.checked)}
-            disabled={!toolsStatus?.comskip?.available}
-          />
-        </SettingRow>
-
-        {formData.comskip_enabled && (
-          <>
-            <Text size="xs" c="dimmed">
-              Commercials will be cut out and the result remuxed using your transcoding settings above.
-            </Text>
-            <TextInput
-              label="Comskip Binary Path (optional)"
-              description="Custom path to the comskip binary"
-              placeholder="/usr/local/bin/comskip"
-              value={formData.comskip_path || ''}
-              onChange={(e) => handleChange('comskip_path', e.target.value || null)}
-            />
-            <TextInput
-              label="Comskip INI Path (optional)"
-              description="Custom comskip.ini file (leave blank to use the app default)"
-              placeholder="/path/to/comskip.ini"
-              value={formData.comskip_ini_path || ''}
-              onChange={(e) => handleChange('comskip_ini_path', e.target.value || null)}
-            />
-          </>
-        )}
-
-        {!toolsStatus?.comskip?.available && (
-          <Alert color="yellow" variant="light">
-            <Text size="sm">
-              Comskip is unavailable. See{' '}
-              <a href="https://github.com/erikkaashoek/Comskip" target="_blank" rel="noopener noreferrer">
-                github.com/erikkaashoek/Comskip
-              </a>{' '}
-              for installation instructions.
-            </Text>
-          </Alert>
-        )}
-      </Stack>
-    </Stack>
-  )
+    )
+  }
 
   const renderNaming = () => (
     <Stack gap="lg">
