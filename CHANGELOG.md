@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Improved: Settings now has a single Recording Format dropdown instead of separate toggles
+
+**What you would notice:** The Settings page previously showed four separate fields for post-processing: "Enable Transcoding," "Remux Only," "Enable ComSkip," and a Transcode Format selector. These are now combined into a single "Recording Format" dropdown with plain-English labels. Your existing configuration is read and shown correctly in the new dropdown. Nothing about how recordings are saved has changed.
+
+**What changed:** The four post-processing fields on the Settings page were replaced with one dropdown. The available options are: Keep original (.ts), MKV container (fast, no re-encode), MP4 container (fast, no re-encode), MKV (re-encode with FFmpeg), MP4 (re-encode with FFmpeg), MKV + skip commercials, and MP4 + skip commercials. This is a Settings page visual change only. The backend settings that control recording behavior are unchanged.
+
+---
+
+### Fixed: Guide data for a deleted account is now removed immediately
+
+**What you would notice:** If you deleted an account and then added a new one, the new account's program guide could briefly show programs from the deleted account before the guide refreshed. This happened because SQLite can reuse account ID numbers, so the new account would inadvertently pick up the old guide data. This is now fixed. When an account is deleted, all of its guide data is removed at the same time.
+
+**What changed:** Account deletion now deletes all program guide rows for that account as part of the same operation, and clears the in-memory guide cache so no stale data can be returned to the browser before the cache resets.
+
+---
+
 ### Fixed: Deleting an account now cancels its scheduled recordings and stops active downloads
 
 **What you would notice:** Before this fix, deleting an account from Mustarrd left its scheduled recordings in a broken state. On the next scheduler check, those recordings would fail with a confusing "Account not found" error rather than a clear reason. Any download that was actively running when you deleted the account would keep running in the background with nowhere to save to. Now, deleting an account immediately cancels all its pending and active scheduled recordings with a clear "Account deleted" note, and any download that was in progress is stopped cleanly.
