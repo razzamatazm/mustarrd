@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-07
 
+### Fixed: Settings no longer accepts negative recording padding values
+
+**What you would notice:** Before this fix, you could save a negative number for "Default pre-padding" or "Default post-padding" in Settings and Mustarrd would silently accept it. A negative padding value shifted the recording start time in the wrong direction and shortened the captured duration, causing recordings to miss content or fail without any clear explanation. Mustarrd now rejects negative values immediately and returns an error, so your padding settings always behave as expected.
+
+**What changed:** The Settings API now validates that the default pre-padding and post-padding minutes must be zero or greater. This matches the same rule that already applied to per-schedule padding. Existing valid settings are not affected.
+
+---
+
 ### Improved: Downloads page no longer shows blank progress bars for stages that are not running
 
 **What you would notice:** While a recording was downloading, the Downloads page showed three progress bars: Download, Commercial Detect, and Re-encode. For most users who have ComSkip and transcoding turned off, the Commercial Detect and Re-encode bars appeared immediately at zero with blank labels and stayed that way for the entire download. It looked like something was broken or stuck. Now only the stages that are actually running show a bar.
