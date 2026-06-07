@@ -43,7 +43,7 @@ import {
   getNowUtc,
 } from '../utils/channelTime'
 
-function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading, isError }) {
+function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading, isError, isAdmin }) {
   const [search, setSearch] = useState('')
 
   const filteredChannels = useMemo(() => {
@@ -69,11 +69,17 @@ function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading, is
           Could not reach your provider.
         </Text>
         <Text size="xs" c="dimmed" ta="center">
-          Check your account status in{' '}
-          <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
-            Settings → Accounts
-          </Link>
-          .
+          {isAdmin ? (
+            <>
+              Check your account status in{' '}
+              <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+                Settings → Accounts
+              </Link>
+              .
+            </>
+          ) : (
+            'Contact your administrator to check the account connection.'
+          )}
         </Text>
       </Stack>
     )
@@ -379,6 +385,11 @@ export default function Browse() {
   const [desktopSeriesHeight, setDesktopSeriesHeight] = useState(getInitialDesktopPanelHeight)
   const [mobileMoviesView, setMobileMoviesView] = useState('categories')
   const [mobileSeriesView, setMobileSeriesView] = useState('categories')
+
+  const { data: authStatus } = useQuery({
+    queryKey: ['auth', 'status'],
+    queryFn: authApi.status,
+  })
 
   // Fetch accounts
   const { data: accounts, isLoading: accountsLoading } = useQuery({
@@ -936,6 +947,7 @@ export default function Browse() {
                     onSelectChannel={handleSelectChannel}
                     isLoading={channelsLoading}
                     isError={channelsIsError}
+                    isAdmin={authStatus?.is_admin}
                   />
                 </Stack>
               </Card>
@@ -968,6 +980,7 @@ export default function Browse() {
                     onSelectChannel={handleSelectChannel}
                     isLoading={channelsLoading}
                     isError={channelsIsError}
+                    isAdmin={authStatus?.is_admin}
                   />
                 </Stack>
               </Card>
