@@ -575,27 +575,45 @@ class EPGIngestManager:
         if not value:
             return None
         value = value.strip()
-        if len(value) >= 14:
+        # Split on first space to separate date digits from optional timezone.
+        # Providers may omit seconds (12-digit YYYYMMDDHHmm) per the XMLTV spec.
+        if " " in value:
+            date_part, tz_part = value.split(" ", 1)
+            tz_part = tz_part.strip()
+        elif len(value) >= 14:
             date_part = value[:14]
             tz_part = value[14:].strip()
+        elif len(value) >= 12:
+            date_part = value[:12]
+            tz_part = value[12:].strip()
+        else:
+            return None
+
+        if len(date_part) == 14:
+            fmt = "%Y%m%d%H%M%S"
+        elif len(date_part) == 12:
+            fmt = "%Y%m%d%H%M"
+        else:
+            return None
+
+        try:
+            dt = datetime.strptime(date_part, fmt)
+        except ValueError:
+            return None
+
+        if tz_part:
             try:
-                dt = datetime.strptime(date_part, "%Y%m%d%H%M%S")
-            except ValueError:
-                return None
-            if tz_part:
-                try:
-                    if tz_part[0] not in "+-":
-                        tz_part = tz_part.replace(" ", "")
-                    if tz_part.upper() == "Z":
-                        return dt.replace(tzinfo=timezone.utc)
-                    if len(tz_part) == 6 and tz_part[3] == ":":
-                        tz_part = tz_part.replace(":", "")
-                    offset = datetime.strptime(tz_part, "%z").tzinfo
-                    return dt.replace(tzinfo=offset)
-                except ValueError:
+                if tz_part[0] not in "+-":
+                    tz_part = tz_part.replace(" ", "")
+                if tz_part.upper() == "Z":
                     return dt.replace(tzinfo=timezone.utc)
-            return dt.replace(tzinfo=timezone.utc)
-        return None
+                if len(tz_part) == 6 and tz_part[3] == ":":
+                    tz_part = tz_part.replace(":", "")
+                offset = datetime.strptime(tz_part, "%z").tzinfo
+                return dt.replace(tzinfo=offset)
+            except ValueError:
+                return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=timezone.utc)
 
     def _extract_text(self, elem: Element, tag: str) -> Optional[str]:
         child = elem.find(tag)
