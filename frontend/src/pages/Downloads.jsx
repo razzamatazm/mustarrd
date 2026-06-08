@@ -589,7 +589,7 @@ export default function Downloads() {
       </Group>
 
       <Tabs defaultValue="active">
-        <Tabs.List>
+        <Tabs.List grow style={{ flexWrap: 'nowrap' }}>
           <Tabs.Tab value="active" leftSection={<IconDownload size={16} />}>
             Active {activeDownloads.length > 0 && `(${activeDownloads.length})`}
           </Tabs.Tab>
