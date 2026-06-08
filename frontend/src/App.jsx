@@ -495,7 +495,7 @@ function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        {showLowDiskBanner && (
+        {showLowDiskBanner && authStatus?.authenticated && (
           <Alert
             icon={<IconAlertTriangle size={16} />}
             color="orange"
