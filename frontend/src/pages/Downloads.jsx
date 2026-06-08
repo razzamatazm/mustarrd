@@ -280,9 +280,14 @@ function DownloadCard({
         {download.status === 'completed' && (
           <Tooltip label={download.output_path}>
             <Text size="xs" c="dimmed" truncate>
-              Saved to: {completedFileName}{download.file_size > 0 ? ` · ${formatBytes(download.file_size)}` : ''}
+              Saved to: {completedFileName}
             </Text>
           </Tooltip>
+        )}
+        {download.status === 'completed' && download.file_size > 0 && (
+          <Text size="xs" c="dimmed">
+            Download size: {formatBytes(download.file_size)}
+          </Text>
         )}
         {download.status === 'completed' && (
           <Group gap="xs">
