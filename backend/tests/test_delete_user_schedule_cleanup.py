@@ -154,6 +154,39 @@ class DeleteUserScheduleCleanupTests(unittest.IsolatedAsyncioTestCase):
         session.delete.assert_awaited_with(user)
         session.commit.assert_awaited()
 
+    async def test_commit_before_cancel_download(self):
+        """session.commit must happen before cancel_download to avoid SQLite lock."""
+        user = _make_user()
+        dl = _make_download(42, DownloadStatus.DOWNLOADING.value)
+        call_order = []
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=[
+            _scalar_one(user),
+            AsyncMock(),
+            AsyncMock(),
+            _scalar_list([]),
+            _scalar_list([dl]),
+        ])
+
+        async def tracked_commit():
+            call_order.append("commit")
+        session.commit.side_effect = tracked_commit
+
+        with patch("api.admin_users.download_manager") as mock_dm:
+            async def tracked_cancel(dl_id):
+                call_order.append(f"cancel:{dl_id}")
+            mock_dm.cancel_download.side_effect = tracked_cancel
+            mock_dm.disconnect_user_websockets = AsyncMock()
+            await delete_user(user.id, None, session)
+
+        self.assertIn("commit", call_order, "commit was never called")
+        self.assertIn("cancel:42", call_order, "cancel_download was never called")
+        commit_pos = call_order.index("commit")
+        cancel_pos = call_order.index("cancel:42")
+        self.assertLess(commit_pos, cancel_pos,
+                        f"cancel_download called before commit: {call_order}")
+
 
 if __name__ == "__main__":
     unittest.main()
