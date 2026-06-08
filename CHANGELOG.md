@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Settings now shows when your program guide last synced, with a Refresh Now button
+
+**What you would notice:** There was no way to tell from Settings whether your program guide data was fresh or stale. You had to go to Settings > Accounts and use the Force EPG Refresh button there. A new Guide section is now available in Settings, between File Naming and Appearance. It shows the date and time your guide last synced (for example, "Last synced: Today at 10:30 PM") and a Refresh Now button you can click without leaving Settings. If the guide has never synced, it says "Guide not yet synced." The button shows a spinner while running and cannot be double-clicked.
+
+**What changed:** A new Guide section was added to the Settings sidebar. It uses the same data already available to the Accounts page, so no backend logic was changed. The change is purely in the settings interface.
+
+---
+
+### Fixed: ComSkip settings panel now appears correctly after the setup wizard runs
+
+**What you would notice:** If you run Mustarrd on Docker and ComSkip is installed, the setup wizard recommends and applies the "MKV container + skip commercials" recording profile. After finishing the wizard and opening Settings > Post-Processing, the dropdown showed "MKV container (fast, no re-encode)" with no ComSkip settings below it. There was no way to see or change the ComSkip binary path or configuration file path. Worse, saving any setting in that state silently switched your recording profile from the fast stream-copy method to a slower full re-encode, which uses more CPU and takes longer. After this fix, the correct profile label appears in the dropdown, the ComSkip binary and configuration file fields are visible, and saving settings preserves the fast stream-copy profile exactly as the wizard set it.
+
+**What changed:** Two bugs were fixed. In the frontend, the recording format detection logic checked the wrong condition first, so a valid "fast stream-copy + commercial removal" state was silently mapped to the plain MKV option. In the backend, settings save incorrectly forced the fast stream-copy flag off whenever ComSkip was enabled, overwriting the profile on every save. Both are now corrected. A regression test was added to verify that the fast ComSkip profile survives a settings save without being changed.
+
+---
+
 ### Improved: Edit Account button now appears directly on unreachable provider cards
 
 **What you would notice:** When an IPTV account shows as unreachable on the Accounts settings page, the next step is almost always to fix the server URL or credentials. Previously the only way to do that was to open the three-dot menu on the card and find the Edit option, which is easy to miss. An "Edit Account" button now appears directly below the error message on any unreachable provider card, so you can correct the details right away without hunting for a menu.
