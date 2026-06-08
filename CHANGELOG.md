@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Retry button now appears directly on failed and cancelled download cards
+
+**What you would notice:** When a download failed or was cancelled, the only way to retry it was to open the three-dot action menu on the card and find the Retry option. That menu is easy to miss, especially on a phone. The Retry button now appears directly on the card itself, right alongside the other action buttons, so you can act immediately without hunting through a menu.
+
+**What changed:** A Retry button was added inline to failed and cancelled download cards in the History tab. No download logic was changed. The button uses the same retry action that was already available in the menu.
+
+---
+
+### Fixed: Series episode downloads with very long titles no longer fail on Linux
+
+**What you would notice:** If you downloaded a series episode where the combined length of the show name and episode title was very long (more than about 200 characters, most common with Korean, Japanese, or Chinese titles), the download would fail silently with no clear explanation. The fix in a previous release capped each part individually, but the combined result could still be too long when both parts were at their individual limits. After this fix, the combined filename is always trimmed to fit, and the download completes normally.
+
+**What changed:** After assembling the show name and episode title into a single filename, the result is now trimmed to 200 UTF-8 bytes before the file extension is added. Each part was already capped individually, but the assembled combination was never checked. This means a show and episode both with 200-byte names no longer produce a 400-byte filename that Linux refuses to write.
+
+---
+
 ### Fixed: EPG guide no longer goes stale with large IPTV providers
 
 **What you would notice:** If your IPTV provider serves a large program guide file (common with providers that carry many channels), Mustarrd would silently fail to refresh the guide and show stale or missing program listings with no explanation. After this fix, Mustarrd waits up to 5 minutes for the guide download to complete, matching the extra time large files need on a slow connection or a busy provider.
