@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Program guide now loads correctly for providers that use a namespace in their XMLTV feed
+
+**What you would notice:** Some IPTV providers include a specific XML marker called a namespace at the top of their program guide file. If your provider used one, Mustarrd would silently import zero programs. The Browse and Catchup pages would appear completely empty with no error message shown anywhere. After this fix, the guide loads normally for all providers regardless of whether their XMLTV file includes a namespace.
+
+**What changed:** Mustarrd's program guide parser now strips namespace prefixes from tag names before processing them, so it correctly identifies channels and programs even when the provider's XMLTV file includes an XML namespace declaration. No changes were made to how downloads or recordings work.
+
+---
+
+### Fixed: Scheduled recordings now fire at the correct time for providers that label timezones by name
+
+**What you would notice:** Some IPTV providers write timezone abbreviations such as EST, PST, CET, or BST directly in their program guide timestamps instead of using a numeric offset. Mustarrd was treating all of those as UTC, storing the time wrong by the full offset of the timezone. EST programs were off by 5 hours; UK summer (BST) programs were off by 1 hour. A recording scheduled for 8:00 PM EST would actually fire at 1:00 AM the next day. After this fix, named timezone abbreviations are converted to the correct UTC time before storing, so scheduled recordings target the right content.
+
+**What changed:** The program guide time parser now recognises common named timezone abbreviations (EST, EDT, CST, CDT, MST, MDT, PST, PDT, CET, CEST, BST, GMT, and others) and applies the correct UTC offset for each. Previously, any named timezone abbreviation that was not a numeric offset was silently stored as UTC. Recordings already scheduled before this update are not affected.
+
+---
+
+### Improved: Browse EPG right panel is now fully blank when the provider is unreachable
+
+**What you would notice:** When your IPTV provider cannot be reached, Browse EPG shows a connection error in the left panel. After a fix earlier today, the "Select a channel to view its EPG" placeholder text was already hidden in that state. A camera icon and "No channel selected" header in the right panel were still visible, which could suggest that selecting a channel was possible when it was not. Both the icon and header are now hidden in error state. The right panel is completely blank, keeping your attention on the connection error and the link to Settings.
+
+**What changed:** A one-line guard was added to the Browse EPG right panel so the header row does not render when the provider is known to be unreachable. No backend changes were made.
+
+---
+
 ### Fixed: Disabling a user now immediately ends their live downloads feed
 
 **What you would notice:** Before this fix, an admin could disable a user account on the Users page, but if that user had the Downloads page open, their real-time progress feed stayed active for the rest of their session. They would continue seeing live download updates even though their account had been disabled. After this fix, disabling a user closes their connection immediately. Their live feed stops as soon as the admin saves the change.
