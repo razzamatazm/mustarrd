@@ -80,6 +80,7 @@ class ScheduledManager:
                     ready.append(schedule)
 
             if not ready:
+                await session.commit()
                 return
 
             free_gb = self._get_free_space_gb(download_folder)
