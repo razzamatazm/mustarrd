@@ -436,6 +436,8 @@ async def plex_login_complete(
         user = user_result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=500, detail="Plex identity is mapped to a missing user")
+        if user.status == "disabled":
+            raise HTTPException(status_code=403, detail="Your account has been disabled")
     else:
         user = User(
             role="download_only",
@@ -456,7 +458,8 @@ async def plex_login_complete(
         )
         session.add(identity)
 
-    user.status = "active"
+    if user.status != "active":
+        user.status = "active"
     user.last_login_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     identity.provider_username = str(username)
