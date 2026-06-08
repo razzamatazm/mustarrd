@@ -12,6 +12,7 @@ import {
   Loader,
   Alert,
   Button,
+  Select,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useNavigate, Link } from 'react-router-dom'
@@ -29,6 +30,7 @@ import {
   IconSettings,
   IconPlayerPlay,
   IconFolderOpen,
+  IconFilter,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -254,6 +256,7 @@ export default function Scheduled() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localItems, setLocalItems] = useState([])
+  const [historyFilter, setHistoryFilter] = useState('all')
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
   const isDesktop = Boolean(desktopApi?.openFileLocation && desktopApi?.playFile)
 
@@ -366,6 +369,9 @@ export default function Scheduled() {
   const historySchedules = localItems?.filter((s) =>
     ['completed', 'failed', 'cancelled'].includes(s.status)
   ) || []
+  const filteredHistorySchedules = historyFilter === 'all'
+    ? historySchedules
+    : historySchedules.filter((s) => s.status === historyFilter)
   const accountGuideOffsets = Object.fromEntries(
     (accounts || []).map((account) => [Number(account.id), getGuideOffsetHours(account.guide_offset_hours)])
   )
@@ -451,7 +457,25 @@ export default function Scheduled() {
             </Card>
           ) : (
             <Stack gap="md">
-              {historySchedules.map((schedule) => (
+              <Select
+                size="xs"
+                w={160}
+                value={historyFilter}
+                onChange={(v) => setHistoryFilter(v || 'all')}
+                leftSection={<IconFilter size={14} />}
+                allowDeselect={false}
+                data={[
+                  { value: 'all', label: 'All statuses' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'failed', label: 'Failed' },
+                  { value: 'cancelled', label: 'Cancelled' },
+                ]}
+              />
+              {filteredHistorySchedules.length === 0 ? (
+                <Text c="dimmed" ta="center" py="lg" size="sm">
+                  No {historyFilter} scheduled recordings.
+                </Text>
+              ) : filteredHistorySchedules.map((schedule) => (
                 <ScheduleCard
                   key={schedule.id}
                   schedule={schedule}
