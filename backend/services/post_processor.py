@@ -1203,9 +1203,10 @@ class PostProcessor:
             f"Commercial removal: duration={duration:.3f}s"
         )
         if duration <= 0:
-            await self._notify_log(
-                log_callback,
-                "Commercial removal: ffprobe duration unavailable; last segment will run to EOF."
+            raise Exception(
+                "Commercial removal requires ffprobe to determine video duration, "
+                "but ffprobe was not found or returned no duration. "
+                "Please ensure ffprobe is installed alongside ffmpeg."
             )
 
         # Build keep segments (inverse of commercial segments)
