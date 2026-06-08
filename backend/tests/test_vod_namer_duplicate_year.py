@@ -62,7 +62,7 @@ class MovieOutputPathDuplicateYearTests(unittest.TestCase):
         """When year=None, no year suffix is appended."""
         result = movie_output_path("/downloads", "Inception", None, "mkv")
         basename = Path(result).name
-        self.assertNotIn("(", basename.replace("(", "").replace(")", ""),
+        self.assertNotIn("(", basename,
                          "Unexpected parentheses when year is None")
         import re
         self.assertIsNone(re.search(r'\(\d{4}\)', basename),

@@ -23,7 +23,8 @@ def _safe_extension(ext: Optional[str]) -> str:
 def movie_output_path(download_folder: str, title: str, year: Optional[int], extension: Optional[str]) -> str:
     safe_title = _sanitize_component(title)
     if year:
-        filename = f"{safe_title} ({year})"
+        title_base = re.sub(r'\s*\(\d{4}\)\s*$', '', safe_title)
+        filename = f"{title_base} ({year})"
     else:
         filename = safe_title
     filename = f"{filename}.{_safe_extension(extension)}"
