@@ -157,7 +157,7 @@ function ScheduleCard({
           </Alert>
         )}
 
-        {!schedule.status_message && schedule.download_error_message && (
+        {!schedule.status_message && schedule.download_status === 'failed' && schedule.download_error_message && (
           <Alert color="red" variant="light" p="xs">
             <Text size="xs">{schedule.download_error_message}</Text>
           </Alert>

@@ -140,6 +140,50 @@ class ScheduleFailedErrorMessageTests(unittest.IsolatedAsyncioTestCase):
             "Connection timed out after 30s",
         )
 
+    async def test_completed_with_warnings_has_completed_download_status(self):
+        """
+        A completed download whose error_message is set to a warnings string
+        (e.g. "Completed with warnings: comskip exited with code 1") must still
+        have download_status='completed' in the API response.
+
+        This locks in the backend contract that the frontend gate
+        `download_status === 'failed'` correctly suppresses the red error alert
+        for completed-with-warnings recordings.
+        """
+        s = MagicMock(spec=ScheduledRecording)
+        s.download_id = 99
+        s.status = ScheduledStatus.COMPLETED.value
+        s.status_message = None
+        s.updated_at = None
+        s.to_dict.return_value = {
+            "id": 3,
+            "status": ScheduledStatus.COMPLETED.value,
+            "status_message": None,
+            "download_id": 99,
+        }
+
+        d = MagicMock()
+        d.id = 99
+        d.status = DownloadStatus.COMPLETED.value
+        d.error_message = "Completed with warnings: comskip exited with code 1"
+        d.progress = 1.0
+        d.output_path = "/completed/show.ts"
+
+        response = await self._call_list_schedules(s, d)
+        item = response[0]
+
+        self.assertEqual(
+            item.get("download_status"),
+            DownloadStatus.COMPLETED.value,
+            "A completed-with-warnings download must have download_status='completed', "
+            "not 'failed'. The frontend red error alert must not fire for it.",
+        )
+        self.assertIsNotNone(
+            item.get("download_error_message"),
+            "download_error_message is present even for completed-with-warnings; "
+            "the frontend suppresses the red alert via the download_status gate.",
+        )
+
     async def test_non_failed_schedule_has_no_error_message(self):
         """
         A completed schedule must not show a spurious error_message.
