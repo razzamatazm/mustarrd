@@ -1,30 +1,29 @@
 """
-Regression test: _escape_concat_path uses shell-style single-quote escaping ("'\\''")
-which is invalid in ffmpeg concat format.
+Regression test: _escape_concat_path must produce paths that round-trip correctly
+through ffmpeg's concat demuxer parser (av_get_token in libavutil/avstring.c).
 
-Within a single-quoted ffmpeg concat path, a literal single quote must be escaped as
-\\' (backslash-quote). Shell-style quoting closes and reopens the surrounding quotes,
-which ffmpeg's concat parser does not support -- it terminates the quoted string at the
-first unescaped '.
+The concat file line format is: file '<escaped_path>'
+ffmpeg parses this with av_get_token rules:
+  - Inside single-quoted spans: characters are taken literally (no backslash processing).
+  - Outside single-quoted spans: backslash escapes the next character.
 
-Effect: commercial removal via the concat+encode path fails for any recording whose
-filename contains an apostrophe (e.g., "Father's Day", "New Year's Eve", "Britain's
-Got Talent"). ffmpeg receives only the partial path before the apostrophe as the
-filename, then errors out.
+To embed a literal ' in a single-quoted path, the sequence must be: '<before>'\''<after>'
+(close quote, backslash-escaped quote outside quotes, reopen quote). This is the
+documented ffmpeg form (e.g. "Crime d'\\'Amour" in the ffmpeg utils docs and
+"file '/mnt/share/file 3'\\''.wav'" in the concat demuxer docs).
+
+Using backslash-quote (\\') inside a single-quoted span does NOT work: ffmpeg treats
+backslash as a literal character inside single quotes, so the apostrophe closes the
+quoted span and the path is truncated. Example:
+  file 'Father\\'s Day.ts'  -> ffmpeg reads 'Father\\' then stops at the apostrophe
+
+Effect if wrong: commercial removal via the concat+encode path fails for any recording
+whose filename contains an apostrophe (e.g., "Father's Day", "New Year's Eve",
+"Britain's Got Talent"). ffmpeg receives a truncated path and errors with
+"No such file or directory". The recording is marked FAILED with no output file.
 
 sanitize_filename does not strip single quotes (invalid_chars = r'[<>:"/\\\\|?*\\x00-\\x1f]'
-excludes '), so provider titles like "It's a Wonderful Life" pass through to segment
-temp filenames unchanged.
-
-Reproduction:
-  1. Enable ComSkip + commercial removal in Settings.
-  2. Schedule a recording whose EPG title contains an apostrophe.
-  3. After download completes, observe the post-processor log: ffmpeg concat step
-     fails with "No such file or directory" for the truncated filename.
-  4. Recording is marked FAILED / WARNING; no output file is produced.
-
-Expected: apostrophe in filename escaped as \\' so ffmpeg concat line is valid.
-Actual:   apostrophe escaped as '\\'' producing a split ffmpeg concat token.
+excludes '), so provider titles with apostrophes pass through to segment filenames.
 """
 
 import importlib.util
@@ -45,57 +44,84 @@ SPEC.loader.exec_module(POST_PROCESSOR_MODULE)
 PostProcessor = POST_PROCESSOR_MODULE.PostProcessor
 
 
+def _av_get_token(token: str) -> str:
+    """
+    Reference implementation of ffmpeg av_get_token for concat file paths.
+
+    Rules (from libavutil/avstring.c):
+    - Single-quoted span (entered/exited by '): characters taken literally,
+      no backslash processing inside.
+    - Outside single-quoted spans: backslash escapes the next character.
+    """
+    result = []
+    i = 0
+    while i < len(token):
+        c = token[i]
+        if c == "'":
+            i += 1
+            while i < len(token) and token[i] != "'":
+                result.append(token[i])
+                i += 1
+            if i < len(token):
+                i += 1  # consume closing '
+        elif c == "\\":
+            i += 1
+            if i < len(token):
+                result.append(token[i])
+                i += 1
+        else:
+            result.append(c)
+            i += 1
+    return "".join(result)
+
+
 class ConcatPathEscapeTests(unittest.TestCase):
-    """_escape_concat_path must produce valid ffmpeg concat format, not shell quoting."""
+    """_escape_concat_path must produce valid ffmpeg concat format paths."""
 
     def setUp(self):
         self.processor = PostProcessor()
 
-    def test_apostrophe_not_shell_style_escaped(self):
-        """Single quote must not use shell-style \\'\\'' escaping in ffmpeg concat path.
+    def _parse_concat_path(self, path: Path) -> str:
+        """Escape path and parse back through the av_get_token reference parser."""
+        escaped = self.processor._escape_concat_path(path)
+        return _av_get_token(f"'{escaped}'")
 
-        Shell-style (\\'\\'' ) closes the surrounding single-quoted string, emits a raw
-        apostrophe, then reopens it. ffmpeg concat parser does not support this -- it
-        terminates the path at the first unescaped quote.
+    def test_apostrophe_roundtrips_fathers_day(self):
+        """Apostrophe in filename must survive the escape/parse round-trip.
+
+        'Father\\'s Day' is the documented failure case: ffmpeg reads only
+        'Father\\' when backslash-quote is used inside a single-quoted span.
+        The correct escape is the close-quote/backslash-quote/reopen sequence.
         """
         path = Path("/downloads/Father's Day_seg0.ts")
-        escaped = self.processor._escape_concat_path(path)
-        self.assertNotIn(
-            "'\\''",
-            escaped,
-            "Shell-style quoting ('\\'\\''...) is invalid in ffmpeg concat format; "
-            "use backslash escaping (\\\\') within single-quoted path strings.",
+        parsed = self._parse_concat_path(path)
+        self.assertEqual(
+            parsed,
+            str(path),
+            f"Path did not round-trip through av_get_token. "
+            f"escaped={self.processor._escape_concat_path(path)!r}, parsed={parsed!r}",
         )
 
-    def test_apostrophe_escaped_with_backslash(self):
-        """A single quote inside an ffmpeg concat path must be escaped as \\'.
-
-        The concat file is written as: file '<escaped>\\n
-        For a path containing ', the escaped form must be \\' so ffmpeg reads
-        the entire path as one token.
-        """
+    def test_apostrophe_roundtrips_new_years_eve(self):
+        """Apostrophe round-trip for a multi-word title with season/episode suffix."""
         path = Path("/downloads/New Year's Eve S01E01_seg0.ts")
-        escaped = self.processor._escape_concat_path(path)
-        self.assertIn(
-            "\\'",
-            escaped,
-            "Apostrophe must be escaped as \\\\' for ffmpeg concat format.",
+        parsed = self._parse_concat_path(path)
+        self.assertEqual(
+            parsed,
+            str(path),
+            f"Path did not round-trip. "
+            f"escaped={self.processor._escape_concat_path(path)!r}, parsed={parsed!r}",
         )
 
-    def test_apostrophe_full_concat_line_is_valid(self):
-        """The full concat file line must not split the filename at the apostrophe.
-
-        When ffmpeg concat parser sees file 'path\\'\\''rest', it reads 'path' as the
-        filename and discards the rest, producing a "No such file or directory" error.
-        """
+    def test_apostrophe_roundtrips_britains_got_talent(self):
+        """Apostrophe round-trip for a show title with apostrophe mid-word."""
         path = Path("/downloads/Britain's Got Talent S12E03_seg0.ts")
-        escaped = self.processor._escape_concat_path(path)
-        concat_line = f"file '{escaped}'"
-        self.assertNotIn(
-            "'\\''",
-            concat_line,
-            f"Malformed ffmpeg concat line: {concat_line!r}. "
-            "ffmpeg parses only the partial path before the apostrophe.",
+        parsed = self._parse_concat_path(path)
+        self.assertEqual(
+            parsed,
+            str(path),
+            f"Path did not round-trip. "
+            f"escaped={self.processor._escape_concat_path(path)!r}, parsed={parsed!r}",
         )
 
     def test_path_without_special_chars_unchanged(self):

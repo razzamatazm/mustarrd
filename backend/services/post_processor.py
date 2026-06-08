@@ -631,7 +631,7 @@ class PostProcessor:
     def _escape_concat_path(self, path: Path) -> str:
         text = str(path)
         text = text.replace("\\", "\\\\")
-        return text.replace("'", "\\'")
+        return text.replace("'", "'\\''")
 
     @staticmethod
     def _primary_av_map_args() -> list:
