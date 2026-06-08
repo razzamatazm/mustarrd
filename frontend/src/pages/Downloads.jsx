@@ -668,6 +668,9 @@ export default function Downloads() {
                 <Text c="dimmed" ta="center" size="sm">
                   Schedule a show from the Browse page and it will appear here.
                 </Text>
+                <Button onClick={() => navigate('/browse')}>
+                  Go to Browse
+                </Button>
               </Stack>
             </Card>
           ) : (
