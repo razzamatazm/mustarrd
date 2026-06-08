@@ -108,6 +108,7 @@ class ScheduledManager:
                         "duration_minutes": schedule.duration_minutes,
                         "epg_id": schedule.epg_id,
                         "id": schedule.program_id,
+                        "category": schedule.channel_category_name or "",
                     }
 
                     download = await build_download_from_program(

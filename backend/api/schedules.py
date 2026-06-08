@@ -201,10 +201,15 @@ async def create_schedule(
 
     custom_filename = _sanitize_filename(data.custom_filename)
 
+    channel_category_name = (
+        data.program.get("category") or data.program.get("category_name") or None
+    )
+
     schedule = ScheduledRecording(
         account_id=data.account_id,
         channel_id=data.channel_id,
         channel_name=data.channel_name,
+        channel_category_name=channel_category_name,
         program_id=str(program_id) if program_id is not None else None,
         epg_id=str(epg_id) if epg_id is not None else None,
         program_title=data.program.get("title", "Unknown"),

@@ -25,6 +25,7 @@ class ScheduledRecording(Base):
     # Channel info
     channel_id: Mapped[str] = mapped_column(String(100))
     channel_name: Mapped[str] = mapped_column(String(255))
+    channel_category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Program info
     program_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
