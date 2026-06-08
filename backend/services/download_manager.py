@@ -1407,7 +1407,7 @@ class DownloadManager:
             except Exception as e:
                 logger.exception("Comskip error")
                 raise RuntimeError(
-                    f"ComSkip failed: {e}. Recording not saved to avoid producing a file with commercials intact."
+                    f"ComSkip failed: {e}. The raw recording is still in the download folder and was not deleted."
                 ) from e
 
         # Transcode if enabled (and not already done by commercial removal)
