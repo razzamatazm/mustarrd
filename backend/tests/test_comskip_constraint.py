@@ -1,8 +1,6 @@
 """
 Regression tests for ComSkip settings constraints.
 
-Two related bugs:
-
 Bug 1 (HIGH): update_settings only enforced "comskip_enabled=True forces
 transcode_enabled=True" when the current request contained comskip_enabled.
 A second request setting transcode_enabled=False bypassed the constraint,
@@ -10,13 +8,11 @@ leaving comskip_enabled=True + transcode_enabled=False in the DB. ComSkip
 ran and produced an EDL that was silently ignored; commercials stayed in
 the output with no user-visible error.
 
-Bug 2 (MEDIUM): No constraint enforced "comskip_enabled=True forces
-remux_only=False". A user could store comskip_enabled=True + remux_only=True.
-FFmpeg ran in stream-copy mode and never applied EDL cut points. All
-commercial segments remained in the output file while the UI showed COMPLETED.
-
-Fix: constraints now apply to the final stored state after all field updates,
-not just to the fields present in the current request body.
+Fix: transcode_enabled=True is enforced on the final stored state after all
+field updates.  remux_only is intentionally NOT constrained: the pipeline
+supports stream-copy commercial removal (segment extraction + concat -c copy),
+so remux_only=True + comskip_enabled=True is the valid fast "remux + skip
+commercials" profile written by the Docker onboarding flow.
 """
 import sys
 import unittest
@@ -73,19 +69,20 @@ class ComSkipConstraintTests(unittest.IsolatedAsyncioTestCase):
             "transcode_enabled must stay True when comskip_enabled is already True")
         self.assertTrue(result["comskip_enabled"])
 
-    async def test_second_request_cannot_enable_remux_while_comskip_on(self):
-        """PUT remux_only=True must be rejected when comskip_enabled is already True.
+    async def test_remux_allowed_with_comskip_on(self):
+        """PUT remux_only=True is accepted when comskip_enabled is already True.
 
-        Before fix: settings stored comskip_enabled=True, remux_only=True. ComSkip
-        ran but FFmpeg stream-copied; commercials remained in output.
-        After fix: remux_only stays False regardless of what the request sets.
+        The pipeline supports stream-copy commercial removal: segment extraction
+        runs with -c copy, then concat with -c copy.  remux_only=True +
+        comskip_enabled=True is the fast "remux + skip commercials" profile that
+        Docker onboarding writes and that users can select explicitly.
         """
         result = await self._apply(
             initial={"comskip_enabled": True, "remux_only": False},
             update={"remux_only": True},
         )
-        self.assertFalse(result["remux_only"],
-            "remux_only must stay False when comskip_enabled is already True")
+        self.assertTrue(result["remux_only"],
+            "remux_only=True must be accepted when comskip_enabled is already True")
         self.assertTrue(result["comskip_enabled"])
 
     async def test_enabling_comskip_forces_transcode_on(self):
@@ -98,18 +95,18 @@ class ComSkipConstraintTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["transcode_enabled"],
             "enabling comskip must force transcode_enabled=True")
 
-    async def test_enabling_comskip_forces_remux_off(self):
-        """Single request enabling comskip must auto-disable remux_only."""
+    async def test_enabling_comskip_preserves_remux_state(self):
+        """Enabling comskip does not change remux_only; both True and False are valid."""
         result = await self._apply(
             initial={"comskip_enabled": False, "remux_only": True},
             update={"comskip_enabled": True},
         )
         self.assertTrue(result["comskip_enabled"])
-        self.assertFalse(result["remux_only"],
-            "enabling comskip must force remux_only=False")
+        self.assertTrue(result["remux_only"],
+            "enabling comskip must not clear remux_only; fast remux+comskip is a supported profile")
 
-    async def test_enabling_comskip_with_conflicting_values_in_same_request(self):
-        """comskip_enabled=True + transcode_enabled=False in the same request: comskip wins."""
+    async def test_enabling_comskip_with_conflicting_transcode_in_same_request(self):
+        """comskip_enabled=True + transcode_enabled=False in the same request: comskip wins for transcode."""
         result = await self._apply(
             initial={"comskip_enabled": False, "transcode_enabled": True},
             update={"comskip_enabled": True, "transcode_enabled": False, "remux_only": True},
@@ -117,8 +114,8 @@ class ComSkipConstraintTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["comskip_enabled"])
         self.assertTrue(result["transcode_enabled"],
             "comskip constraint must win over explicit transcode_enabled=False in same request")
-        self.assertFalse(result["remux_only"],
-            "comskip constraint must win over explicit remux_only=True in same request")
+        self.assertTrue(result["remux_only"],
+            "remux_only=True is valid alongside comskip_enabled=True; it is not overridden")
 
     async def test_transcode_can_be_disabled_when_comskip_is_off(self):
         """transcode_enabled=False is accepted normally when comskip is off."""
@@ -137,6 +134,24 @@ class ComSkipConstraintTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(result["comskip_enabled"])
         self.assertTrue(result["remux_only"])
+
+    async def test_remux_comskip_profile_survives_settings_save(self):
+        """remux_only=True + comskip_enabled=True is preserved on any settings save.
+
+        Regression: before this fix, any PUT /settings call while this profile
+        was active forced remux_only=False, silently downgrading the user from
+        fast stream-copy commercial removal to full re-encode.  Docker onboarding
+        writes this exact profile (remux_comskip) as the recommended path.
+        """
+        result = await self._apply(
+            initial={"comskip_enabled": True, "remux_only": True, "transcode_enabled": True},
+            update={"comskip_path": "/usr/bin/comskip"},
+        )
+        self.assertTrue(result["comskip_enabled"])
+        self.assertTrue(result["remux_only"],
+            "remux_only must survive a settings save; silently clobbering it "
+            "would downgrade Docker onboarding users from fast remux to full re-encode")
+        self.assertTrue(result["transcode_enabled"])
 
 
 if __name__ == "__main__":

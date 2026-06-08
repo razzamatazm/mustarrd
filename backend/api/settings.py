@@ -228,12 +228,13 @@ async def update_settings(
             value = int(value)
         setattr(settings, field, value)
 
-    # Enforce ComSkip constraints on the final stored state, not just the
-    # current request, so a subsequent request cannot disable transcode or
-    # enable remux-only while ComSkip is already on.
+    # Enforce ComSkip constraint on the final stored state: comskip requires
+    # FFmpeg, so transcode_enabled must stay True.  remux_only is NOT forced
+    # off: the pipeline supports stream-copy commercial removal (segment
+    # extraction + concat with -c copy), so remux_only=True + comskip_enabled=True
+    # is the valid "fast remux + skip commercials" profile written by onboarding.
     if settings.comskip_enabled:
         settings.transcode_enabled = True
-        settings.remux_only = False
 
     await session.commit()
     await session.refresh(settings)
