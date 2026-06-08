@@ -86,6 +86,7 @@ export function formatAirDateTime(program, kind = 'start', guideOffsetHours = 0)
   const now = getNowUtc().add(offset, 'hour')
   const todayDate = now.format('YYYY-MM-DD')
   const tomorrowDate = now.add(1, 'day').format('YYYY-MM-DD')
+  const yesterdayDate = now.subtract(1, 'day').format('YYYY-MM-DD')
   const displayDate = displayTime.format('YYYY-MM-DD')
   const timeStr = displayTime.format('h:mm A')
   if (displayDate === todayDate) {
@@ -93,6 +94,9 @@ export function formatAirDateTime(program, kind = 'start', guideOffsetHours = 0)
   }
   if (displayDate === tomorrowDate) {
     return `Tomorrow at ${timeStr}`
+  }
+  if (displayDate === yesterdayDate) {
+    return `Yesterday at ${timeStr}`
   }
   return `${displayTime.format('ddd, MMM D, YYYY')} at ${timeStr}`
 }
