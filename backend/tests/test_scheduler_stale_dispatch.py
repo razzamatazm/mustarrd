@@ -214,6 +214,66 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
             "A schedule for a show that ended 5 minutes ago must be dispatched.",
         )
 
+    async def test_expired_schedule_failed_status_committed(self):
+        """REGRESSION: Expired schedule FAILED status must be committed to DB.
+
+        When only expired schedules exist, _queue_ready_recordings hits
+        'if not ready: return' (line 82) before calling session.commit().
+        SQLAlchemy discards the uncommitted FAILED status on session close,
+        leaving the schedule permanently SCHEDULED in the DB.
+
+        This test fails before the fix and passes after.
+        """
+        schedule = _make_stale_schedule(hours_ago=48)
+
+        # Build the session mock directly so we can inspect commit() calls.
+        scalars_result = MagicMock()
+        scalars_result.all.return_value = [schedule]
+        schedules_exec_result = MagicMock()
+        schedules_exec_result.scalars.return_value = scalars_result
+
+        settings_obj = AppSettings()
+        settings_obj.download_folder = "/tmp/downloads"
+        settings_obj.min_free_space_gb = 1
+        settings_exec_result = MagicMock()
+        settings_exec_result.scalar_one_or_none.return_value = settings_obj
+
+        call_count = [0]
+
+        async def execute(stmt):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return schedules_exec_result
+            return settings_exec_result
+
+        session = AsyncMock()
+        session.execute = execute
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def session_ctx():
+            yield session
+
+        manager = ScheduledManager()
+
+        with (
+            patch("services.scheduled_manager.async_session_maker", session_ctx),
+            patch.object(
+                manager,
+                "_get_catchup_window_days",
+                new=AsyncMock(return_value=1),
+            ),
+        ):
+            await manager._queue_ready_recordings()
+
+        self.assertEqual(
+            schedule.status,
+            ScheduledStatus.FAILED.value,
+            "Expired schedule must be marked FAILED.",
+        )
+        # FAILS before fix: commit is skipped by "if not ready: return"
+        session.commit.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
