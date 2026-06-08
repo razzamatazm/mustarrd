@@ -588,6 +588,7 @@ class DownloadManager:
     async def _execute_download(self, download_id: int):
         """Execute a single download."""
         async with async_session_maker() as session:
+            download = None
             try:
                 # Get download record
                 result = await session.execute(
@@ -692,17 +693,22 @@ class DownloadManager:
                 await self._trigger_plex_refresh(completed_path)
 
             except asyncio.CancelledError:
-                # Download was cancelled
-                download.status = DownloadStatus.CANCELLED.value
-                await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
-                await session.commit()
-                if download.output_path and os.path.exists(download.output_path):
-                    try:
-                        os.unlink(download.output_path)
-                    except OSError:
-                        pass
+                if download is None:
+                    result = await session.execute(
+                        select(Download).where(Download.id == download_id)
+                    )
+                    download = result.scalar_one_or_none()
+                if download:
+                    download.status = DownloadStatus.CANCELLED.value
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
+                    await session.commit()
+                    if download.output_path and os.path.exists(download.output_path):
+                        try:
+                            os.unlink(download.output_path)
+                        except OSError:
+                            pass
                 await self._broadcast_progress(
-                    download_id, download.progress, DownloadStatus.CANCELLED.value
+                    download_id, download.progress if download else 0, DownloadStatus.CANCELLED.value
                 )
                 await self._broadcast_log(download_id, "Download cancelled.", level="warning")
 
