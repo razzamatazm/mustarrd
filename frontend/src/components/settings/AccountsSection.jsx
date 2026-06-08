@@ -3,6 +3,7 @@ import {
   Title,
   Button,
   Card,
+  Flex,
   Group,
   Text,
   Stack,
@@ -502,7 +503,7 @@ export default function AccountsSection({ showTitle = true }) {
       <Group justify="space-between">
         {showTitle ? <Title order={2}>Accounts</Title> : <Title order={4}>Accounts</Title>}
         {accounts?.length > 0 && (
-          <Group>
+          <Flex direction={{ base: 'column-reverse', sm: 'row' }} gap="xs">
             <Button
               variant="light"
               color="orange"
@@ -516,7 +517,7 @@ export default function AccountsSection({ showTitle = true }) {
             <Button leftSection={<IconPlus size={16} />} onClick={handleAddClick}>
               Add Another Account
             </Button>
-          </Group>
+          </Flex>
         )}
       </Group>
 
