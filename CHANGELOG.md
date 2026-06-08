@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Scheduled History now shows why a recording failed
+
+**What you would notice:** In Scheduled > History, a recording that failed used to show only a red "Failed" badge with no explanation. To find out what went wrong, you had to navigate to Downloads > History and manually match the entry by channel and time. The failure reason now appears directly on the Scheduled History card, for example: "Provider returned an error page. The catchup window may have expired or be unavailable."
+
+**What changed:** The Scheduled History card now shows the download failure message alongside the "Failed" badge. No changes were made to how recordings are stored or processed.
+
+---
+
+### Improved: Settings > Accounts button order corrected on mobile
+
+**What you would notice:** On a phone, the Settings > Accounts page used to show "Force EPG Refresh" above "+ Add Another Account". The more important action was below the less important one. The order is now corrected on narrow screens: "+ Add Another Account" appears first and "Force EPG Refresh" appears below it. The layout on desktop is unchanged.
+
+**What changed:** When the two buttons stack on narrow screens, the column order is reversed so the primary action appears at the top. No backend changes were made.
+
+---
+
 ### Fixed: Retrying a failed download now checks disk space first
 
 **What you would notice:** If a download failed because the disk was full and you clicked Retry, Mustarrd used to start the download again immediately with no disk check. It would hit the same full-disk condition and fail again, with no clear explanation. Clicking Retry now returns the same "Not enough disk space" message you would see if you tried to start a fresh download. The problem is obvious and you know to free space before retrying.
