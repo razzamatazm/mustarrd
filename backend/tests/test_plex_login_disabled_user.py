@@ -88,17 +88,6 @@ class PlexLoginDisabledUserTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             return user.id
 
-    def _patches(self):
-        return [
-            patch("api.auth._enforce_rate_limit"),
-            patch("api.auth.plex_service.check_pin", new=AsyncMock(return_value={"authToken": "fake-auth-tok"})),
-            patch("api.auth.plex_service.get_user_profile", new=AsyncMock(return_value=_plex_profile())),
-            patch("api.auth.plex_service.user_is_in_server", new=AsyncMock(return_value=True)),
-            patch("api.auth.credential_crypto.decrypt", return_value="server-tok"),
-            patch("api.auth.clear_auth_session"),
-            patch("api.auth.set_download_user_session"),
-        ]
-
     async def _call(self, session):
         return await plex_login_complete(
             PlexCompletePayload(pin_id=42),
