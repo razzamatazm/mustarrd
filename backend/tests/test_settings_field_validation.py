@@ -234,5 +234,66 @@ class DefaultPaddingNormalizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["default_post_padding_minutes"], 0)
 
 
+class MaxConcurrentValidationTests(unittest.TestCase):
+    """max_concurrent_downloads and max_concurrent_post_processing must be bounded.
+
+    Before fix: max_concurrent_downloads had ge=1 but no upper bound.
+    max_concurrent_post_processing had no Field() at all, accepting 0, negatives,
+    and arbitrary large integers. Sending {"max_concurrent_downloads": 10000} caused
+    the manager to attempt 10000 simultaneous downloads, exhausting file descriptors.
+
+    After fix: max_concurrent_downloads is capped at 50;
+    max_concurrent_post_processing requires ge=1, le=20.
+    """
+
+    def test_downloads_at_lower_bound_accepted(self):
+        m = SettingsUpdate(max_concurrent_downloads=1)
+        self.assertEqual(m.max_concurrent_downloads, 1)
+
+    def test_downloads_at_upper_bound_accepted(self):
+        m = SettingsUpdate(max_concurrent_downloads=50)
+        self.assertEqual(m.max_concurrent_downloads, 50)
+
+    def test_downloads_above_upper_bound_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_downloads=51)
+
+    def test_downloads_large_value_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_downloads=10000)
+
+    def test_downloads_zero_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_downloads=0)
+
+    def test_downloads_none_accepted(self):
+        m = SettingsUpdate(max_concurrent_downloads=None)
+        self.assertIsNone(m.max_concurrent_downloads)
+
+    def test_post_processing_at_lower_bound_accepted(self):
+        m = SettingsUpdate(max_concurrent_post_processing=1)
+        self.assertEqual(m.max_concurrent_post_processing, 1)
+
+    def test_post_processing_at_upper_bound_accepted(self):
+        m = SettingsUpdate(max_concurrent_post_processing=20)
+        self.assertEqual(m.max_concurrent_post_processing, 20)
+
+    def test_post_processing_above_upper_bound_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_post_processing=21)
+
+    def test_post_processing_zero_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_post_processing=0)
+
+    def test_post_processing_negative_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(max_concurrent_post_processing=-1)
+
+    def test_post_processing_none_accepted(self):
+        m = SettingsUpdate(max_concurrent_post_processing=None)
+        self.assertIsNone(m.max_concurrent_post_processing)
+
+
 if __name__ == "__main__":
     unittest.main()
