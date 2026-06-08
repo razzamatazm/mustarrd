@@ -184,7 +184,7 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
       </Text>
 
       <Group mt="md" gap="xs">
-        {catchupSummary?.loading ? (
+        {catchupSummary?.loading && account.last_connection_ok !== false ? (
           <Badge variant="outline" size="sm" color="blue">
             Catchup: loading...
           </Badge>
