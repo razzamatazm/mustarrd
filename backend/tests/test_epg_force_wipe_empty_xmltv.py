@@ -8,8 +8,9 @@ Before the fix:
   nothing. Guide empty for up to 8 hours.
 
 After the fix:
-- The force-delete is guarded by `if xmltv_bytes:`. An empty XMLTV response leaves
-  existing rows intact and logs a warning.
+- The force-delete is guarded by `if total_programs:`. An XMLTV response with no
+  <programme> tags (empty body or well-formed but empty document) leaves existing rows
+  intact and logs a warning.
 """
 import sys
 import unittest
@@ -94,14 +95,49 @@ class EPGForceWipeEmptyXmltvTests(unittest.IsolatedAsyncioTestCase):
             f"Got DELETE statements: {delete_tracker}",
         )
 
-    async def test_force_refresh_nonempty_xmltv_does_delete_rows(self):
-        """DELETE is issued when provider returns a non-empty XMLTV body with force=True."""
+    async def test_force_refresh_well_formed_but_programmeless_xmltv_does_not_delete_rows(self):
+        """No DELETE issued when provider returns valid XML with no <programme> tags.
+
+        A mid-regeneration or throttled provider may return a well-formed <tv></tv>
+        document with zero programme entries. The guard keys off parsed programme count,
+        not raw byte length, so existing rows are preserved in this case too.
+        """
         manager = EPGIngestManager()
         account = _make_account()
         delete_tracker = []
 
-        minimal_xmltv = b'<?xml version="1.0" encoding="UTF-8"?><tv></tv>'
-        client = _make_xtream_client(xmltv_bytes=minimal_xmltv)
+        empty_but_valid_xmltv = b'<?xml version="1.0" encoding="UTF-8"?><tv></tv>'
+        client = _make_xtream_client(xmltv_bytes=empty_but_valid_xmltv)
+
+        with (
+            patch("services.epg_ingest_manager.async_session_maker", side_effect=_make_session_ctx(delete_tracker)),
+            patch("services.epg_ingest_manager.resolve_account_password", return_value="pass"),
+            patch("services.epg_ingest_manager.XtreamClient", return_value=client),
+        ):
+            await manager._refresh_account(account, force=True)
+
+        self.assertEqual(
+            delete_tracker,
+            [],
+            "No DELETE must be issued when XMLTV has no <programme> tags (empty but valid document). "
+            f"Got DELETE statements: {delete_tracker}",
+        )
+
+    async def test_force_refresh_nonempty_xmltv_does_delete_rows(self):
+        """DELETE is issued when provider returns an XMLTV body with programme entries."""
+        manager = EPGIngestManager()
+        account = _make_account()
+        delete_tracker = []
+
+        xmltv_with_programme = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b'<tv>'
+            b'<programme start="20260101000000 +0000" stop="20260101010000 +0000" channel="ch1">'
+            b'<title>Test Show</title>'
+            b'</programme>'
+            b'</tv>'
+        )
+        client = _make_xtream_client(xmltv_bytes=xmltv_with_programme)
 
         with (
             patch("services.epg_ingest_manager.async_session_maker", side_effect=_make_session_ctx(delete_tracker)),
@@ -112,7 +148,7 @@ class EPGForceWipeEmptyXmltvTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(
             len(delete_tracker) >= 1,
-            "A DELETE must be issued when XMLTV body is non-empty and force=True.",
+            "A DELETE must be issued when XMLTV body contains <programme> entries and force=True.",
         )
 
 

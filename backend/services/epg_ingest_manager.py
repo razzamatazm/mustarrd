@@ -219,7 +219,7 @@ class EPGIngestManager:
             async with async_session_maker() as session:
                 async with session.begin():
                     if force:
-                        if xmltv_bytes:
+                        if total_programs:
                             await self._log(
                                 "Force mode enabled: clearing existing guide rows before reload.",
                                 account=account,
@@ -231,7 +231,7 @@ class EPGIngestManager:
                             )
                         else:
                             await self._log(
-                                "Force mode requested but XMLTV response was empty: existing guide rows preserved.",
+                                "Force mode requested but XMLTV contained no programme entries: existing guide rows preserved.",
                                 level="warning",
                                 account=account,
                             )
