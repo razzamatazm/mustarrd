@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Downloads Upcoming tab now has a Go to Browse button when empty
+
+**What you would notice:** When you have no upcoming recordings scheduled, the Downloads Upcoming tab used to show a message saying to go to Browse EPG to find something to record, but there was no button to take you there. You had to navigate there yourself. A Go to Browse button now appears on that empty state, matching the button already shown on the Active and Scheduled pages when they are empty.
+
+**What changed:** A Go to Browse button was added to the Downloads Upcoming empty state. No backend changes were made.
+
+---
+
 ### Fixed: Program guide now loads correctly for providers that use a namespace in their XMLTV feed
 
 **What you would notice:** Some IPTV providers include a specific XML marker called a namespace at the top of their program guide file. If your provider used one, Mustarrd would silently import zero programs. The Browse and Catchup pages would appear completely empty with no error message shown anywhere. After this fix, the guide loads normally for all providers regardless of whether their XMLTV file includes a namespace.
