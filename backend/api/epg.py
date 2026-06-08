@@ -88,8 +88,7 @@ async def trigger_epg_refresh(
     request: EPGRefreshRequest,
     _admin: None = Depends(require_admin),
 ):
-    status = epg_ingest_manager.get_status()
-    if status.get("running"):
+    if not epg_ingest_manager.try_claim_refresh():
         raise HTTPException(status_code=409, detail="EPG refresh is already running")
 
     refresh_task = asyncio.create_task(

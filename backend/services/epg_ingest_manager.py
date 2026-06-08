@@ -47,6 +47,7 @@ class EPGIngestManager:
     def __init__(self):
         self._running = False
         self._refresh_lock = asyncio.Lock()
+        self._task_pending = False
         self._interval = max(1, int(app_settings.epg_refresh_interval_hours)) * 3600
         self._backfill_cooldown_seconds = max(self._interval, 6 * 3600)
         self._status = {
@@ -84,6 +85,7 @@ class EPGIngestManager:
             await asyncio.sleep(self._interval)
 
     async def refresh_all_accounts(self, force: bool = False):
+        self._task_pending = False
         async with self._refresh_lock:
             if force:
                 await self._log("Starting forced full EPG refresh across active accounts.")
@@ -121,8 +123,23 @@ class EPGIngestManager:
                 })
                 await self._log("Account-specific EPG refresh finished.", account=account)
 
+    def try_claim_refresh(self) -> bool:
+        """Claim a pending manual refresh slot.
+
+        Returns True and marks a refresh as pending if no refresh is currently
+        running or already pending. Returns False otherwise. Called synchronously
+        from the API endpoint before creating the asyncio task, so two rapid
+        requests cannot both slip through the running-flag check.
+        """
+        if self._status.get("running") or self._task_pending:
+            return False
+        self._task_pending = True
+        return True
+
     def get_status(self) -> dict:
         status = dict(self._status)
+        if self._task_pending:
+            status["running"] = True
         for key in ("started_at", "last_completed_at"):
             if status.get(key):
                 status[key] = status[key].isoformat()
