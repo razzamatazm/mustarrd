@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Downloads Upcoming cards now show when a show ends and when the download begins
+
+**What you would notice:** On the Downloads > Upcoming tab, each recording card previously showed only the show's start time. The card now shows the full air window, for example "Airs: Today at 7:30 PM - 8:00 PM (30m)", and a separate line showing when Mustarrd will begin downloading, for example "Download starts: Today at 8:00 PM (30m recording)". This makes it easy to see at a glance whether a recording fits your schedule and how long the download will run. The Scheduled Recordings page already showed this information. The Downloads Upcoming tab now matches it.
+
+**What changed:** The Upcoming recording cards were updated to display the air end time and the download start time alongside the air start time. No recording logic was changed.
+
+---
+
+### Fixed: Sending a program request with a numeric timestamp no longer causes a server error in all cases
+
+**What you would notice:** No visible change during normal use. A previous update fixed server errors when a third-party app or script sent a number instead of a text date for a program's start or end time. This update extends that fix to cover an additional path that the earlier change missed, so the same type of invalid input now returns a clear error message in all cases.
+
+**What changed:** The file naming step that runs just before a download starts was not covered by the earlier fix. It now handles integer timestamps correctly instead of crashing with an internal server error.
+
+---
+
 ### Improved: Yesterday's recordings now display as "Yesterday" instead of a full date
 
 **What you would notice:** On the Scheduled page, cancelled or completed recordings from yesterday used to show a full weekday-and-date label like "Sat, Jun 7, 2026 at 7:30 PM". They now show "Yesterday at 7:30 PM", matching the same natural style already used for upcoming recordings that air "Today" or "Tomorrow". Recordings from more than two days ago continue to show the full date.
