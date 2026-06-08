@@ -1061,6 +1061,17 @@ class DownloadManager:
                         download_progress=progress
                     )
 
+        # For chunked streams (total_size == 0) the progress-based commit inside
+        # the loop never fires, so downloaded_bytes stays 0 in the DB. Commit the
+        # final byte count here so recovery after a crash can detect a complete file.
+        if total_size == 0:
+            await session.execute(
+                update(Download)
+                .where(Download.id == download_id)
+                .values(downloaded_bytes=downloaded)
+            )
+            await session.commit()
+
         await self._broadcast_log(
             download_id,
             f"Download bytes written: {downloaded:,}."

@@ -63,17 +63,15 @@ def _make_recovery_session(downloads, settings=None):
 class RecoverChunkedCompleteTests(unittest.IsolatedAsyncioTestCase):
     async def test_chunked_complete_file_not_requeued_for_redownload(self):
         """
-        A chunked download whose on-disk bytes match downloaded_bytes should be
-        detected as complete on recovery, not re-queued as PENDING.
+        A chunked download whose streaming completed should not be re-queued.
 
-        Current behavior (bug): status set to PENDING; recovery_offset = full
-        file size; next _download_file call sends Range: bytes={full_size}-;
-        provider returns 416; exception handler deletes the completed file.
+        When all bytes stream successfully, _stream_response_to_file commits
+        downloaded_bytes to the DB before returning. If the process then crashes
+        before the COMPLETED status commit, recovery sees downloaded_bytes matching
+        the on-disk size and must advance the download to COMPLETED, not PENDING.
 
-        Expected: status advanced to COMPLETED (or PROCESSING if post-processing
-        is configured), not re-queued.
-
-        This test FAILS with the current code and should PASS after the fix.
+        downloaded_bytes = 8192 here reflects the DB state after that final commit
+        fires (the fix that makes this possible).
         """
         with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
             f.write(b"\x47" * 8192)
@@ -117,12 +115,11 @@ class RecoverChunkedCompleteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chunked_partial_file_still_requeued(self):
         """
-        A chunked download whose on-disk bytes are smaller than downloaded_bytes
-        (genuine partial: crash mid-stream) should still be re-queued as PENDING
-        so the download retries from where it left off.
+        A chunked download that crashed mid-stream should be re-queued as PENDING.
 
-        This is the non-regressed case: partial files must not be falsely marked
-        complete.
+        When the process dies during streaming, no final commit fires, so
+        downloaded_bytes stays 0 in the DB. The on-disk file is non-empty but
+        partial. Recovery must not falsely treat it as complete.
         """
         with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
             f.write(b"\x47" * 1024)
@@ -133,7 +130,7 @@ class RecoverChunkedCompleteTests(unittest.IsolatedAsyncioTestCase):
             download.status = DownloadStatus.DOWNLOADING.value
             download.output_path = tmp_path
             download.file_size = 0     # chunked stream
-            download.downloaded_bytes = 4096  # DB says 4096 but disk has only 1024
+            download.downloaded_bytes = 0  # crash mid-stream: final commit never fired
             download.error_message = None
             download.is_vod = False
 
