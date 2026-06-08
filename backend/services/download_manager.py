@@ -577,6 +577,31 @@ class DownloadManager:
                     await self._sync_schedule_status(session, download.id, DownloadStatus.FAILED.value)
                     await self._broadcast_log(download.id, download.error_message, level="error")
 
+            if recovered_download_ids:
+                min_free_gb = (
+                    settings.min_free_space_gb
+                    if settings and settings.min_free_space_gb is not None
+                    else 25
+                ) or 0
+                if min_free_gb > 0 and os.path.exists(download_folder):
+                    free_gb = shutil.disk_usage(download_folder).free / (1024 ** 3)
+                    if free_gb < min_free_gb:
+                        download_by_id = {d.id: d for d in downloads}
+                        for dl_id in list(recovered_download_ids):
+                            dl = download_by_id.get(dl_id)
+                            if dl:
+                                dl.status = DownloadStatus.FAILED.value
+                                dl.error_message = (
+                                    f"Disk space below minimum at startup "
+                                    f"({free_gb:.1f} GB free, {min_free_gb} GB required)."
+                                )
+                                await self._broadcast_log(
+                                    dl_id,
+                                    dl.error_message,
+                                    level="error",
+                                )
+                        recovered_download_ids.clear()
+
             await session.commit()
 
         for download_id in recovered_download_ids:
