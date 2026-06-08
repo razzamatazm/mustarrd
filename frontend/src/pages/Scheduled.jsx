@@ -14,7 +14,7 @@ import {
   Button,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -37,6 +37,23 @@ import { accountsApi, schedulesApi } from '../api'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
+
+const ACCOUNT_SETTINGS_SUFFIX = 'in your account settings.'
+
+function renderErrorMessage(msg) {
+  if (!msg) return null
+  const idx = msg.indexOf(ACCOUNT_SETTINGS_SUFFIX)
+  if (idx === -1) return msg
+  return (
+    <>
+      {msg.slice(0, idx)}
+      <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+        your account settings
+      </Link>
+      .
+    </>
+  )
+}
 
 function formatDuration(minutes) {
   const d = dayjs.duration(minutes, 'minutes')
@@ -159,7 +176,7 @@ function ScheduleCard({
 
         {!schedule.status_message && schedule.download_status === 'failed' && schedule.download_error_message && (
           <Alert color="red" variant="light" p="xs">
-            <Text size="xs">{schedule.download_error_message}</Text>
+            <Text size="xs">{renderErrorMessage(schedule.download_error_message)}</Text>
           </Alert>
         )}
 

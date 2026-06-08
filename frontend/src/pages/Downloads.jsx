@@ -18,7 +18,7 @@ import {
   Select,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -47,6 +47,23 @@ import ProgressBar from '../components/ProgressBar'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
+
+const ACCOUNT_SETTINGS_SUFFIX = 'in your account settings.'
+
+function renderErrorMessage(msg) {
+  if (!msg) return null
+  const idx = msg.indexOf(ACCOUNT_SETTINGS_SUFFIX)
+  if (idx === -1) return msg
+  return (
+    <>
+      {msg.slice(0, idx)}
+      <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+        your account settings
+      </Link>
+      .
+    </>
+  )
+}
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
@@ -356,13 +373,13 @@ function DownloadCard({
         )}
         {download.status === 'completed' && download.error_message && (
           <Alert color="yellow" variant="light" p="xs">
-            <Text size="xs">{download.error_message}</Text>
+            <Text size="xs">{renderErrorMessage(download.error_message)}</Text>
           </Alert>
         )}
 
         {download.status === 'failed' && download.error_message && (
           <Alert color="red" variant="light" p="xs">
-            <Text size="xs">{download.error_message}</Text>
+            <Text size="xs">{renderErrorMessage(download.error_message)}</Text>
           </Alert>
         )}
         {canRetry && (
