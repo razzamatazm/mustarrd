@@ -654,20 +654,22 @@ export default function Downloads() {
             <Stack gap="sm">
               {upcomingRecordings.map((rec) => (
                 <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
-                  <Group justify="space-between" wrap="nowrap">
-                    <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
-                      <Text fw={500}>{rec.program_title}</Text>
-                      <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
-                      <Text size="xs" c="dimmed">
-                        Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
-                      </Text>
-                    </Stack>
-                    {rec.status === 'paused_low_space' && (
-                      <Badge color="yellow" variant="light" size="sm" leftSection={<IconAlertCircle size={12} />}>
-                        Paused (Low Space)
-                      </Badge>
-                    )}
-                  </Group>
+                  <Stack gap={2}>
+                    <Group justify="space-between" wrap="nowrap" align="flex-start">
+                      <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
+                        <Text fw={500}>{rec.program_title}</Text>
+                        <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
+                      </Stack>
+                      {rec.status === 'paused_low_space' && (
+                        <Badge color="yellow" variant="light" size="sm" leftSection={<IconAlertCircle size={12} />}>
+                          Paused (Low Space)
+                        </Badge>
+                      )}
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
+                    </Text>
+                  </Stack>
                 </Card>
               ))}
             </Stack>
