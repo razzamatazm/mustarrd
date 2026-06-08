@@ -600,7 +600,7 @@ class EPGIngestManager:
         if " " in value:
             date_part, tz_part = value.split(" ", 1)
             tz_part = tz_part.strip()
-        elif len(value) >= 14:
+        elif len(value) >= 14 and value[:14].isdigit():
             date_part = value[:14]
             tz_part = value[14:].strip()
         elif len(value) >= 12:
