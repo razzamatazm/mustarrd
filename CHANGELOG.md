@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Scheduled Upcoming now lists recordings in the order they will air
+
+**What you would notice:** The Scheduled Recordings > Upcoming tab was showing your recordings in reverse order. The recording furthest away appeared at the top, and the one airing soonest appeared at the bottom. If you had three recordings scheduled, you had to scroll to the bottom to see what was recording next. The list now sorts soonest first, matching the order already used on the Downloads > Upcoming tab.
+
+**What changed:** A one-line sort was added to the Scheduled Upcoming list in the frontend. No backend changes were made.
+
+---
+
+### Fixed: Downloading multiple untitled bonus episodes no longer overwrites earlier files
+
+**What you would notice:** If your provider offered several bonus episodes or extras in a season, all labeled episode 0 with no episode title, Mustarrd would save them all to the same filename. Each new download silently replaced the previous one, so you could end up with only the last episode downloaded and no indication that anything was lost. After this fix, each episode gets a unique filename based on an internal ID, so all of them are saved correctly.
+
+**What changed:** The filename generator now uses a unique episode ID as a tiebreaker for any untitled episode numbered zero, regardless of which season it is in. Previously, this tiebreaker only applied when both the season and episode number were zero.
+
+---
+
 ### Improved: Downloads Upcoming tab now has a Go to Browse button when empty
 
 **What you would notice:** When you have no upcoming recordings scheduled, the Downloads Upcoming tab used to show a message saying to go to Browse EPG to find something to record, but there was no button to take you there. You had to navigate there yourself. A Go to Browse button now appears on that empty state, matching the button already shown on the Active and Scheduled pages when they are empty.
