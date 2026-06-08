@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: ComSkip failure message now correctly says your raw recording is still on disk
+
+**What you would notice:** When ComSkip failed during post-processing, Mustarrd showed an error message that said "Recording not saved." That wording made it sound like your recording had been deleted. In fact, the original raw recording file was never removed and was still sitting in your downloads folder the whole time. The message now correctly says "The raw recording is still in the download folder and was not deleted," so you know your file is safe and can rescue it if needed.
+
+**What changed:** The error message shown when ComSkip fails was reworded to accurately describe what happens: the raw recording stays in the download folder and is not deleted. Previously, the message said "not saved," which was misleading and caused some operators to queue a re-download, overwriting the intact file they already had.
+
+---
+
+### Fixed: Cancelling a download immediately after queuing it no longer leaves it stuck as Pending
+
+**What you would notice:** If you cancelled a download within a very short window after queueing it, the download could get stuck showing as Pending forever. It had no active task driving it forward and no way to recover without retrying or restarting the app. After this fix, downloads cancelled at any point, including that brief window right after queuing, correctly move to Cancelled and any partial file is cleaned up.
+
+**What changed:** A rare timing issue in the download manager was fixed. If a cancellation arrived at exactly the moment the download task was starting up and had not yet read the download record from the database, the cancellation handler would fail silently and leave the download in Pending state. The fix ensures the handler can always fetch the record it needs, regardless of when the cancellation arrives.
+
+---
+
 ### Fixed: Commercial removal now fails clearly when ffprobe is not installed
 
 **What you would notice:** If you had commercial removal enabled and ffprobe was not installed alongside ffmpeg, Mustarrd would silently mark the download as completed even though none of the commercials had actually been cut. The file looked done but still contained every ad break. After this fix, if ffprobe is missing or cannot read the file duration, the download is marked as failed with a message telling you to install ffprobe alongside ffmpeg.
