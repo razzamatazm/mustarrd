@@ -496,85 +496,91 @@ class EPGIngestManager:
         stream_info = channel_maps["stream_info"]
         xmltv_to_stream: Dict[str, str] = dict(stream_by_xmltv_id)
 
-        for _, elem in ET.iterparse(io.BytesIO(xmltv_bytes), events=("end",)):
-            local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-            if local_tag == "channel":
-                xmltv_id = elem.get("id")
-                display_name = self._extract_text(elem, "display-name")
-                if xmltv_id and xmltv_id not in xmltv_to_stream:
-                    if xmltv_id in stream_info:
-                        xmltv_to_stream[xmltv_id] = xmltv_id
-                    elif display_name:
-                        name_key = self._normalize_name(display_name)
-                        stream_id = stream_by_name.get(name_key)
-                        if stream_id:
-                            xmltv_to_stream[xmltv_id] = stream_id
-                elem.clear()
-                continue
-
-            if local_tag != "programme":
-                continue
-
-            xmltv_id = elem.get("channel")
-            if not xmltv_id:
-                elem.clear()
-                continue
-
-            stream_id = xmltv_to_stream.get(xmltv_id)
-            if not stream_id or stream_id not in stream_info:
-                elem.clear()
-                continue
-
-            start_raw = elem.get("start")
-            stop_raw = elem.get("stop")
-            start_dt = self._parse_xmltv_time(start_raw)
-            end_dt = self._parse_xmltv_time(stop_raw)
-            if not start_dt or not end_dt:
-                elem.clear()
-                continue
-
-            start_utc = start_dt.astimezone(timezone.utc)
-            end_utc = end_dt.astimezone(timezone.utc)
-            archive_days = int(stream_info[stream_id].get("archive_days") or 0)
-            if archive_days > 0:
-                channel_cutoff = now_utc - timedelta(days=archive_days)
-                if end_utc < channel_cutoff:
+        try:
+            for _, elem in ET.iterparse(io.BytesIO(xmltv_bytes), events=("end",)):
+                local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if local_tag == "channel":
+                    xmltv_id = elem.get("id")
+                    display_name = self._extract_text(elem, "display-name")
+                    if xmltv_id and xmltv_id not in xmltv_to_stream:
+                        if xmltv_id in stream_info:
+                            xmltv_to_stream[xmltv_id] = xmltv_id
+                        elif display_name:
+                            name_key = self._normalize_name(display_name)
+                            stream_id = stream_by_name.get(name_key)
+                            if stream_id:
+                                xmltv_to_stream[xmltv_id] = stream_id
                     elem.clear()
                     continue
 
-            duration_minutes = int((end_utc - start_utc).total_seconds() / 60)
-            if duration_minutes <= 0:
+                if local_tag != "programme":
+                    continue
+
+                xmltv_id = elem.get("channel")
+                if not xmltv_id:
+                    elem.clear()
+                    continue
+
+                stream_id = xmltv_to_stream.get(xmltv_id)
+                if not stream_id or stream_id not in stream_info:
+                    elem.clear()
+                    continue
+
+                start_raw = elem.get("start")
+                stop_raw = elem.get("stop")
+                start_dt = self._parse_xmltv_time(start_raw)
+                end_dt = self._parse_xmltv_time(stop_raw)
+                if not start_dt or not end_dt:
+                    elem.clear()
+                    continue
+
+                start_utc = start_dt.astimezone(timezone.utc)
+                end_utc = end_dt.astimezone(timezone.utc)
+                archive_days = int(stream_info[stream_id].get("archive_days") or 0)
+                if archive_days > 0:
+                    channel_cutoff = now_utc - timedelta(days=archive_days)
+                    if end_utc < channel_cutoff:
+                        elem.clear()
+                        continue
+
+                duration_minutes = int((end_utc - start_utc).total_seconds() / 60)
+                if duration_minutes <= 0:
+                    elem.clear()
+                    continue
+
+                title = self._extract_text(elem, "title") or "Unknown"
+                description = self._extract_text(elem, "desc")
+                category = self._extract_text(elem, "category")
+
+                start_ts = int(start_utc.timestamp())
+                stop_ts = int(end_utc.timestamp())
+                epg_id = f"{stream_id}:{start_ts}:{stop_ts}"
+
+                info = stream_info[stream_id]
+                yield {
+                    "channel_id": stream_id,
+                    "channel_name": info["name"],
+                    "xmltv_id": xmltv_id,
+                    "epg_id": epg_id,
+                    "title": title,
+                    "description": description,
+                    "category": category,
+                    "start_time": start_utc,
+                    "end_time": end_utc,
+                    "start_timestamp": start_ts,
+                    "stop_timestamp": stop_ts,
+                    "provider_start": start_raw,
+                    "provider_stop": stop_raw,
+                    "duration_minutes": duration_minutes,
+                    "has_archive": info["has_archive"],
+                }
+
                 elem.clear()
-                continue
-
-            title = self._extract_text(elem, "title") or "Unknown"
-            description = self._extract_text(elem, "desc")
-            category = self._extract_text(elem, "category")
-
-            start_ts = int(start_utc.timestamp())
-            stop_ts = int(end_utc.timestamp())
-            epg_id = f"{stream_id}:{start_ts}:{stop_ts}"
-
-            info = stream_info[stream_id]
-            yield {
-                "channel_id": stream_id,
-                "channel_name": info["name"],
-                "xmltv_id": xmltv_id,
-                "epg_id": epg_id,
-                "title": title,
-                "description": description,
-                "category": category,
-                "start_time": start_utc,
-                "end_time": end_utc,
-                "start_timestamp": start_ts,
-                "stop_timestamp": stop_ts,
-                "provider_start": start_raw,
-                "provider_stop": stop_raw,
-                "duration_minutes": duration_minutes,
-                "has_archive": info["has_archive"],
-            }
-
-            elem.clear()
+        except ET.ParseError as exc:
+            logger.warning(
+                "XMLTV file was truncated or malformed; partial EPG data was imported. (%s)",
+                exc,
+            )
 
     def _maybe_decompress(self, data: bytes) -> bytes:
         if data[:2] == b"\x1f\x8b":
