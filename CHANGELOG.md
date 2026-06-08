@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: The Downloads page tabs no longer wrap to a second row on phones
+
+**What you would notice:** On a phone, the Downloads page shows three tabs: Active, Upcoming, and History. Previously the History tab could fall onto a second row, making the page look broken and hiding the fact that all three sections exist. All three tabs now stay on a single row and share the available width evenly.
+
+**What changed:** The tab bar on the Downloads page was updated to stretch tabs evenly across the full width and prevent wrapping. No backend changes were made.
+
+---
+
 ### Improved: The "Paused (Low Space)" badge on upcoming recordings no longer pushes the air time to a second line
 
 **What you would notice:** On the Downloads page, scheduled recordings that are paused because disk space is low show a yellow "Paused (Low Space)" badge. Previously that badge sat next to the air time text, and on smaller screens or phones the two would compete for space, pushing the air time onto a second line mid-sentence. The badge now sits in the title row next to the show name, and the air time always has its own line below with room to display fully.
