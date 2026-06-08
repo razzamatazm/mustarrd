@@ -699,6 +699,20 @@ class DownloadManager:
                     )
                     download = result.scalar_one_or_none()
                 if download:
+                    if download.status == DownloadStatus.COMPLETED.value:
+                        # Cancel arrived after the file was already moved to the
+                        # completed folder. Commit the completed state and leave
+                        # the file untouched.
+                        await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
+                        await session.commit()
+                        await self._broadcast_progress(
+                            download_id, 100, DownloadStatus.COMPLETED.value
+                        )
+                        await self._broadcast_log(
+                            download_id,
+                            f"Download completed: {os.path.basename(download.output_path)}"
+                        )
+                        return
                     download.status = DownloadStatus.CANCELLED.value
                     await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                     await session.commit()
