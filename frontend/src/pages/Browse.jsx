@@ -987,29 +987,31 @@ export default function Browse() {
 
               <Card shadow="sm" padding="md" radius="md" withBorder style={{ height: '100%' }}>
                 <Stack style={{ height: '100%' }}>
-                  <Group justify="space-between">
-                    <Group gap="xs">
-                      {selectedChannel?.stream_icon ? (
-                        <Image
-                          src={selectedChannel.stream_icon}
-                          alt={selectedChannel.name}
-                          w={32}
-                          h={32}
-                          fit="contain"
-                        />
-                      ) : (
-                        <IconVideo size={28} opacity={0.4} />
+                  {(selectedChannel || !channelsIsError) && (
+                    <Group justify="space-between">
+                      <Group gap="xs">
+                        {selectedChannel?.stream_icon ? (
+                          <Image
+                            src={selectedChannel.stream_icon}
+                            alt={selectedChannel.name}
+                            w={32}
+                            h={32}
+                            fit="contain"
+                          />
+                        ) : (
+                          <IconVideo size={28} opacity={0.4} />
+                        )}
+                        <Text fw={500}>
+                          {selectedChannel ? selectedChannel.name : 'No channel selected'}
+                        </Text>
+                      </Group>
+                      {selectedChannel && (
+                        <Badge variant="light" leftSection={<IconClock size={12} />}>
+                          {formatArchiveDuration(selectedChannel.tv_archive_duration)}
+                        </Badge>
                       )}
-                      <Text fw={500}>
-                        {selectedChannel ? selectedChannel.name : 'No channel selected'}
-                      </Text>
                     </Group>
-                    {selectedChannel && (
-                      <Badge variant="light" leftSection={<IconClock size={12} />}>
-                        {formatArchiveDuration(selectedChannel.tv_archive_duration)}
-                      </Badge>
-                    )}
-                  </Group>
+                  )}
 
                   {selectedChannel ? (
                     <Stack style={{ flex: 1, minHeight: 0 }}>
