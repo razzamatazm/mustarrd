@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Browse EPG right panel now shows a message when your provider is unreachable
+
+**What you would notice:** On desktop, the Browse EPG page has a two-column layout: channels on the left, the program guide on the right. When your IPTV provider cannot be reached, the right panel was completely blank. This could look like a display glitch or a broken page with no hint of what was wrong. The right panel now shows a TV icon and the message "Channel guide will appear here once your provider is connected." so you can tell immediately that the empty space is intentional and not a bug.
+
+**What changed:** A placeholder message and icon were added to the right panel of the Browse EPG desktop layout. When the provider is unreachable, the panel now shows the message instead of an empty box. No backend changes were made.
+
+---
+
 ### Fixed: Providers using compact XMLTV timestamps now have their guide loaded correctly
 
 **What you would notice:** Some IPTV providers write timestamps in their program guide files in a compact 12-character format with the timezone offset written directly after the time, like `202311152000+0200`, with no space before the `+`. If your provider used this format, every program on every channel would be silently dropped during each guide refresh. Browse and Catchup would show nothing, with no error message to explain why.
