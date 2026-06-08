@@ -228,6 +228,23 @@ class DownloadManager:
     async def queue_download(self, download: Download) -> Download:
         """Add a download to the queue."""
         async with async_session_maker() as session:
+            _active = [
+                DownloadStatus.PENDING.value,
+                DownloadStatus.DOWNLOADING.value,
+                DownloadStatus.PROCESSING.value,
+            ]
+            _dup = await session.execute(
+                select(Download.id).where(
+                    Download.output_path == download.output_path,
+                    Download.status.in_(_active),
+                ).limit(1)
+            )
+            if _dup.scalar_one_or_none() is not None:
+                raise ValueError(
+                    f"A download is already active for this output file: "
+                    f"{os.path.basename(download.output_path)}"
+                )
+
             session.add(download)
             await session.commit()
             await session.refresh(download)

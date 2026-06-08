@@ -392,7 +392,10 @@ async def create_download(
     await check_disk_space(session)
 
     # Queue the download
-    download = await download_manager.queue_download(download)
+    try:
+        download = await download_manager.queue_download(download)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="A download for this output path is already active.")
 
     return (await _attach_requested_by(session, [download.to_dict()], auth))[0]
 
