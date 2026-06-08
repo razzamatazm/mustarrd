@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Status badges on scheduled recordings no longer push show titles off the screen on phones
+
+**What you would notice:** On the Scheduled page, each recording card shows a status badge (such as "Scheduled" or "Paused (Low Space)"). Previously that badge shared the top-right corner of the card with the menu button, and on phones a long show title like "The Great British Bake Off" had no room and was cut off with "..." making it impossible to read. The badge now sits below the channel name on the left side of the card, and the menu button is alone at the top-right. Show titles now have full width and are no longer cut short.
+
+**What changed:** The badge was moved from beside the menu button to below the channel name. No backend changes were made.
+
+---
+
 ### Improved: The Downloads page tabs no longer wrap to a second row on phones
 
 **What you would notice:** On a phone, the Downloads page shows three tabs: Active, Upcoming, and History. Previously the History tab could fall onto a second row, making the page look broken and hiding the fact that all three sections exist. All three tabs now stay on a single row and share the available width evenly.
