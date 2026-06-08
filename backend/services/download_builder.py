@@ -38,7 +38,7 @@ def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, dateti
     else:
         start_time = program.get("start_time")
         end_time = program.get("end_time")
-        if not start_time or not end_time:
+        if not isinstance(start_time, str) or not isinstance(end_time, str):
             raise ValueError("Program has no valid start or end time")
         program_start_utc = datetime.fromisoformat(start_time)
         program_end_utc = datetime.fromisoformat(end_time)
@@ -50,7 +50,7 @@ def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, dateti
             program_end_utc = program_end_utc.replace(tzinfo=timezone.utc)
         duration_minutes = int((program_end_utc - program_start_utc).total_seconds() / 60)
 
-    if program.get("start_time") and program.get("end_time"):
+    if isinstance(program.get("start_time"), str) and isinstance(program.get("end_time"), str):
         program_start_local = datetime.fromisoformat(program["start_time"])
         program_end_local = datetime.fromisoformat(program["end_time"])
     else:

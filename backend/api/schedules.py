@@ -41,7 +41,7 @@ def _parse_program(program: dict) -> tuple[datetime, datetime, int, int, int, st
     if start_timestamp and stop_timestamp:
         start_time = datetime.fromtimestamp(int(start_timestamp), tz=timezone.utc)
         end_time = datetime.fromtimestamp(int(stop_timestamp), tz=timezone.utc)
-    elif program.get("start_time") and program.get("end_time"):
+    elif isinstance(program.get("start_time"), str) and isinstance(program.get("end_time"), str):
         start_time = datetime.fromisoformat(program["start_time"])
         end_time = datetime.fromisoformat(program["end_time"])
     else:
