@@ -100,7 +100,7 @@ function ScheduleCard({
   return (
     <Card shadow="sm" padding="md" radius="md" withBorder>
       <Stack gap="xs">
-        <Group justify="space-between" wrap="nowrap">
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
           <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
             <Text fw={500}>
               {schedule.program_title}
@@ -108,36 +108,34 @@ function ScheduleCard({
             <Text size="sm" c="dimmed" truncate>
               {schedule.channel_name}
             </Text>
-          </Stack>
-          <Group gap="xs">
             {getStatusBadge(schedule.status)}
-            <Menu shadow="md" width={160}>
-              <Menu.Target>
-                <ActionIcon variant="subtle">
-                  <IconDotsVertical size={16} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {isActive && (
-                  <Menu.Item
-                    leftSection={<IconPlayerStop size={14} />}
-                    onClick={() => onCancel(schedule)}
-                  >
-                    Cancel
-                  </Menu.Item>
-                )}
-                {canDelete && (
-                  <Menu.Item
-                    color="red"
-                    leftSection={<IconTrash size={14} />}
-                    onClick={() => setConfirmingDelete(true)}
-                  >
-                    Delete
-                  </Menu.Item>
-                )}
-              </Menu.Dropdown>
-            </Menu>
-          </Group>
+          </Stack>
+          <Menu shadow="md" width={160}>
+            <Menu.Target>
+              <ActionIcon variant="subtle">
+                <IconDotsVertical size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {isActive && (
+                <Menu.Item
+                  leftSection={<IconPlayerStop size={14} />}
+                  onClick={() => onCancel(schedule)}
+                >
+                  Cancel
+                </Menu.Item>
+              )}
+              {canDelete && (
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconTrash size={14} />}
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  Delete
+                </Menu.Item>
+              )}
+            </Menu.Dropdown>
+          </Menu>
         </Group>
 
         <Text size="xs" c="dimmed">
