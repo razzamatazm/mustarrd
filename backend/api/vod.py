@@ -147,7 +147,10 @@ async def download_movie(
         raise HTTPException(status_code=400, detail="Unable to queue movie download")
 
     await check_disk_space(session)
-    download = await download_manager.queue_download(download)
+    try:
+        download = await download_manager.queue_download(download)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="A download for this file is already active.")
     return download.to_dict()
 
 
@@ -245,7 +248,10 @@ async def download_series(
             raise HTTPException(status_code=400, detail="Unable to queue series download")
 
         await check_disk_space(session)
-        download = await download_manager.queue_download(download)
+        try:
+            download = await download_manager.queue_download(download)
+        except ValueError:
+            raise HTTPException(status_code=409, detail="A download for this file is already active.")
         downloads.append(download.to_dict())
 
     return {
