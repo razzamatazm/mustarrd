@@ -4,6 +4,24 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-06-08
+
+### Improved: Downloads History now has a filter to show only completed, failed, or cancelled recordings
+
+**What you would notice:** The History tab on the Downloads page used to show all past recordings in one mixed list. Finding the recordings that failed, or checking what you had cancelled, meant scrolling through everything. A filter dropdown now sits at the top of the History panel. Choose from All, Completed, Failed, or Cancelled to narrow the list instantly. This is a display change only and does not affect your recordings.
+
+**What changed:** A status filter dropdown was added to the Downloads > History tab. Selecting a status narrows the list immediately. No backend changes were made.
+
+---
+
+### Fixed: The EPG Offset (minutes) setting now actually shifts program times in the guide
+
+**What you would notice:** Settings has a global "EPG Offset (minutes)" field that is supposed to shift all program times forward or backward to correct for a provider that sends guide data in the wrong timezone. Before this fix, you could save a value there and nothing would change. The setting was stored in the database but never read. Program times in Browse and EPG search now shift by the number of minutes you enter in that field.
+
+**What changed:** The EPG service now reads the global offset and adds it on top of any per-account guide offset when displaying programs in Browse EPG and EPG search. If you previously set this field and noticed it had no effect, it will now work after updating.
+
+---
+
 ## 2026-06-07
 
 ### Fixed: Hardware-accelerated transcoding no longer destroys MP4 and MKV recordings

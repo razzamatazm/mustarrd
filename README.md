@@ -92,6 +92,7 @@ Then open **http://localhost:4177** in your browser.
 - The **Upcoming** tab lists everything scheduled to record automatically, sorted by air date, with show name, channel, time, and duration. A count badge on the tab heading shows how many recordings are queued at a glance. Recordings paused for low disk space show a yellow "PAUSED (LOW SPACE)" badge with an alert icon
 - A red badge on the **Downloads** menu item shows how many recordings have permanently failed since you last visited. Opening Downloads clears it
 - A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
+- The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Failed, or Cancelled entries
 - Failed downloads can be retried from the same page
 - Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries stay so you can retry them)
 
