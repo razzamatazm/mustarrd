@@ -133,6 +133,16 @@ class FailedCountTests(unittest.TestCase):
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("42", compiled, "user_id filter must appear for non-admin")
 
+    def test_out_of_range_since_raises_422(self):
+        """since=99999999999999999999 must raise HTTPException(422), not crash with 500."""
+        from fastapi import HTTPException
+        from api.downloads import get_failed_download_count
+        session = self._make_session(count=0)
+        auth = self._make_admin_auth()
+        with self.assertRaises(HTTPException) as ctx:
+            self._run(get_failed_download_count(auth=auth, session=session, since=99999999999999999999.0))
+        self.assertEqual(ctx.exception.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

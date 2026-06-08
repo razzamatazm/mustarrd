@@ -193,7 +193,7 @@ async def _attach_requested_by(
 async def get_failed_download_count(
     auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session),
-    since: Optional[float] = Query(default=None),
+    since: Optional[float] = Query(default=None, ge=0, le=253402300799000),
 ):
     """Count permanently failed downloads since a given Unix timestamp in milliseconds."""
     query = select(func.count()).select_from(Download).where(Download.status == DownloadStatus.FAILED.value)
@@ -201,7 +201,10 @@ async def get_failed_download_count(
         query = query.where(Download.requested_by_user_id == auth.user_id)
     query = query.where(Download.completed_at.is_not(None))
     if since is not None:
-        cutoff = datetime.utcfromtimestamp(since / 1000.0)
+        try:
+            cutoff = datetime.utcfromtimestamp(since / 1000.0)
+        except (OSError, OverflowError, ValueError):
+            raise HTTPException(status_code=422, detail="since: timestamp out of range")
         query = query.where(Download.completed_at >= cutoff)
     result = await session.execute(query)
     return {"count": result.scalar() or 0}
