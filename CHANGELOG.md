@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: EPG guide no longer goes stale with large IPTV providers
+
+**What you would notice:** If your IPTV provider serves a large program guide file (common with providers that carry many channels), Mustarrd would silently fail to refresh the guide and show stale or missing program listings with no explanation. After this fix, Mustarrd waits up to 5 minutes for the guide download to complete, matching the extra time large files need on a slow connection or a busy provider.
+
+**What changed:** The timeout for downloading the XMLTV program guide file was raised from 30 seconds to 300 seconds. Large providers routinely serve guide files of 20 to 200 MB, which can take longer than 30 seconds on a slow or loaded connection. The new limit matches the timeout already used for other large downloads in Mustarrd. Most users will not notice any difference; users whose guide was silently failing will now see it refresh correctly.
+
+---
+
+### Fixed: File Naming settings no longer say ".ts extension" for MP4 and MKV users
+
+**What you would notice:** Under Settings > File Naming, the description said "Files get the .ts extension automatically." That was only correct for users recording in the default TS format. If you had set your Recording Format to MP4 or MKV, the description was simply wrong: your files were getting .mp4 or .mkv extensions, not .ts. The description now correctly explains that the extension is controlled by your Recording Format setting, and that you should not add an extension to your file naming template.
+
+**What changed:** One sentence in the File Naming settings description was reworded to accurately describe how file extensions work. No recording logic or file handling was changed.
+
+---
+
 ### Fixed: ComSkip now correctly cuts all commercials when EDL segments overlap
 
 **What you would notice:** If you use commercial removal and your provider's ComSkip EDL file contained one commercial block fully inside another (overlapping segments), a slice of commercial video would slip through into the final recording. The recording would look complete but still contain ads. After this fix, overlapping commercial segments are handled correctly and all commercial content is removed.
