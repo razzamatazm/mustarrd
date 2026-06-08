@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: File Naming settings now show real example filenames
+
+**What you would notice:** Under Settings > File Naming, each template section used to show the raw template syntax as an example, such as `{show} - S{season:02d}E{episode:02d} - {title}`. That text was identical to what was already in the input field above it and gave no useful information, especially to users who do not know what `{season:02d}` means. The example line now shows what a real downloaded file would actually be named, such as `Breaking Bad - S01E05 - Gray Matter` for TV shows or `Inception (2010)` for movies. You can see exactly what your filename settings will produce before saving anything.
+
+**What changed:** The backend now generates a sample filename using placeholder data and includes it in the settings response. The frontend displays this rendered example instead of the raw template text. No template logic was changed, and no existing filenames are affected.
+
+---
+
+### Improved: Download start lines are easier to read on mobile
+
+**What you would notice:** On a phone, Scheduled and Downloads Upcoming cards showed text like "Download starts: Wednesday at 9:30 PM (1h 30m recording)". On narrow screens, the word "recording" would wrap onto its own line, making the card look misaligned. Since the label "Download starts:" already tells you a recording is happening, the word "recording" was redundant. Cards now show "Download starts: Wednesday at 9:30 PM (1h 30m)" and fit cleanly on one line on all phone sizes.
+
+**What changed:** The word "recording" was removed from the download duration text in the Scheduled Upcoming and Downloads Upcoming card components. No other text or behavior was changed.
+
+---
+
+### Fixed: Cancelling a download at the last moment no longer deletes the completed file
+
+**What you would notice:** In a very narrow timing window, pressing Cancel on a download that had just finished could permanently delete the completed recording from your folder and show it as Cancelled. The recording would be gone with no way to recover it. After this fix, if a download has already finished and moved to your completed recordings folder, pressing Cancel at that moment has no effect: the recording stays in place and shows as Completed.
+
+**What changed:** The cancel handler in the download manager now checks whether a download is already marked as completed before taking any action. If it is, the handler stops without touching the file. Previously this check was missing, so the handler would delete whatever file it found at the download path, which by that point was the completed recording in your recordings folder.
+
+---
+
+### Fixed: Long show and episode titles no longer cause series downloads to fail
+
+**What you would notice:** If you downloaded a series episode where both the show name and the episode title were very long (most common with Korean, Japanese, or Chinese content), the download would fail with no clear explanation. The app would mark it as Failed and give no actionable message. After this fix, the combined filename is automatically trimmed to fit within the filesystem's filename length limit, and the download completes normally.
+
+**What changed:** Each part of a series filename (show name and episode title) was already capped individually, but the combined result was never checked. Two long parts together could exceed the 255-character Linux filename limit. A trim step was added after combining the two parts so the resulting filename always fits. Your show and episode names are preserved as fully as possible; only characters beyond the limit are removed.
+
+---
+
 ### Fixed: ComSkip failure message now correctly says your raw recording is still on disk
 
 **What you would notice:** When ComSkip failed during post-processing, Mustarrd showed an error message that said "Recording not saved." That wording made it sound like your recording had been deleted. In fact, the original raw recording file was never removed and was still sitting in your downloads folder the whole time. The message now correctly says "The raw recording is still in the download folder and was not deleted," so you know your file is safe and can rescue it if needed.
