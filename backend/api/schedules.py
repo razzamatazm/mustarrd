@@ -126,6 +126,7 @@ async def list_schedules(
             data["download_status"] = download.status
             data["download_progress"] = download.progress
             data["download_output_path"] = download.output_path
+            data["download_error_message"] = download.error_message
         response.append(data)
 
     return response

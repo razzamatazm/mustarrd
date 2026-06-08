@@ -157,6 +157,12 @@ function ScheduleCard({
           </Alert>
         )}
 
+        {!schedule.status_message && schedule.download_error_message && (
+          <Alert color="red" variant="light" p="xs">
+            <Text size="xs">{schedule.download_error_message}</Text>
+          </Alert>
+        )}
+
         {schedule.download_status === 'completed' && schedule.download_id && (
           <Group gap="xs">
             {isDesktop ? (
