@@ -672,22 +672,32 @@ export default function Downloads() {
             </Card>
           ) : (
             <Stack gap="sm">
-              {upcomingRecordings.map((rec) => (
-                <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
-                  <Stack gap={2}>
-                    <Group justify="space-between" wrap="nowrap" align="flex-start">
-                      <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
-                        <Text fw={500}>{rec.program_title}</Text>
-                        <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
-                      </Stack>
-                      {getScheduledStatusBadge(rec.status)}
-                    </Group>
-                    <Text size="xs" c="dimmed">
-                      Airs: {formatAirDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0) || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
-                    </Text>
-                  </Stack>
-                </Card>
-              ))}
+              {upcomingRecordings.map((rec) => {
+                const guideOffset = accountGuideOffsets[Number(rec.account_id)] || 0
+                const airStart = formatAirDateTime(rec, 'start', guideOffset)
+                const airEnd = formatChannelDateTime(rec, 'end', guideOffset, 'h:mm A')
+                const downloadAt = formatAirDateTime(rec, 'available', guideOffset)
+                const totalDuration = (rec.duration_minutes || 0) + (rec.pre_padding_minutes || 0) + (rec.post_padding_minutes || 0)
+                return (
+                  <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
+                    <Stack gap={2}>
+                      <Group justify="space-between" wrap="nowrap" align="flex-start">
+                        <Stack gap={2} style={{ flex: 1, overflow: 'hidden' }}>
+                          <Text fw={500}>{rec.program_title}</Text>
+                          <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
+                        </Stack>
+                        {getScheduledStatusBadge(rec.status)}
+                      </Group>
+                      <Text size="xs" c="dimmed">
+                        Airs: {airStart || 'Unknown'} - {airEnd || 'Unknown'} ({formatDuration(rec.duration_minutes || 0)})
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        Download starts: {downloadAt || 'Unknown'} ({formatDuration(totalDuration)} recording)
+                      </Text>
+                    </Stack>
+                  </Card>
+                )
+              })}
             </Stack>
           )}
         </Tabs.Panel>
