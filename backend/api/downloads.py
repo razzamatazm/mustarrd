@@ -582,6 +582,8 @@ async def retry_download(
     if download.status not in [DownloadStatus.FAILED.value, DownloadStatus.CANCELLED.value]:
         raise HTTPException(status_code=400, detail="Can only retry failed or cancelled downloads")
 
+    await check_disk_space(session)
+
     success = await download_manager.retry_download(download_id)
 
     if not success:
