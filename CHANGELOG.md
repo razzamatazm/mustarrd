@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: The "Paused (Low Space)" badge on upcoming recordings no longer pushes the air time to a second line
+
+**What you would notice:** On the Downloads page, scheduled recordings that are paused because disk space is low show a yellow "Paused (Low Space)" badge. Previously that badge sat next to the air time text, and on smaller screens or phones the two would compete for space, pushing the air time onto a second line mid-sentence. The badge now sits in the title row next to the show name, and the air time always has its own line below with room to display fully.
+
+**What changed:** The layout of upcoming recording cards in Downloads was restructured so the badge shares a row with the show title, and the air time sits in a separate row underneath. No backend changes were made.
+
+---
+
 ### Improved: Completed recordings in Downloads History now show the download size on a separate labeled line
 
 **What you would notice:** Previously, a completed recording showed its file size next to the filename with a dot separator, which was easy to miss and could be confusing for transcoded recordings where the download size and the final file on disk differ in size. The download size is now shown on its own line below the filename, with a clear "Download size: 1.4 GB" label so you know exactly what you are looking at. Entries with no reported size (chunked streams, older records, or failed downloads) show only the filename, with no spurious "0 B" line.
