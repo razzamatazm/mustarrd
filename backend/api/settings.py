@@ -263,6 +263,7 @@ async def get_template_variables(_admin: None = Depends(require_admin)):
                 {"name": "date", "description": "Air date (YYYY-MM-DD)"},
             ],
             "example": "{show} - S{season:02d}E{episode:02d} - {title}",
+            "rendered_example": "Breaking Bad - S01E05 - Gray Matter",
         },
         "movie": {
             "variables": [
@@ -270,6 +271,7 @@ async def get_template_variables(_admin: None = Depends(require_admin)):
                 {"name": "year", "description": "Release year"},
             ],
             "example": "{title} ({year})",
+            "rendered_example": "Inception (2010)",
         },
         "sports": {
             "variables": [
@@ -278,6 +280,7 @@ async def get_template_variables(_admin: None = Depends(require_admin)):
                 {"name": "channel", "description": "Channel name"},
             ],
             "example": "{title} - {date}",
+            "rendered_example": "FA Cup Final - 2024-01-14",
         },
         "default": {
             "variables": [
@@ -286,6 +289,7 @@ async def get_template_variables(_admin: None = Depends(require_admin)):
                 {"name": "date", "description": "Air date (YYYY-MM-DD)"},
             ],
             "example": "{title} - {date}",
+            "rendered_example": "Planet Earth - 2024-01-14",
         },
     }
 

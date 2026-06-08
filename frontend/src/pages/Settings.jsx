@@ -54,7 +54,7 @@ function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
 }
 
-function TemplateSection({ label, template, variables, example, onChange }) {
+function TemplateSection({ label, template, variables, example, renderedExample, onChange }) {
   return (
     <Stack gap="xs">
       <TextInput
@@ -71,7 +71,7 @@ function TemplateSection({ label, template, variables, example, onChange }) {
         ))}
       </Group>
       <Text size="xs" c="dimmed">
-        Example: <Code>{example}</Code>
+        Example: <Code>{renderedExample || example}</Code>
       </Text>
     </Stack>
   )
@@ -931,6 +931,7 @@ export default function Settings() {
               template={formData.tv_template}
               variables={templateInfo.tv_show.variables}
               example={templateInfo.tv_show.example}
+              renderedExample={templateInfo.tv_show.rendered_example}
               onChange={(val) => handleChange('tv_template', val)}
             />
           </Stack>
@@ -947,6 +948,7 @@ export default function Settings() {
               template={formData.movie_template}
               variables={templateInfo.movie.variables}
               example={templateInfo.movie.example}
+              renderedExample={templateInfo.movie.rendered_example}
               onChange={(val) => handleChange('movie_template', val)}
             />
           </Stack>
@@ -963,6 +965,7 @@ export default function Settings() {
               template={formData.sports_template}
               variables={templateInfo.sports.variables}
               example={templateInfo.sports.example}
+              renderedExample={templateInfo.sports.rendered_example}
               onChange={(val) => handleChange('sports_template', val)}
             />
           </Stack>
@@ -978,6 +981,7 @@ export default function Settings() {
             template={formData.default_template}
             variables={templateInfo.default.variables}
             example={templateInfo.default.example}
+            renderedExample={templateInfo.default.rendered_example}
             onChange={(val) => handleChange('default_template', val)}
           />
         </Stack>
