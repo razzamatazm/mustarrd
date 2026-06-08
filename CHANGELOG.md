@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Commercial removal now fails clearly when ffprobe is not installed
+
+**What you would notice:** If you had commercial removal enabled and ffprobe was not installed alongside ffmpeg, Mustarrd would silently mark the download as completed even though none of the commercials had actually been cut. The file looked done but still contained every ad break. After this fix, if ffprobe is missing or cannot read the file duration, the download is marked as failed with a message telling you to install ffprobe alongside ffmpeg.
+
+**What changed:** The commercial removal step now checks the file duration before it does any work. If ffprobe is unavailable or returns an invalid duration, the process stops immediately and marks the download as failed with a clear error message. Previously, a missing ffprobe caused the duration to come back as zero, which silently produced the original file unchanged.
+
+---
+
+### Improved: Accounts heading on mobile now appears above the buttons
+
+**What you would notice:** On a phone, the Settings > Accounts page was showing two action buttons at the top with the "Accounts" heading below them. With no label above the buttons, the page looked broken and it was not obvious what screen you were on. The heading now appears at the top where it belongs, with the buttons underneath.
+
+**What changed:** The layout of the Accounts page header was updated so that on narrow screens the heading always renders first and the action buttons appear below it. On desktop, the layout is unchanged.
+
+---
+
 ### Improved: Browse EPG right panel now shows a message when your provider is unreachable
 
 **What you would notice:** On desktop, the Browse EPG page has a two-column layout: channels on the left, the program guide on the right. When your IPTV provider cannot be reached, the right panel was completely blank. This could look like a display glitch or a broken page with no hint of what was wrong. The right panel now shows a TV icon and the message "Channel guide will appear here once your provider is connected." so you can tell immediately that the empty space is intentional and not a bug.
