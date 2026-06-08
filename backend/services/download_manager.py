@@ -88,6 +88,19 @@ class DownloadManager:
     def unregister_websocket(self, websocket):
         self._websocket_connections.pop(websocket, None)
 
+    async def disconnect_user_websockets(self, user_id: int) -> None:
+        """Close all open WebSocket connections belonging to a specific user."""
+        to_close = [
+            ws for ws, ws_auth in list(self._websocket_connections.items())
+            if ws_auth.get("user_id") == user_id
+        ]
+        for ws in to_close:
+            self._websocket_connections.pop(ws, None)
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     def _track_active_download(self, download_id: int, account_id: Optional[int]) -> None:
         if account_id is None:
             return

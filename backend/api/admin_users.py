@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_admin, hash_password, AuthContext
 from database import get_session
 from models import User, UserIdentity, UserSetupToken
+from services.download_manager import download_manager
 
 
 router = APIRouter()
@@ -119,6 +120,10 @@ async def update_user(
 
     await session.commit()
     await session.refresh(user)
+
+    if payload.status == "disabled":
+        await download_manager.disconnect_user_websockets(user_id)
+
     return user.to_dict()
 
 
