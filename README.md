@@ -147,7 +147,7 @@ Most users never need to touch these. Set them in `docker-compose.yml` or a `bac
 | `CATCHUP_MAX_CONCURRENT_DOWNLOADS` | Max simultaneous downloads | `2` |
 | `CATCHUP_SESSION_SECRET` | Session signing key, auto-generated and persisted to `./config/session_secret` on first run. Only set this manually to rotate or share across instances | *(auto)* |
 | `CATCHUP_CORS_ORIGINS` | Comma-separated allowed frontend origins; only needed when the UI is accessed from a non-localhost address | `http://localhost:4178,...` |
-| `CATCHUP_SESSION_HTTPS_ONLY` | Require HTTPS for session cookies | `true` |
+| `CATCHUP_SESSION_COOKIE_SECURE_MODE` | When to mark session cookies as HTTPS-only: `auto` (default, detects HTTPS including reverse-proxy setups), `always`, or `never` | `auto` |
 | `CATCHUP_ALLOW_REMOTE_SETUP` | Allow password setup from non-local IPs | `false` |
 | `CATCHUP_FFMPEG_PATH` | Path to ffmpeg binary | *(auto-detected)* |
 | `CATCHUP_COMSKIP_PATH` | Path to comskip binary | *(auto-detected)* |
