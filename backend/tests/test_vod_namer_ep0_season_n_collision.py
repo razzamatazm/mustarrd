@@ -72,6 +72,21 @@ class VodNamerEp0SeasonNCollisionTests(unittest.TestCase):
             "Regression: (0,0) case should still produce unique paths.",
         )
 
+    def test_numbered_episode_no_title_does_not_get_id_suffix(self):
+        """Untitled but properly numbered episodes (e.g. S02E05) must not get episode_id appended.
+
+        SxxExx already disambiguates; appending the provider ID would corrupt
+        Plex/Jellyfin filenames for providers that omit episode titles.
+        """
+        path = series_episode_output_path(
+            "/dl", "My Show", 2, 5, None, "mp4", episode_id="48213"
+        )
+        self.assertNotIn(
+            "48213",
+            path,
+            f"episode_id must not appear in path for a numbered episode (S02E05): {path!r}",
+        )
+
     def test_episode_with_title_not_affected(self):
         """Episodes with a title must not be modified by the fallback."""
         path_a = series_episode_output_path(
