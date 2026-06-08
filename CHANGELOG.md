@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Sending a program request with a number instead of a text date no longer causes a server error
+
+**What you would notice:** No visible change during normal use. Previously, if a third-party app or script sent a request to schedule or download a program and used a number (for example `1700000000`) instead of a text date (for example `"2023-11-14T22:13:20"`) for the start or end time, Mustarrd would respond with a generic server error. It now returns a clear "invalid input" message telling the caller the data was in the wrong format.
+
+**What changed:** The date-parsing code now checks that start and end times are text strings before trying to read them as dates. A number or other non-text value now produces a proper "400 Bad Request" response instead of an unhandled crash.
+
+---
+
 ### Fixed: Series episodes with no season or episode information no longer overwrite each other
 
 **What you would notice:** Some IPTV providers send series episodes without any season number, episode number, or episode title. Mustarrd would save every such episode from the same show to the same filename (for example `Season 00/S00E00 - My Show.mkv`). Downloading several such episodes would leave only one file on disk because each new download overwrote the previous one, with no error or warning.
