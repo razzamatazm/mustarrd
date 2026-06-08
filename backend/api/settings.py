@@ -43,8 +43,8 @@ class SettingsUpdate(BaseModel):
     max_concurrent_downloads: Optional[int] = Field(default=None, ge=1)
     max_concurrent_post_processing: Optional[int] = None
     min_free_space_gb: Optional[int] = Field(default=None, ge=1)
-    default_pre_padding_minutes: Optional[int] = Field(default=None, ge=0)
-    default_post_padding_minutes: Optional[int] = Field(default=None, ge=0)
+    default_pre_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
+    default_post_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
     default_account_id: Optional[int] = None
     # Post-processing
     transcode_enabled: Optional[bool] = None
