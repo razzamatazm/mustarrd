@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Series episodes with no season or episode information no longer overwrite each other
+
+**What you would notice:** Some IPTV providers send series episodes without any season number, episode number, or episode title. Mustarrd would save every such episode from the same show to the same filename (for example `Season 00/S00E00 - My Show.mkv`). Downloading several such episodes would leave only one file on disk because each new download overwrote the previous one, with no error or warning.
+
+**What changed:** When a series episode has no season, episode, or title information, Mustarrd now adds the provider's internal episode ID to the filename to make each file unique. All episodes are saved separately and no longer overwrite each other.
+
+---
+
+### Fixed: Downloading the same movie or series episode twice no longer corrupts the recording
+
+**What you would notice:** If you clicked Download twice on the same movie or series episode, or if two requests arrived at the same moment, Mustarrd would start both downloads and write to the same file at the same time. The recording would appear as completed but would often be corrupted and unplayable.
+
+**What changed:** If a download for a particular file is already active, any further request to download the same item is now rejected with a clear message. Only one download at a time can write to any given file.
+
+---
+
+### Fixed: Settings no longer accepts values that could cause Mustarrd to open thousands of connections at once
+
+**What you would notice:** If "Max concurrent downloads" was set to a very large number (for example 10,000 in the Settings page), Mustarrd would attempt to run that many downloads simultaneously. This could exhaust the available network connections on your server and cause the download process to crash until Mustarrd was restarted.
+
+**What changed:** "Max concurrent downloads" is now capped at 50, and "Max concurrent post-processing jobs" is limited to between 1 and 20. Both values are well above what any home server requires. The defaults remain 2 and 1.
+
+---
+
+### Improved: Upcoming recordings on the Downloads page now show a status badge
+
+**What you would notice:** Cards on the Downloads Upcoming tab had no status indicator. You had to visit the Scheduled Recordings page to see whether a recording was confirmed, queued, or paused due to low disk space.
+
+**What changed:** Each card on the Downloads Upcoming tab now shows the same status badge (Scheduled, Queued, Paused (Low Space), and so on) that already appeared on the Scheduled Recordings page. No backend changes were made.
+
+---
+
 ### Fixed: Retrying a recording no longer allows a duplicate schedule to sneak through while the retry is in progress
 
 **What you would notice:** If you retried a failed or cancelled recording and then tried to schedule the same program again before the retry finished, Mustarrd would accept the second schedule request as if the first were not running. Both downloads would write to the same output file at the same time, corrupting it. Mustarrd now correctly sees the retry as an active schedule and rejects the duplicate.
