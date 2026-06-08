@@ -58,6 +58,13 @@ def series_episode_output_path(
         # output paths. Leave normal numbered episodes (S02E05, etc.) clean.
         base_name = f"{base_name} - {_sanitize_component(str(episode_id))}"
 
+    # Cap combined base_name so the filename stays under Linux NAME_MAX (255
+    # bytes). Each component is independently capped at 200 bytes by
+    # sanitize_filename, but two components together can reach ~400 bytes.
+    encoded = base_name.encode("utf-8")
+    if len(encoded) > 200:
+        base_name = encoded[:200].decode("utf-8", errors="ignore").rstrip() or "unknown-episode"
+
     filename = f"{base_name}.{_safe_extension(extension)}"
 
     return os.path.join(download_folder, safe_show, season_folder, filename)
