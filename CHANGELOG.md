@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Completed recordings in Downloads History now show the download size on a separate labeled line
+
+**What you would notice:** Previously, a completed recording showed its file size next to the filename with a dot separator, which was easy to miss and could be confusing for transcoded recordings where the download size and the final file on disk differ in size. The download size is now shown on its own line below the filename, with a clear "Download size: 1.4 GB" label so you know exactly what you are looking at. Entries with no reported size (chunked streams, older records, or failed downloads) show only the filename, with no spurious "0 B" line.
+
+**What changed:** The completed recording card in Downloads > History was updated to display the filename and download size as two separate lines. The label "Download size:" makes clear that this is the size reported by your provider during the download, not necessarily the size of the final processed file. No backend changes were made.
+
+---
+
+### Fixed: Commercial removal no longer fails for shows with apostrophes in the title
+
+**What you would notice:** Shows whose names include an apostrophe (Father's Day, New Year's Eve, Britain's Got Talent, It's a Wonderful Life) were failing during the commercial-removal step. The download would finish, but the recording would be marked as failed or warning with no output file produced, and the log would show a file-not-found error from ffmpeg. This is now fixed.
+
+**What changed:** The file path formatter used when combining recording segments before running ComSkip was using the wrong quoting style for apostrophes. ffmpeg's concat list format uses its own quoting rules, not standard shell quoting. The formatter was corrected to use ffmpeg's expected style.
+
+---
+
+### Fixed: Original .ts file is now deleted when "delete after transcode" is on and a remux falls back to re-encode
+
+**What you would notice:** If you have "delete original after transcode" enabled and a recording could not be remuxed (converting the container format without re-encoding the video), Mustarrd would fall back to a full re-encode. The re-encoded file would land in your completed folder correctly, but the original .ts file would remain in your downloads folder instead of being deleted. This is now fixed.
+
+**What changed:** The fallback re-encode path was missing the step that removes the original file when the "delete original" setting is on. The deletion now runs correctly after a successful re-encode following a remux failure.
+
+---
+
 ### Fixed: Only admins can now trigger a manual EPG guide refresh
 
 **What you would notice:** On a shared Mustarrd instance where Plex login is enabled or multiple users have accounts, any logged-in user could previously trigger a full EPG refresh. This could hammer your IPTV provider repeatedly if a user or an app did it in a loop, risking rate limits that block normal downloads. This is now limited to admin accounts.
