@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Retrying a recording no longer allows a duplicate schedule to sneak through while the retry is in progress
+
+**What you would notice:** If you retried a failed or cancelled recording and then tried to schedule the same program again before the retry finished, Mustarrd would accept the second schedule request as if the first were not running. Both downloads would write to the same output file at the same time, corrupting it. Mustarrd now correctly sees the retry as an active schedule and rejects the duplicate.
+
+**What changed:** When a download is retried, Mustarrd now immediately marks the linked scheduled recording back to "queued" status. The guard that blocks duplicate schedules checks that status, so any further attempt to schedule the same program while the retry is in progress is correctly refused.
+
+---
+
+### Improved: The low disk space banner now shows the minimum threshold so you know exactly why recordings are paused
+
+**What you would notice:** Before this change, the banner said something like "870.5 GB free" with no explanation of why recordings were stopped. If your drive is large, that number alone is confusing. The banner now reads "870.5 GB free (25 GB minimum)" so you can see at a glance what the threshold is and why Mustarrd paused new recordings.
+
+**What changed:** The low disk space banner now includes the configured minimum free space in parentheses alongside the current free space. The minimum is set in Settings under Recording. No backend changes were made.
+
+---
+
 ### Fixed: Mustarrd no longer corrupts recordings when your provider schedules the same show twice with slightly different start times
 
 **What you would notice:** Some IPTV providers serve the same show twice in the program guide with start times that differ by a second or two. Mustarrd's duplicate check compares timestamps exactly, so it would see those as two different programs and schedule two separate downloads for the same show. Both downloads would write to the same output file at the same time, producing a corrupted or empty recording. Mustarrd now catches this before the second download starts, marks it as a duplicate, and lets the original recording finish normally.
