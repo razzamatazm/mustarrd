@@ -78,3 +78,21 @@ export function formatChannelDateTime(
 export function getNowUtc() {
   return dayjs.utc()
 }
+
+export function formatAirDateTime(program, kind = 'start', guideOffsetHours = 0) {
+  const displayTime = getChannelDisplayTime(program, kind, guideOffsetHours)
+  if (!displayTime) return ''
+  const offset = getGuideOffsetHours(guideOffsetHours)
+  const now = getNowUtc().add(offset, 'hour')
+  const todayDate = now.format('YYYY-MM-DD')
+  const tomorrowDate = now.add(1, 'day').format('YYYY-MM-DD')
+  const displayDate = displayTime.format('YYYY-MM-DD')
+  const timeStr = displayTime.format('h:mm A')
+  if (displayDate === todayDate) {
+    return `Today at ${timeStr}`
+  }
+  if (displayDate === tomorrowDate) {
+    return `Tomorrow at ${timeStr}`
+  }
+  return `${displayTime.format('ddd, MMM D, YYYY')} at ${timeStr}`
+}

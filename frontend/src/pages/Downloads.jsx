@@ -44,7 +44,7 @@ import duration from 'dayjs/plugin/duration'
 
 import { accountsApi, authApi, downloadsApi, createDownloadWebSocket } from '../api'
 import ProgressBar from '../components/ProgressBar'
-import { formatChannelDateTime, getGuideOffsetHours } from '../utils/channelTime'
+import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
 
@@ -683,7 +683,7 @@ export default function Downloads() {
                       {getScheduledStatusBadge(rec.status)}
                     </Group>
                     <Text size="xs" c="dimmed">
-                      Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
+                      Airs: {formatAirDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0) || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
                     </Text>
                   </Stack>
                 </Card>

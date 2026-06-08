@@ -34,7 +34,7 @@ import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 
 import { accountsApi, schedulesApi } from '../api'
-import { formatChannelDateTime, getGuideOffsetHours } from '../utils/channelTime'
+import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
 
@@ -87,9 +87,9 @@ function ScheduleCard({
     ? schedule.start_timestamp < Date.now() / 1000
     : false
 
-  const startTime = formatChannelDateTime(schedule, 'start', guideOffsetHours, 'MMM D, YYYY h:mm A')
+  const startTime = formatAirDateTime(schedule, 'start', guideOffsetHours)
   const endTime = formatChannelDateTime(schedule, 'end', guideOffsetHours, 'h:mm A')
-  const availableAt = formatChannelDateTime(schedule, 'available', guideOffsetHours, 'MMM D, YYYY h:mm A')
+  const availableAt = formatAirDateTime(schedule, 'available', guideOffsetHours)
   const totalDuration = (schedule.duration_minutes || 0)
     + (schedule.pre_padding_minutes || 0)
     + (schedule.post_padding_minutes || 0)
