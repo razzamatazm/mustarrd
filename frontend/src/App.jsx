@@ -504,8 +504,8 @@ function App() {
             styles={{ message: { fontSize: 'var(--mantine-font-size-sm)' } }}
           >
             {hasPausedLowSpace
-              ? `Recordings paused: low disk space.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free.` : ''} Free up space on your recordings drive to resume.`
-              : `Disk space is low.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free.` : ''} Recordings may pause soon.`}
+              ? `Recordings paused: low disk space.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free (${diskSpace.min_free_space_gb} GB minimum).` : ''} Free up space on your recordings drive to resume.`
+              : `Disk space is low.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free (${diskSpace.min_free_space_gb} GB minimum).` : ''} Recordings may pause soon.`}
           </Alert>
         )}
         <Routes>
