@@ -500,10 +500,15 @@ export default function AccountsSection({ showTitle = true }) {
 
   return (
     <Stack>
-      <Group justify="space-between">
+      <Flex
+        direction={{ base: 'column', sm: 'row' }}
+        justify={{ sm: 'space-between' }}
+        align={{ sm: 'center' }}
+        gap="xs"
+      >
         {showTitle ? <Title order={2}>Accounts</Title> : <Title order={4}>Accounts</Title>}
         {accounts?.length > 0 && (
-          <Flex direction={{ base: 'column-reverse', sm: 'row' }} gap="xs">
+          <Group gap="xs">
             <Button
               variant="light"
               color="orange"
@@ -517,9 +522,9 @@ export default function AccountsSection({ showTitle = true }) {
             <Button leftSection={<IconPlus size={16} />} onClick={handleAddClick}>
               Add Another Account
             </Button>
-          </Flex>
+          </Group>
         )}
-      </Group>
+      </Flex>
 
       {accounts?.length === 0 ? (
         <Card shadow="sm" padding="xl" radius="md" withBorder>
