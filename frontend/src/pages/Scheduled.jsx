@@ -342,9 +342,9 @@ export default function Scheduled() {
     }
   }
 
-  const activeSchedules = localItems?.filter((s) =>
+  const activeSchedules = (localItems?.filter((s) =>
     ['scheduled', 'queued', 'downloading', 'processing', 'paused_low_space'].includes(s.status)
-  ) || []
+  ) || []).sort((a, b) => new Date(a.program_start || 0) - new Date(b.program_start || 0))
 
   const historySchedules = localItems?.filter((s) =>
     ['completed', 'failed', 'cancelled'].includes(s.status)
