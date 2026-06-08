@@ -83,6 +83,9 @@ function ScheduleCard({
   const activeStatuses = ['scheduled', 'queued', 'downloading', 'processing', 'paused_low_space']
   const isActive = activeStatuses.includes(schedule.status)
   const canDelete = !isActive
+  const startHasPassed = schedule.start_timestamp
+    ? schedule.start_timestamp < Date.now() / 1000
+    : false
 
   const startTime = formatChannelDateTime(schedule, 'start', guideOffsetHours, 'MMM D, YYYY h:mm A')
   const endTime = formatChannelDateTime(schedule, 'end', guideOffsetHours, 'h:mm A')
@@ -139,7 +142,7 @@ function ScheduleCard({
         </Group>
 
         <Text size="xs" c="dimmed">
-          {isActive ? 'Airs' : 'Aired'}: {startTime || 'Unknown'} - {endTime || 'Unknown'} ({formatDuration(schedule.duration_minutes || 0)})
+          {(!isActive && startHasPassed) ? 'Aired' : 'Airs'}: {startTime || 'Unknown'} - {endTime || 'Unknown'} ({formatDuration(schedule.duration_minutes || 0)})
         </Text>
 
         {(isActive || schedule.status === 'completed') && (
