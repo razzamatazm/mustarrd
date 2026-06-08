@@ -98,5 +98,10 @@ export function formatAirDateTime(program, kind = 'start', guideOffsetHours = 0)
   if (displayDate === yesterdayDate) {
     return `Yesterday at ${timeStr}`
   }
+  for (let d = 2; d <= 6; d++) {
+    if (displayDate === now.add(d, 'day').format('YYYY-MM-DD')) {
+      return `${displayTime.format('dddd')} at ${timeStr}`
+    }
+  }
   return `${displayTime.format('ddd, MMM D, YYYY')} at ${timeStr}`
 }
