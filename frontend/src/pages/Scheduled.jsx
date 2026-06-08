@@ -38,7 +38,7 @@ import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '.
 
 dayjs.extend(duration)
 
-const ACCOUNT_SETTINGS_SUFFIX = 'in your account settings.'
+const ACCOUNT_SETTINGS_SUFFIX = 'your account settings.'
 
 function renderErrorMessage(msg) {
   if (!msg) return null
