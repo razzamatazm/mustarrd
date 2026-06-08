@@ -174,6 +174,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Improved: Scheduled and Upcoming recordings now show "Today" and "Tomorrow" instead of full dates
+
+**What you would notice:** Cards on the Scheduled Recordings page and the Downloads Upcoming tab now say "Today at 7:30 PM" or "Tomorrow at 8:00 PM" for shows airing in the next two days. Shows airing further out still display the full date. This makes it much easier to scan your recording list and spot what records tonight or tomorrow at a glance.
+
+**What changed:** The date display on Scheduled and Upcoming cards now checks whether a recording airs today or tomorrow and uses plain-English labels accordingly. No backend changes were made.
+
+---
+
+### Fixed: Program guide no longer goes blank for providers that omit seconds from their timestamps
+
+**What you would notice:** A small number of IPTV providers send program guide data with 12-digit timestamps that leave out the seconds (for example, "202306011200" instead of "20230601120000"). If your provider used this format, your entire guide would appear empty after refreshing with no error message to explain why. Mustarrd now handles both formats, so the guide loads correctly regardless of which your provider uses.
+
+**What changed:** The part of Mustarrd that reads and parses program guide data now accepts 12-digit timestamps (hours and minutes only) in addition to the standard 14-digit format that includes seconds. This also fixes a related case where a 12-digit timestamp followed by a timezone offset (for example "202306011200 +0000") was silently dropped.
+
+---
+
+### Fixed: Passing an unreasonably large timestamp to an internal API endpoint no longer causes a server error
+
+**What you would notice:** No visible change during normal use. Previously, if an API client sent an impossibly large timestamp value to the failed recordings count endpoint, Mustarrd would respond with a generic server error. It now returns a proper "invalid input" error that tells the caller their value was out of range.
+
+**What changed:** The failed recordings count endpoint now validates that the provided timestamp falls within a reasonable date range. Values outside that range return a 422 (Unprocessable Entity) error instead of crashing with a 500.
+
+---
+
 ## 2026-06-07
 
 ### Fixed: Hardware-accelerated transcoding no longer destroys MP4 and MKV recordings
