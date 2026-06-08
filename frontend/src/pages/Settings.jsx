@@ -44,9 +44,11 @@ import {
   IconTrash,
   IconKey,
   IconDeviceTv,
+  IconCalendar,
+  IconRefresh,
 } from '@tabler/icons-react'
 
-import { adminPlexApi, adminUsersApi, authApi, settingsApi } from '../api'
+import { adminPlexApi, adminUsersApi, authApi, epgApi, settingsApi } from '../api'
 import AccountsSection from '../components/settings/AccountsSection'
 import LogsSection from '../components/settings/LogsSection'
 
@@ -118,6 +120,7 @@ const ADMIN_SECTIONS = [
   { id: 'recording', label: 'Recording', icon: IconDownload },
   { id: 'processing', label: 'Post-Processing', icon: IconWand },
   { id: 'naming', label: 'File Naming', icon: IconFile },
+  { id: 'guide', label: 'Guide', icon: IconCalendar },
   { id: 'appearance', label: 'Appearance', icon: IconMoon },
   { id: 'security', label: 'Security', icon: IconLock },
   { id: 'logs', label: 'Logs', icon: IconListDetails },
@@ -228,6 +231,22 @@ export default function Settings() {
     enabled: isAdmin,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  })
+  const { data: epgStatus } = useQuery({
+    queryKey: ['epg', 'status'],
+    queryFn: epgApi.status,
+    enabled: isAdmin,
+    refetchInterval: 5000,
+  })
+  const epgRefreshMutation = useMutation({
+    mutationFn: () => epgApi.refresh(false),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['epg', 'status'] })
+      notifications.show({ title: 'Guide refresh started', message: 'The guide will update in the background.', color: 'green' })
+    },
+    onError: (err) => {
+      notifications.show({ title: 'Refresh failed', message: err?.message || 'Could not start guide refresh.', color: 'red' })
+    },
   })
   const { data: managedUsers = [] } = useQuery({
     queryKey: ['admin', 'users'],
@@ -989,6 +1008,50 @@ export default function Settings() {
     </Stack>
   )
 
+  const renderGuide = () => {
+    const lastSync = epgStatus?.last_completed_at
+    let lastSyncLabel = 'Guide not yet synced'
+    if (lastSync) {
+      const d = new Date(lastSync)
+      const now = new Date()
+      const isToday = d.toDateString() === now.toDateString()
+      const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      lastSyncLabel = isToday
+        ? `Today at ${timeStr}`
+        : `${d.toLocaleDateString([], { month: 'long', day: 'numeric' })} at ${timeStr}`
+    }
+    const isRunning = epgStatus?.running || epgRefreshMutation.isPending
+    return (
+      <Stack gap="lg">
+        <Stack gap={2}>
+          <Text fw={600} size="lg">Guide</Text>
+          <Text size="sm" c="dimmed">Program guide sync status and manual refresh</Text>
+        </Stack>
+        <SettingRow
+          label="Last synced"
+          description="When Mustarrd last updated the program guide from your provider"
+        >
+          <Text size="sm" c={lastSync ? undefined : 'dimmed'}>{lastSyncLabel}</Text>
+        </SettingRow>
+        <SettingRow
+          label="Refresh guide now"
+          description="Fetch the latest program guide data from your provider in the background"
+        >
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconRefresh size={14} />}
+            loading={isRunning}
+            disabled={isRunning}
+            onClick={() => epgRefreshMutation.mutate()}
+          >
+            {isRunning ? 'Refreshing...' : 'Refresh Now'}
+          </Button>
+        </SettingRow>
+      </Stack>
+    )
+  }
+
   const renderAppearance = () => (
     <Stack gap="lg">
       <Stack gap={2}>
@@ -1265,6 +1328,7 @@ export default function Settings() {
     recording: renderRecording,
     processing: renderProcessing,
     naming: renderNaming,
+    guide: renderGuide,
     appearance: renderAppearance,
     security: renderSecurity,
     users: renderUsers,
