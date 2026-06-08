@@ -92,6 +92,26 @@ function getStatusBadge(status) {
   )
 }
 
+function getScheduledStatusBadge(status) {
+  const statusConfig = {
+    scheduled: { color: 'gray', icon: IconCalendar, label: 'Scheduled' },
+    queued: { color: 'yellow', icon: IconDownload, label: 'Queued' },
+    downloading: { color: 'yellow', icon: IconDownload, label: 'Downloading' },
+    processing: { color: 'teal', icon: IconSettings, label: 'Processing' },
+    completed: { color: 'green', icon: IconCheck, label: 'Completed' },
+    failed: { color: 'red', icon: IconX, label: 'Failed' },
+    cancelled: { color: 'orange', icon: IconX, label: 'Cancelled' },
+    paused_low_space: { color: 'yellow', icon: IconAlertCircle, label: 'Paused (Low Space)' },
+  }
+  const config = statusConfig[status] || statusConfig.scheduled
+  const Icon = config.icon
+  return (
+    <Badge color={config.color} variant="light" size="sm" leftSection={<Icon size={12} />}>
+      {config.label}
+    </Badge>
+  )
+}
+
 function DownloadCard({
   download,
   isAdmin,
@@ -660,11 +680,7 @@ export default function Downloads() {
                         <Text fw={500}>{rec.program_title}</Text>
                         <Text size="sm" c="dimmed" truncate>{rec.channel_name}</Text>
                       </Stack>
-                      {rec.status === 'paused_low_space' && (
-                        <Badge color="yellow" variant="light" size="sm" leftSection={<IconAlertCircle size={12} />}>
-                          Paused (Low Space)
-                        </Badge>
-                      )}
+                      {getScheduledStatusBadge(rec.status)}
                     </Group>
                     <Text size="xs" c="dimmed">
                       Airs: {formatChannelDateTime(rec, 'start', accountGuideOffsets[Number(rec.account_id)] || 0, 'ddd MMM D, YYYY h:mm A') || 'Unknown time'}{' '}({formatDuration(rec.duration_minutes)})
