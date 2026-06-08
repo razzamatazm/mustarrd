@@ -21,6 +21,21 @@ from services.log_stream import backend_log_stream
 
 logger = logging.getLogger(__name__)
 
+# Common XMLTV timezone abbreviations mapped to their UTC offset in minutes.
+# strptime("%z") only accepts numeric offsets; named zones raise ValueError.
+_NAMED_TZ_OFFSETS: Dict[str, int] = {
+    "UTC": 0, "GMT": 0,
+    "EST": -300, "EDT": -240,
+    "CST": -360, "CDT": -300,
+    "MST": -420, "MDT": -360,
+    "PST": -480, "PDT": -420,
+    "CET": 60, "CEST": 120,
+    "EET": 120, "EEST": 180,
+    "IST": 330,
+    "HKT": 480, "JST": 540, "AEST": 600, "AEDT": 660,
+    "NZST": 720, "NZDT": 780,
+}
+
 
 def _friendly_connection_error(e: Exception) -> str:
     """Translate a connection exception into a short, user-readable string."""
@@ -478,7 +493,8 @@ class EPGIngestManager:
         xmltv_to_stream: Dict[str, str] = dict(stream_by_xmltv_id)
 
         for _, elem in ET.iterparse(io.BytesIO(xmltv_bytes), events=("end",)):
-            if elem.tag == "channel":
+            local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            if local_tag == "channel":
                 xmltv_id = elem.get("id")
                 display_name = self._extract_text(elem, "display-name")
                 if xmltv_id and xmltv_id not in xmltv_to_stream:
@@ -492,7 +508,7 @@ class EPGIngestManager:
                 elem.clear()
                 continue
 
-            if elem.tag != "programme":
+            if local_tag != "programme":
                 continue
 
             xmltv_id = elem.get("channel")
@@ -607,6 +623,10 @@ class EPGIngestManager:
                     tz_part = tz_part.replace(" ", "")
                 if tz_part.upper() == "Z":
                     return dt.replace(tzinfo=timezone.utc)
+                upper = tz_part.upper()
+                if upper in _NAMED_TZ_OFFSETS:
+                    tz = timezone(timedelta(minutes=_NAMED_TZ_OFFSETS[upper]))
+                    return dt.replace(tzinfo=tz)
                 if len(tz_part) == 6 and tz_part[3] == ":":
                     tz_part = tz_part.replace(":", "")
                 offset = datetime.strptime(tz_part, "%z").tzinfo
@@ -616,9 +636,10 @@ class EPGIngestManager:
         return dt.replace(tzinfo=timezone.utc)
 
     def _extract_text(self, elem: Element, tag: str) -> Optional[str]:
-        child = elem.find(tag)
-        if child is not None and child.text:
-            return child.text.strip()
+        for child in elem:
+            local = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            if local == tag and child.text:
+                return child.text.strip()
         return None
 
     def _extract_xmltv_id(self, channel: dict) -> Optional[str]:
