@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Pressing the EPG Refresh button twice quickly no longer starts two separate guide refreshes
+
+**What you would notice:** If you clicked "Refresh EPG" twice in quick succession, or if a network retry happened to fire at the same moment as your click, Mustarrd would run a full program guide refresh twice back to back. This doubled the time the refresh took and put unnecessary extra load on your IPTV provider. The second request is now blocked and only one refresh runs.
+
+**What changed:** A busy flag is now set the moment a refresh is queued. Any further request that arrives while that flag is set is turned away immediately. The flag clears once the refresh task actually starts running.
+
+---
+
+### Fixed: Program guide is no longer wiped when your provider returns an empty response during a force-refresh
+
+**What you would notice:** If your IPTV provider briefly returned nothing when Mustarrd triggered a force-refresh of the program guide, the entire guide would be deleted and stay empty until the next automatic scheduled refresh, which could be up to 8 hours away. The existing guide is now left untouched when the provider returns an empty response.
+
+**What changed:** The force-refresh now checks that the response actually contains program data before deleting the existing guide. If the response is empty, a warning is logged and your current guide is preserved.
+
+---
+
 ### Improved: Status badges on scheduled recordings no longer push show titles off the screen on phones
 
 **What you would notice:** On the Scheduled page, each recording card shows a status badge (such as "Scheduled" or "Paused (Low Space)"). Previously that badge shared the top-right corner of the card with the menu button, and on phones a long show title like "The Great British Bake Off" had no room and was cut off with "..." making it impossible to read. The badge now sits below the channel name on the left side of the card, and the menu button is alone at the top-right. Show titles now have full width and are no longer cut short.
