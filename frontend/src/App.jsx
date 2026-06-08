@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   AppShell,
+  Alert,
   Burger,
   Group,
   NavLink as MantineNavLink,
@@ -19,6 +20,7 @@ import {
   IconSettings,
   IconLogout,
   IconLogin,
+  IconAlertTriangle,
 } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -119,6 +121,24 @@ function App() {
     enabled: Boolean(authStatus?.authenticated),
   })
   const failedDownloadsCount = failedCountData?.count ?? 0
+
+  const { data: diskSpace } = useQuery({
+    queryKey: ['downloads', 'disk-space'],
+    queryFn: downloadsApi.diskSpace,
+    refetchInterval: 30000,
+    enabled: Boolean(authStatus?.authenticated),
+  })
+
+  const { data: upcomingRecordings } = useQuery({
+    queryKey: ['downloads', 'upcoming'],
+    queryFn: downloadsApi.upcoming,
+    refetchInterval: 30000,
+    enabled: Boolean(authStatus?.authenticated),
+  })
+
+  const hasPausedLowSpace = upcomingRecordings?.some((r) => r.status === 'paused_low_space') ?? false
+  const isDiskLow = diskSpace?.is_low ?? false
+  const showLowDiskBanner = hasPausedLowSpace || isDiskLow
 
   const { data: epgStatus } = useQuery({
     queryKey: ['epg', 'status'],
@@ -475,6 +495,19 @@ function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {showLowDiskBanner && (
+          <Alert
+            icon={<IconAlertTriangle size={16} />}
+            color="orange"
+            variant="light"
+            mb="md"
+            styles={{ message: { fontSize: 'var(--mantine-font-size-sm)' } }}
+          >
+            {hasPausedLowSpace
+              ? `Recordings paused: low disk space.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free.` : ''} Free up space on your recordings drive to resume.`
+              : `Disk space is low.${diskSpace?.disk_free_gb != null ? ` ${diskSpace.disk_free_gb} GB free.` : ''} Recordings may pause soon.`}
+          </Alert>
+        )}
         <Routes>
           <Route path="/" element={<Navigate to="/browse" replace />} />
           <Route path="/login" element={<Login />} />
