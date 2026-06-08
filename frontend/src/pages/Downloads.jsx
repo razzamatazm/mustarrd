@@ -695,7 +695,7 @@ export default function Downloads() {
                         Airs: {airStart || 'Unknown'} - {airEnd || 'Unknown'} ({formatDuration(rec.duration_minutes || 0)})
                       </Text>
                       <Text size="xs" c="dimmed">
-                        Download starts: {downloadAt || 'Unknown'} ({formatDuration(totalDuration)} recording)
+                        Download starts: {downloadAt || 'Unknown'} ({formatDuration(totalDuration)})
                       </Text>
                     </Stack>
                   </Card>

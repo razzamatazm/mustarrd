@@ -147,7 +147,7 @@ function ScheduleCard({
 
         {(isActive || schedule.status === 'completed') && (
           <Text size="xs" c="dimmed">
-            Download starts: {availableAt || 'Unknown'} ({formatDuration(totalDuration)} recording)
+            Download starts: {availableAt || 'Unknown'} ({formatDuration(totalDuration)})
           </Text>
         )}
 
