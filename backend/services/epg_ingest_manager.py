@@ -135,6 +135,18 @@ class EPGIngestManager:
         self._task_pending = True
         return True
 
+    def release_pending(self, task: "asyncio.Task") -> None:
+        """Done-callback registered on the manual-refresh asyncio task.
+
+        Guarantees _task_pending is cleared when the task finishes for any
+        reason. Normally _refresh_all_accounts clears it after setting
+        running=True. If the task fails before that point (e.g. SQLite locked
+        on the initial DB query), this callback ensures the flag does not stay
+        True permanently and brick the refresh button with 409 forever.
+        """
+        if self._task_pending:
+            self._task_pending = False
+
     def get_status(self) -> dict:
         status = dict(self._status)
         if self._task_pending:

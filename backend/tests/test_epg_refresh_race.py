@@ -104,5 +104,41 @@ class EPGRefreshRaceTests(unittest.TestCase):
         )
 
 
+    def test_release_pending_on_task_failure_unblocks_next_claim(self):
+        """If the refresh task fails before running is set True, release_pending
+        (called via the done-callback) must clear _task_pending so the next
+        try_claim_refresh call succeeds rather than returning 409 forever.
+        """
+        import asyncio
+
+        manager = EPGIngestManager()
+
+        async def failing_refresh(*args, **kwargs):
+            raise RuntimeError("SQLite locked")
+
+        manager._refresh_all_accounts = failing_refresh
+
+        async def run():
+            manager.try_claim_refresh()
+            task = asyncio.create_task(manager.refresh_all_accounts())
+            task.add_done_callback(manager.release_pending)
+            try:
+                await task
+            except RuntimeError:
+                pass
+
+        asyncio.run(run())
+
+        self.assertFalse(
+            manager._task_pending,
+            "release_pending must clear _task_pending after task failure.",
+        )
+        self.assertTrue(
+            manager.try_claim_refresh(),
+            "try_claim_refresh must succeed after release_pending clears the flag "
+            "(refresh button must not be permanently bricked by a transient error).",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

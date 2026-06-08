@@ -95,6 +95,7 @@ async def trigger_epg_refresh(
         epg_ingest_manager.refresh_all_accounts(force=request.force)
     )
     refresh_task.add_done_callback(_log_task_result)
+    refresh_task.add_done_callback(epg_ingest_manager.release_pending)
 
     return {
         "status": "started",
