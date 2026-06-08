@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Providers using compact XMLTV timestamps now have their guide loaded correctly
+
+**What you would notice:** Some IPTV providers write timestamps in their program guide files in a compact 12-character format with the timezone offset written directly after the time, like `202311152000+0200`, with no space before the `+`. If your provider used this format, every program on every channel would be silently dropped during each guide refresh. Browse and Catchup would show nothing, with no error message to explain why.
+
+**What changed:** One character was added to the timestamp parser in the program guide importer. The parser now correctly identifies when a timezone offset starts within the 14-character slice it was examining and routes those timestamps to the right handling branch. Programs that were previously dropped now import correctly with the right UTC time.
+
+---
+
+### Fixed: Program guide data is no longer lost when a provider sends a broken or cut-off guide file
+
+**What you would notice:** When your IPTV provider's program guide file was corrupted, partially downloaded, or cut off mid-file, Mustarrd would silently discard all the programs it had already successfully read before hitting the bad part. Your guide would show gaps for affected channels even though Mustarrd had already parsed that data correctly. After this fix, any programs read before the broken section are saved. The server log records a warning so you can see that the file was incomplete.
+
+**What changed:** The program guide importer now catches the error that occurs when an XMLTV file is truncated or contains invalid characters mid-way through. When that happens, parsing stops cleanly and everything collected up to that point is written to the database. Previously, the error caused all buffered data to be discarded without any warning.
+
+---
+
+### Improved: Upcoming recording cards now show the day of the week instead of a full date
+
+**What you would notice:** Recording cards in Scheduled > Upcoming and Downloads > Upcoming that previously showed a full date like "Wed, Jun 10, 2026 at 8:00 PM" for shows airing within the next week now show "Wednesday at 8:00 PM" instead. This is easier to read at a glance and avoids a layout issue on mobile where the old format could cause the time to wrap onto its own line.
+
+**What changed:** A small addition was made to the date formatting helper in the frontend. Dates within 2 to 6 days from now show the weekday name. Today, Tomorrow, and dates more than 6 days out are unchanged.
+
+---
+
 ### Improved: Scheduled Upcoming now lists recordings in the order they will air
 
 **What you would notice:** The Scheduled Recordings > Upcoming tab was showing your recordings in reverse order. The recording furthest away appeared at the top, and the one airing soonest appeared at the bottom. If you had three recordings scheduled, you had to scroll to the bottom to see what was recording next. The list now sorts soonest first, matching the order already used on the Downloads > Upcoming tab.
