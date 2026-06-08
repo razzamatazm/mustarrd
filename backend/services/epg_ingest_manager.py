@@ -601,6 +601,38 @@ class EPGIngestManager:
         if not value:
             return None
         value = value.strip()
+
+        # ISO format detection: date part contains dashes (YYYY-MM-DD) or T separator.
+        # Some providers emit "2024-01-15 20:00:00 +0100" or "2024-01-15T20:00:00+01:00"
+        # instead of the compact XMLTV-spec format "20240115200000 +0100".
+        first_chunk = value.split(" ", 1)[0] if " " in value else value
+        if "-" in first_chunk[:10] or "T" in first_chunk:
+            try:
+                parts = value.split()
+                if len(parts) == 3:
+                    # "2024-01-15 20:00:00 +0100" -> "2024-01-15T20:00:00+0100"
+                    iso_str = parts[0] + "T" + parts[1] + parts[2]
+                elif len(parts) == 2 and parts[1][:1] in "+-":
+                    # "2024-01-15T20:00:00 +0100" (space before offset)
+                    iso_str = parts[0] + parts[1]
+                elif len(parts) == 2:
+                    # "2024-01-15 20:00:00" (no tz)
+                    iso_str = parts[0] + "T" + parts[1]
+                else:
+                    iso_str = value
+                if iso_str.endswith("Z"):
+                    iso_str = iso_str[:-1] + "+00:00"
+                # ±HHMM -> ±HH:MM (fromisoformat needs colon in offset on Python < 3.11)
+                if len(iso_str) >= 5 and iso_str[-5] in "+-" and iso_str[-4:].isdigit():
+                    iso_str = iso_str[:-2] + ":" + iso_str[-2:]
+                dt = datetime.fromisoformat(iso_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except (ValueError, TypeError):
+                return None
+
+        # Compact XMLTV format: YYYYMMDDHHmmss [±HHMM]
         # Split on first space to separate date digits from optional timezone.
         # Providers may omit seconds (12-digit YYYYMMDDHHmm) per the XMLTV spec.
         if " " in value:
