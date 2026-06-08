@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Provider error on failed recordings now links directly to Account Settings
+
+**What you would notice:** When a recording failed because Mustarrd could not reach your IPTV provider, the error message said "Cannot reach the provider. Check the server URL in your account settings." The phrase "your account settings" was plain text with no way to click it. You had to know where to go on your own. That phrase is now a clickable link that takes you directly to Settings > Accounts, where you can correct the server URL or credentials. The same error on the Browse page already had this link; now the Downloads and Scheduled history pages match it.
+
+**What changed:** Two frontend files were updated so the provider-unreachable error message includes a navigation link. No download logic or backend code was changed.
+
+---
+
+### Fixed: Expired scheduled recordings now correctly show as Failed instead of staying Scheduled forever
+
+**What you would notice:** If you had a scheduled recording whose catchup window had already passed when the scheduler checked it (for example, you scheduled something on a provider that only keeps 7 days of catchup, and 8 days had gone by), the recording would remain stuck showing "Scheduled" in the UI forever. Every 30 seconds the app would silently try and fail to process it, and the status never changed. After this fix, expired recordings correctly update to "Failed" so you can see at a glance that the program is no longer available for download.
+
+**What changed:** When the scheduler processed expired recordings, it correctly marked them as Failed in memory, but then returned early without saving that status to the database. One line was added to save the status before the early return. No scheduling logic was changed.
+
+---
+
+### Fixed: Deleting a user now immediately cancels their scheduled recordings and active downloads
+
+**What you would notice:** When an admin deleted a user from the Users page, that user's scheduled recordings would continue to fire (creating new downloads attributed to the deleted account) and any downloads already in progress would keep running, consuming disk space and IPTV stream slots. After this fix, deleting a user immediately cancels all their pending schedules and stops any active downloads. Their browser session is also disconnected.
+
+**What changed:** The admin user-delete action now cancels scheduled recordings, stops active downloads, and closes open browser connections for the deleted user before removing the account. Previously this cleanup only ran when a user deleted their own account. The behavior now matches the existing self-delete path.
+
+---
+
 ### Improved: Retry button now appears directly on failed and cancelled download cards
 
 **What you would notice:** When a download failed or was cancelled, the only way to retry it was to open the three-dot action menu on the card and find the Retry option. That menu is easy to miss, especially on a phone. The Retry button now appears directly on the card itself, right alongside the other action buttons, so you can act immediately without hunting through a menu.
