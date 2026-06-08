@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Retrying a failed download now checks disk space first
+
+**What you would notice:** If a download failed because the disk was full and you clicked Retry, Mustarrd used to start the download again immediately with no disk check. It would hit the same full-disk condition and fail again, with no clear explanation. Clicking Retry now returns the same "Not enough disk space" message you would see if you tried to start a fresh download. The problem is obvious and you know to free space before retrying.
+
+**What changed:** The Retry action on a failed download now checks available disk space before re-queuing, the same check that already ran when you first requested the download. If the disk is below the configured free space minimum, Mustarrd returns a "Not enough disk space" message instead of silently restarting a download that will fail again.
+
+---
+
+### Improved: Settings no longer shows a loading badge alongside a connection error
+
+**What you would notice:** On the Settings > Accounts page, when a provider could not be reached, the account card showed both a red "Unreachable" status and a blue "Catchup: loading..." badge at the same time. The two indicators appeared to contradict each other. The loading badge now only appears when the provider is reachable. If the provider status is already known to be an error, the card shows only the error state.
+
+**What changed:** A small guard was added so the loading badge only appears when the provider has not been flagged as unreachable. No backend changes were made.
+
+---
+
 ### Improved: Downloads Upcoming cards now show when a show ends and when the download begins
 
 **What you would notice:** On the Downloads > Upcoming tab, each recording card previously showed only the show's start time. The card now shows the full air window, for example "Airs: Today at 7:30 PM - 8:00 PM (30m)", and a separate line showing when Mustarrd will begin downloading, for example "Download starts: Today at 8:00 PM (30m recording)". This makes it easy to see at a glance whether a recording fits your schedule and how long the download will run. The Scheduled Recordings page already showed this information. The Downloads Upcoming tab now matches it.
