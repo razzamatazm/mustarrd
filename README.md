@@ -121,7 +121,7 @@ Mustarrd reads the program title and automatically formats the filename for your
 | Movie | `The Matrix (1999).ts` |
 | Everything else | `ESPN - SportsCenter - 2026-01-28.ts` |
 
-Filename templates are customizable in Settings if you want a different format.
+Filename templates are customizable in Settings if you want a different format. The file extension (.ts, .mkv, .mp4) is set by your Recording Format in Settings, not by the filename template, so you should not add an extension to your template.
 
 ## Where Your Files Go
 
@@ -146,6 +146,7 @@ Most users never need to touch these. Set them in `docker-compose.yml` or a `bac
 | `CATCHUP_DEFAULT_DOWNLOAD_FOLDER` | In-progress download location | `/app/downloads` |
 | `CATCHUP_DEFAULT_COMPLETED_FOLDER` | Finished file location | `/app/completed` |
 | `CATCHUP_MAX_CONCURRENT_DOWNLOADS` | Max simultaneous downloads | `2` |
+| `CATCHUP_EPG_REFRESH_INTERVAL_HOURS` | How often Mustarrd automatically refreshes the program guide, in hours | `8` |
 | `CATCHUP_SESSION_SECRET` | Session signing key, auto-generated and persisted to `./config/session_secret` on first run. Only set this manually to rotate or share across instances | *(auto)* |
 | `CATCHUP_CORS_ORIGINS` | Comma-separated allowed frontend origins; only needed when the UI is accessed from a non-localhost address | `http://localhost:4178,...` |
 | `CATCHUP_SESSION_COOKIE_SECURE_MODE` | When to mark session cookies as HTTPS-only: `auto` (default, detects HTTPS including reverse-proxy setups), `always`, or `never` | `auto` |
