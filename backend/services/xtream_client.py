@@ -5,6 +5,7 @@ from urllib.parse import urljoin, urlencode, quote
 
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
+XMLTV_TIMEOUT = aiohttp.ClientTimeout(total=300)
 
 
 class XtreamClient:
@@ -91,7 +92,7 @@ class XtreamClient:
         """Get XMLTV guide data."""
         url = f"{self.server_url}/xmltv.php?{urlencode({'username': self.username, 'password': self.password})}"
         session = await self._get_session()
-        async with session.get(url) as response:
+        async with session.get(url, timeout=XMLTV_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get XMLTV: HTTP {response.status}")
             return await response.read()
