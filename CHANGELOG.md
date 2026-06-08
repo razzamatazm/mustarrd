@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: ComSkip now correctly cuts all commercials when EDL segments overlap
+
+**What you would notice:** If you use commercial removal and your provider's ComSkip EDL file contained one commercial block fully inside another (overlapping segments), a slice of commercial video would slip through into the final recording. The recording would look complete but still contain ads. After this fix, overlapping commercial segments are handled correctly and all commercial content is removed.
+
+**What changed:** The logic that converts commercial markers into keep-segments was advancing its position backward when it encountered a contained segment, causing the outer commercial's tail to be included in the output. The fix ensures the position always moves forward, so no commercial content is ever included between contained segments. Most users will not notice any difference; users who had this specific issue will get cleaner recordings.
+
+---
+
 ### Improved: File Naming settings now show real example filenames
 
 **What you would notice:** Under Settings > File Naming, each template section used to show the raw template syntax as an example, such as `{show} - S{season:02d}E{episode:02d} - {title}`. That text was identical to what was already in the input field above it and gave no useful information, especially to users who do not know what `{season:02d}` means. The example line now shows what a real downloaded file would actually be named, such as `Breaking Bad - S01E05 - Gray Matter` for TV shows or `Inception (2010)` for movies. You can see exactly what your filename settings will produce before saving anything.
