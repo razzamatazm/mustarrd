@@ -217,6 +217,48 @@ class XmltvNamedTimezoneTests(unittest.TestCase):
             "to dt.replace(tzinfo=timezone.utc).",
         )
 
+    def test_bst_returns_utc_minus_1(self):
+        """'20240615120000 BST' (British Summer Time, UTC+1) must be stored as 11:00 UTC.
+
+        UK providers use BST in summer-dated XMLTV. Without this entry, BST falls
+        through to strptime('%z'), raises ValueError, and is stored as UTC: 1 hour off
+        for the entire UK summer schedule.
+        """
+        result = self.manager._parse_xmltv_time("20240615120000 BST")
+        self.assertIsNotNone(result, "BST timestamp returned None.")
+        result_utc = result.astimezone(timezone.utc)
+        expected_utc = datetime(2024, 6, 15, 11, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            result_utc,
+            expected_utc,
+            f"BST noon should be 11:00 UTC, got {result_utc.isoformat()}. "
+            "Named timezone 'BST' was silently treated as UTC.",
+        )
+
+    def test_wet_returns_utc(self):
+        """'20240115120000 WET' (Western European Time, UTC+0) must be 12:00 UTC."""
+        result = self.manager._parse_xmltv_time("20240115120000 WET")
+        self.assertIsNotNone(result, "WET timestamp returned None.")
+        result_utc = result.astimezone(timezone.utc)
+        expected_utc = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            result_utc,
+            expected_utc,
+            f"WET noon should be 12:00 UTC, got {result_utc.isoformat()}.",
+        )
+
+    def test_west_returns_utc_minus_1(self):
+        """'20240615120000 WEST' (Western European Summer Time, UTC+1) must be 11:00 UTC."""
+        result = self.manager._parse_xmltv_time("20240615120000 WEST")
+        self.assertIsNotNone(result, "WEST timestamp returned None.")
+        result_utc = result.astimezone(timezone.utc)
+        expected_utc = datetime(2024, 6, 15, 11, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            result_utc,
+            expected_utc,
+            f"WEST noon should be 11:00 UTC, got {result_utc.isoformat()}.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

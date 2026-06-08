@@ -23,12 +23,16 @@ logger = logging.getLogger(__name__)
 
 # Common XMLTV timezone abbreviations mapped to their UTC offset in minutes.
 # strptime("%z") only accepts numeric offsets; named zones raise ValueError.
+# Some abbreviations are ambiguous (CST = US Central -6 or China +8 or Cuba -5;
+# IST = India +5:30 or Israel +2 or Irish +1; BST = Britain +1 or Bangladesh +6).
+# The values below reflect the meaning most common in TV guide feeds.
 _NAMED_TZ_OFFSETS: Dict[str, int] = {
     "UTC": 0, "GMT": 0,
     "EST": -300, "EDT": -240,
     "CST": -360, "CDT": -300,
     "MST": -420, "MDT": -360,
     "PST": -480, "PDT": -420,
+    "WET": 0, "WEST": 60, "BST": 60,
     "CET": 60, "CEST": 120,
     "EET": 120, "EEST": 180,
     "IST": 330,
