@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Only admins can now trigger a manual EPG guide refresh
+
+**What you would notice:** On a shared Mustarrd instance where Plex login is enabled or multiple users have accounts, any logged-in user could previously trigger a full EPG refresh. This could hammer your IPTV provider repeatedly if a user or an app did it in a loop, risking rate limits that block normal downloads. This is now limited to admin accounts.
+
+**What changed:** The "Force Refresh EPG" button now requires an admin session. Regular users and Plex-provisioned accounts will get a permission error if they try to trigger it. Browsing the channel guide, searching, and all other EPG features are unaffected.
+
+---
+
+### Improved: An orange banner now appears on every page when disk space is low or recordings are paused
+
+**What you would notice:** Before this change, if scheduled recordings were paused because disk space ran low, a warning badge only appeared on the Scheduled recordings page. Browsing the guide or adjusting settings gave no indication that recordings had stopped. An orange banner now appears at the top of every page in those situations, showing the current free disk space and telling you what to do.
+
+**What changed:** A banner was added to the top of every page in the app. It appears when any scheduled recording is in a paused (low space) state, or when free disk space falls below your configured minimum. No backend changes were made.
+
+---
+
+### Fixed: Completed recordings are no longer re-downloaded after a container restart
+
+**What you would notice:** After restarting Mustarrd (for example after an Unraid array operation), some recordings that had finished downloading would be queued to download again from scratch. If the original catchup window had expired by the time the re-download started, the recording would fail. This affected recordings from providers that do not send a file size in the download response (chunked downloads).
+
+**What changed:** Mustarrd now checks whether a recording is complete by comparing the file size on disk to the amount already downloaded, even when the provider did not report a total file size. Recordings that match are moved to completed on restart instead of being re-queued.
+
+---
+
 ### Improved: Downloads History now has a filter to show only completed, failed, or cancelled recordings
 
 **What you would notice:** The History tab on the Downloads page used to show all past recordings in one mixed list. Finding the recordings that failed, or checking what you had cancelled, meant scrolling through everything. A filter dropdown now sits at the top of the History panel. Choose from All, Completed, Failed, or Cancelled to narrow the list instantly. This is a display change only and does not affect your recordings.
