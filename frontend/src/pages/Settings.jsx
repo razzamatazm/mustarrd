@@ -918,7 +918,7 @@ export default function Settings() {
       <Stack gap={2}>
         <Text fw={600} size="lg">File Naming</Text>
         <Text size="sm" c="dimmed">
-          Templates for how downloaded files are named. Files get the .ts extension automatically.
+          Templates for how downloaded files are named. The file extension is added automatically based on your Recording Format, so don&apos;t include one in the template.
         </Text>
       </Stack>
 
