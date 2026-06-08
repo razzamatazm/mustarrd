@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Mustarrd no longer corrupts recordings when your provider schedules the same show twice with slightly different start times
+
+**What you would notice:** Some IPTV providers serve the same show twice in the program guide with start times that differ by a second or two. Mustarrd's duplicate check compares timestamps exactly, so it would see those as two different programs and schedule two separate downloads for the same show. Both downloads would write to the same output file at the same time, producing a corrupted or empty recording. Mustarrd now catches this before the second download starts, marks it as a duplicate, and lets the original recording finish normally.
+
+**What changed:** Before queuing a new download, Mustarrd now checks whether any active download is already writing to the same output file. If a conflict is found, the new request is rejected with a clear message instead of racing against the existing download.
+
+---
+
+### Improved: Cancelled and failed recordings in Scheduled History now say "Aired" and no longer show a "Download starts" line
+
+**What you would notice:** On the Scheduled page, the History tab lists cancelled and failed recording attempts. Previously those cards said "Airs: Jun 7, 2026 7:59 PM" and showed a "Download starts:" line, even though the recording was already in the past and no download ever ran. The air time label now reads "Aired:" to match the historical context, and the "Download starts" line is hidden for cancelled and failed entries where no download happened.
+
+**What changed:** The air time label on history cards was updated to past tense for cancelled and failed entries. The "Download starts" line is now hidden for those same entries. Upcoming and active scheduled recordings are unchanged and still show "Airs:" and "Download starts:". No backend changes were made.
+
+---
+
 ### Fixed: Pressing the EPG Refresh button twice quickly no longer starts two separate guide refreshes
 
 **What you would notice:** If you clicked "Refresh EPG" twice in quick succession, or if a network retry happened to fire at the same moment as your click, Mustarrd would run a full program guide refresh twice back to back. This doubled the time the refresh took and put unnecessary extra load on your IPTV provider. The second request is now blocked and only one refresh runs.
