@@ -1478,7 +1478,7 @@ class PostProcessor:
                 continue
             if start > current_pos:
                 keep_segments.append((current_pos, start))
-            current_pos = end
+            current_pos = max(current_pos, end)
 
         if current_pos < duration:
             keep_segments.append((current_pos, duration))
