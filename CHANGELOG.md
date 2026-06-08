@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Fixed: Disabling a user now immediately ends their live downloads feed
+
+**What you would notice:** Before this fix, an admin could disable a user account on the Users page, but if that user had the Downloads page open, their real-time progress feed stayed active for the rest of their session. They would continue seeing live download updates even though their account had been disabled. After this fix, disabling a user closes their connection immediately. Their live feed stops as soon as the admin saves the change.
+
+**What changed:** When an admin disables a user, Mustarrd now closes all of that user's active WebSocket connections straight away. Previously, the connection was only checked the next time the user tried to do something. No changes were made to how downloads run or how recordings are stored.
+
+---
+
+### Improved: Browse EPG no longer shows a confusing prompt when the provider is unreachable
+
+**What you would notice:** On the Browse EPG page, when a provider cannot be reached, the left panel shows a connection error. Previously, the right panel simultaneously displayed "Select a channel to view its EPG", even though no channels are available in that state. The two messages contradicted each other and could confuse a non-technical user into wondering why they could not select anything. The right panel is now empty in this state. Only the actionable error in the left panel is shown.
+
+**What changed:** A small guard was added to the Browse EPG layout. When the provider is known to be unreachable and no channel is selected, the empty-state prompt is suppressed. No backend changes were made.
+
+---
+
 ### Fixed: Scheduled History now shows why a recording failed
 
 **What you would notice:** In Scheduled > History, a recording that failed used to show only a red "Failed" badge with no explanation. To find out what went wrong, you had to navigate to Downloads > History and manually match the entry by channel and time. The failure reason now appears directly on the Scheduled History card, for example: "Provider returned an error page. The catchup window may have expired or be unavailable."
