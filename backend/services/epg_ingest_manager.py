@@ -219,15 +219,22 @@ class EPGIngestManager:
             async with async_session_maker() as session:
                 async with session.begin():
                     if force:
-                        await self._log(
-                            "Force mode enabled: clearing existing guide rows before reload.",
-                            account=account,
-                        )
-                        await session.execute(
-                            delete(EPGProgram).where(
-                                EPGProgram.account_id == account.id,
+                        if xmltv_bytes:
+                            await self._log(
+                                "Force mode enabled: clearing existing guide rows before reload.",
+                                account=account,
                             )
-                        )
+                            await session.execute(
+                                delete(EPGProgram).where(
+                                    EPGProgram.account_id == account.id,
+                                )
+                            )
+                        else:
+                            await self._log(
+                                "Force mode requested but XMLTV response was empty: existing guide rows preserved.",
+                                level="warning",
+                                account=account,
+                            )
                     else:
                         for stream_id, info in channel_maps["stream_info"].items():
                             archive_days = int(info.get("archive_days") or 0)
