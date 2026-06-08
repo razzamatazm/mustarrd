@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-08
 
+### Improved: Yesterday's recordings now display as "Yesterday" instead of a full date
+
+**What you would notice:** On the Scheduled page, cancelled or completed recordings from yesterday used to show a full weekday-and-date label like "Sat, Jun 7, 2026 at 7:30 PM". They now show "Yesterday at 7:30 PM", matching the same natural style already used for upcoming recordings that air "Today" or "Tomorrow". Recordings from more than two days ago continue to show the full date.
+
+**What changed:** The date label used on history cards was extended to recognise the previous day and display "Yesterday" instead of the full date. No backend changes were made.
+
+---
+
+### Fixed: Long-running Mustarrd instances no longer slowly accumulate memory over time
+
+**What you would notice:** No visible change during normal use. On a Mustarrd instance that has been running for weeks or months and processed many recordings, a small amount of memory was silently retained for each completed, failed, or cancelled download and never released. Over a very long time this could cause memory usage to creep upward on memory-limited servers such as Unraid systems with 8 GB or less.
+
+**What changed:** An internal table that tracks which user started each download was not cleared when a download finished. That entry is now removed as soon as the download reaches a final state (completed, failed, or cancelled). No user-visible behaviour changes.
+
+---
+
 ### Fixed: Sending a program request with a number instead of a text date no longer causes a server error
 
 **What you would notice:** No visible change during normal use. Previously, if a third-party app or script sent a request to schedule or download a program and used a number (for example `1700000000`) instead of a text date (for example `"2023-11-14T22:13:20"`) for the start or end time, Mustarrd would respond with a generic server error. It now returns a clear "invalid input" message telling the caller the data was in the wrong format.
