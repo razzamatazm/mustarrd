@@ -132,7 +132,7 @@ class FileNamer:
         if start_time_str:
             try:
                 start_time = datetime.fromisoformat(start_time_str)
-            except ValueError:
+            except (ValueError, TypeError):
                 start_time = datetime.utcnow()
         else:
             start_time = datetime.utcnow()
