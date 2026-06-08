@@ -252,6 +252,18 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
             {account.last_connection_error}
           </Text>
         )}
+        {account.last_connection_ok === false && (
+          <Group gap="xs" mt={4}>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconEdit size={14} />}
+              onClick={() => onEdit(account)}
+            >
+              Edit Account
+            </Button>
+          </Group>
+        )}
       </Stack>
     </Card>
   )
