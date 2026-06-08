@@ -159,6 +159,7 @@ class DownloadManager:
             DownloadStatus.CANCELLED.value
         ]:
             self._stage_progress.pop(download_id, None)
+            self._download_owners.pop(download_id, None)
 
     def merge_progress_snapshot(self, data: dict) -> dict:
         """Merge in-memory progress fields into a download dict."""
