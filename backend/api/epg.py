@@ -94,6 +94,7 @@ async def trigger_epg_refresh(
     refresh_task = asyncio.create_task(
         epg_ingest_manager.refresh_all_accounts(force=request.force)
     )
+    epg_ingest_manager._pending_task = refresh_task
     refresh_task.add_done_callback(_log_task_result)
     refresh_task.add_done_callback(epg_ingest_manager.release_pending)
 

@@ -121,6 +121,7 @@ class EPGRefreshRaceTests(unittest.TestCase):
         async def run():
             manager.try_claim_refresh()
             task = asyncio.create_task(manager.refresh_all_accounts())
+            manager._pending_task = task
             task.add_done_callback(manager.release_pending)
             try:
                 await task
@@ -137,6 +138,45 @@ class EPGRefreshRaceTests(unittest.TestCase):
             manager.try_claim_refresh(),
             "try_claim_refresh must succeed after release_pending clears the flag "
             "(refresh button must not be permanently bricked by a transient error).",
+        )
+
+
+    def test_stale_done_callback_does_not_clear_later_pending_claim(self):
+        """A completed Task A's release_pending callback must not clear the pending
+        slot claimed by Task B, which was created after A finished.
+
+        Timeline reproduced here:
+        1. Task A finishes normally; _task_pending is already False.
+           _pending_task still points at A.
+        2. Before A's done-callback runs, a new claim succeeds and Task B is created.
+           _pending_task now points at B, _task_pending is True.
+        3. A's deferred release_pending(A) fires. Without the ownership guard it
+           would see _task_pending=True and clear it, stranding B's pending slot.
+        4. A third request slips through try_claim_refresh() and a duplicate refresh starts.
+
+        We use MagicMock sentinels as task stand-ins: release_pending only checks
+        object identity, not asyncio internals, so real Task objects are not needed.
+        """
+        from unittest.mock import MagicMock
+
+        manager = EPGIngestManager()
+        task_a = MagicMock(name="task_a")
+        task_b = MagicMock(name="task_b")
+
+        # Task A finished; _pending_task still points at A.
+        manager._pending_task = task_a
+        manager._task_pending = False
+
+        # Task B is now claimed and registered.
+        manager._task_pending = True
+        manager._pending_task = task_b
+
+        # A's late done-callback fires.
+        manager.release_pending(task_a)
+
+        self.assertTrue(
+            manager._task_pending,
+            "release_pending from an earlier task must not clear a newer task's pending flag.",
         )
 
 

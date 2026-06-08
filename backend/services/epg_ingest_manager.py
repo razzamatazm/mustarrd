@@ -48,6 +48,7 @@ class EPGIngestManager:
         self._running = False
         self._refresh_lock = asyncio.Lock()
         self._task_pending = False
+        self._pending_task: Optional["asyncio.Task"] = None
         self._interval = max(1, int(app_settings.epg_refresh_interval_hours)) * 3600
         self._backfill_cooldown_seconds = max(self._interval, 6 * 3600)
         self._status = {
@@ -143,8 +144,12 @@ class EPGIngestManager:
         running=True. If the task fails before that point (e.g. SQLite locked
         on the initial DB query), this callback ensures the flag does not stay
         True permanently and brick the refresh button with 409 forever.
+
+        Ownership check: only clears the flag if this task is still the one
+        that set it. A late callback from a completed task cannot clear the
+        pending slot claimed by a newer task.
         """
-        if self._task_pending:
+        if task is self._pending_task and self._task_pending:
             self._task_pending = False
 
     def get_status(self) -> dict:
