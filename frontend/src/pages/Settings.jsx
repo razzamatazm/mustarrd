@@ -553,13 +553,18 @@ export default function Settings() {
       description: 'Re-encode to MP4 using ffmpeg. Best compatibility with most devices and media players.',
     },
     {
+      value: 'remux_mkv_comskip',
+      label: 'MKV container + skip commercials (fast)',
+      description: 'Wrap the stream in MKV without re-encoding and remove commercials with ComSkip.',
+    },
+    {
       value: 'transcode_comskip',
-      label: 'MKV + skip commercials',
+      label: 'MKV + skip commercials (re-encode)',
       description: 'Re-encode to MKV and remove commercials with ComSkip.',
     },
     {
       value: 'transcode_mp4_comskip',
-      label: 'MP4 + skip commercials',
+      label: 'MP4 + skip commercials (re-encode)',
       description: 'Re-encode to MP4 and remove commercials with ComSkip.',
     },
   ]
@@ -567,6 +572,7 @@ export default function Settings() {
   function getRecordingFormat(data) {
     if (!data) return 'keep_original'
     if (!data.transcode_enabled) return 'keep_original'
+    if (data.remux_only && data.comskip_enabled) return 'remux_mkv_comskip'
     if (data.remux_only) return data.transcode_format === 'mp4' ? 'remux_mp4' : 'remux_mkv'
     const isMp4 = data.transcode_format === 'mp4'
     if (data.comskip_enabled) return isMp4 ? 'transcode_mp4_comskip' : 'transcode_comskip'
@@ -578,6 +584,7 @@ export default function Settings() {
       keep_original: { transcode_enabled: false, remux_only: false, comskip_enabled: false },
       remux_mkv: { transcode_enabled: true, remux_only: true, comskip_enabled: false, transcode_format: 'mkv' },
       remux_mp4: { transcode_enabled: true, remux_only: true, comskip_enabled: false, transcode_format: 'mp4' },
+      remux_mkv_comskip: { transcode_enabled: true, remux_only: true, comskip_enabled: true, transcode_format: 'mkv' },
       transcode_mkv: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mkv' },
       transcode_mp4: { transcode_enabled: true, remux_only: false, comskip_enabled: false, transcode_format: 'mp4' },
       transcode_comskip: { transcode_enabled: true, remux_only: false, comskip_enabled: true, transcode_format: 'mkv' },
@@ -746,6 +753,7 @@ export default function Settings() {
     const currentFormat = getRecordingFormat(formData)
     const isTranscoding = currentFormat !== 'keep_original'
     const isFullTranscode = ['transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(currentFormat)
+    const isComskipFormat = ['remux_mkv_comskip', 'transcode_comskip', 'transcode_mp4_comskip'].includes(currentFormat)
     const ffmpegReady = toolsStatus?.ffmpeg?.available
     const comskipReady = toolsStatus?.comskip?.available
 
@@ -826,7 +834,7 @@ export default function Settings() {
               value: f.value,
               label: f.label,
               disabled:
-                ['remux_mkv', 'remux_mp4', 'transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && !ffmpegReady
+                ['remux_mkv', 'remux_mp4', 'remux_mkv_comskip', 'transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && !ffmpegReady
                   ? true
                   : false,
             }))}
@@ -842,7 +850,7 @@ export default function Settings() {
             </Alert>
           )}
 
-          {!comskipReady && (currentFormat === 'transcode_comskip' || currentFormat === 'transcode_mp4_comskip') && (
+          {!comskipReady && isComskipFormat && (
             <Alert color="yellow" variant="light">
               <Text size="sm">
                 Comskip binary not found in the default PATH. Enter the path to your comskip binary below, or see{' '}
@@ -887,7 +895,7 @@ export default function Settings() {
             </SettingRow>
           )}
 
-          {(currentFormat === 'transcode_comskip' || currentFormat === 'transcode_mp4_comskip') && (
+          {isComskipFormat && (
             <Stack gap="xs">
               <Text size="xs" c="dimmed">
                 Commercials are detected and removed, then the result is saved as {currentFormat === 'transcode_mp4_comskip' ? 'MP4' : 'MKV'}.
