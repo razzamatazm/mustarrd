@@ -365,6 +365,18 @@ function DownloadCard({
             <Text size="xs">{download.error_message}</Text>
           </Alert>
         )}
+        {canRetry && (
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconRefresh size={14} />}
+              onClick={() => onRetry(download)}
+            >
+              Retry
+            </Button>
+          </Group>
+        )}
       </Stack>
     </Card>
   )
