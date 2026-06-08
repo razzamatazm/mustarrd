@@ -123,6 +123,7 @@ async def build_episode_download(
         episode_num,
         episode_title,
         container_extension,
+        episode_id=episode_id,
     )
 
     trusted_direct_source = _trusted_direct_source(direct_source, account.server_url)

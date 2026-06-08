@@ -7,16 +7,11 @@ Non-conforming IPTV providers commonly return episodes with no season or
 episode numbers and no episode title. When a user selects multiple such
 episodes for download, build_episode_download() calls
 series_episode_output_path() for each with the same metadata values.
-All calls produce the same output path, for example:
+Without the episode_id fallback, all calls produce the same output path.
 
-    /downloads/My Show/Season 00/S00E00 - My Show.mkv
-
-The second and subsequent downloads silently overwrite or corrupt the first.
-The user sees N "Completed" entries in the Downloads list but only one actual
-file on disk. No error is raised.
-
-Fix requires series_episode_output_path to accept an episode_id fallback so
-it can produce unique filenames when season/episode_num/title are all missing.
+Also covers negative season/episode values: providers sometimes send -1 for
+unknown values. Before the fix, these were clamped to 0, colliding with
+genuine season=0/episode=0 entries and expanding the corruption surface.
 """
 import sys
 import unittest
@@ -41,6 +36,7 @@ class SeriesEpisodePathCollisionTests(unittest.TestCase):
                 ep["episode_num"],
                 ep.get("title"),
                 ep.get("extension", "mkv"),
+                episode_id=ep.get("id"),
             )
             for ep in episodes
         ]
@@ -48,30 +44,29 @@ class SeriesEpisodePathCollisionTests(unittest.TestCase):
     def test_multiple_zero_season_zero_episode_no_title_unique_paths(self):
         """
         Three distinct provider episodes with season=0, episode_num=0, no title
-        must produce three unique output paths. Currently all map to the same
-        path, causing silent overwrite of completed downloads.
+        must produce three unique output paths when episode IDs differ.
         """
         episodes = [
-            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None},
-            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None},
-            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None},
+            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None, "id": "ep1"},
+            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None, "id": "ep2"},
+            {"show_name": "My Show", "season": 0, "episode_num": 0, "title": None, "id": "ep3"},
         ]
         paths = self._batch_paths(episodes)
         unique_paths = set(paths)
         self.assertEqual(
             len(unique_paths),
             len(paths),
-            f"Output path collision: all {len(paths)} episodes map to "
-            f"{next(iter(unique_paths))!r}. Each episode must have a unique path.",
+            f"Output path collision: {len(paths) - len(unique_paths)} episodes share a path. "
+            f"Paths: {paths}",
         )
 
     def test_two_episodes_same_zero_metadata_unique_paths(self):
         """
         Two distinct provider episodes with season=0, episode_num=0, no title
-        must produce different output paths.
+        must produce different output paths when episode IDs differ.
         """
-        path_a = series_episode_output_path("/downloads", "Drama Series", 0, 0, None, "mp4")
-        path_b = series_episode_output_path("/downloads", "Drama Series", 0, 0, None, "mp4")
+        path_a = series_episode_output_path("/downloads", "Drama Series", 0, 0, None, "mp4", episode_id="e100")
+        path_b = series_episode_output_path("/downloads", "Drama Series", 0, 0, None, "mp4", episode_id="e101")
         self.assertNotEqual(
             path_a,
             path_b,
@@ -79,11 +74,11 @@ class SeriesEpisodePathCollisionTests(unittest.TestCase):
             "overwrites the first.",
         )
 
-    def test_negative_season_episode_treated_as_zero_still_collides(self):
+    def test_negative_season_episode_not_clamped_to_zero(self):
         """
-        Providers sending season=-1 or episode_num=-1 are clamped to 0 by
-        series_episode_output_path, producing the same path as genuine 0/0
-        episodes and exacerbating the collision.
+        season=-1 and episode_num=-1 must produce paths distinct from season=0
+        and episode_num=0. Previously these were clamped to 0, expanding the
+        collision surface.
         """
         path_negative = series_episode_output_path("/downloads", "My Show", -1, -1, None, "mkv")
         path_zero = series_episode_output_path("/downloads", "My Show", 0, 0, None, "mkv")
@@ -91,7 +86,7 @@ class SeriesEpisodePathCollisionTests(unittest.TestCase):
             path_negative,
             path_zero,
             f"season=-1/episode_num=-1 and season=0/episode_num=0 both produce "
-            f"{path_zero!r}. Negative values from the provider expand the collision surface.",
+            f"{path_zero!r}. Negative provider values collide with zero-indexed entries.",
         )
 
 

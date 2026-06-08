@@ -38,16 +38,24 @@ def series_episode_output_path(
     episode: int,
     episode_title: Optional[str],
     extension: Optional[str],
+    episode_id: Optional[str] = None,
 ) -> str:
     safe_show = _sanitize_component(show_name)
     safe_title = _sanitize_component(episode_title) if episode_title else ""
-    season_num = max(int(season or 0), 0)
-    episode_num = max(int(episode or 0), 0)
+    # Preserve raw values so negative season/episode numbers (common with
+    # non-conforming providers) produce distinct paths rather than colliding
+    # with genuine season=0/episode=0 entries.
+    season_num = int(season or 0)
+    episode_num = int(episode or 0)
 
     season_folder = f"Season {season_num:02d}"
     base_name = f"S{season_num:02d}E{episode_num:02d} - {safe_show}"
     if safe_title:
         base_name = f"{base_name} - {safe_title}"
+    elif season_num == 0 and episode_num == 0 and episode_id:
+        # No usable metadata: append the provider episode ID so multiple
+        # zero-metadata episodes of the same show get distinct output paths.
+        base_name = f"{base_name} - {_sanitize_component(str(episode_id))}"
 
     filename = f"{base_name}.{_safe_extension(extension)}"
 
