@@ -2,18 +2,19 @@
 Regression test: POST /epg/refresh TOCTOU race allows two simultaneous refreshes.
 
 Before the fix:
-- `status["running"]` is only set True INSIDE `_refresh_all_accounts()`, which runs
-  after the asyncio task is scheduled and after the lock is acquired.
-- Two rapid POST /epg/refresh requests both read running=False, both call
-  asyncio.create_task(), both return HTTP 200.
-- Task B waits for the lock, then runs a full second EPG refresh after Task A finishes.
-- With force=True this wipes and reloads the EPG table twice.
+- `_task_pending` was cleared at the top of `refresh_all_accounts()`, before the first
+  await (`self._log(...)`). Between that clear and `_status["running"]` being set True
+  inside `_refresh_all_accounts()` (after the DB session await), both flags were False.
+- A second POST /epg/refresh arriving during that window would see both flags False,
+  call `try_claim_refresh()` successfully, and create a second task. With force=True
+  this wiped and reloaded the EPG table twice.
 
 After the fix:
-- `try_claim_refresh()` atomically sets `_task_pending=True` and returns True on the
-  first call.  A second call before the task starts returns False immediately.
-- The API endpoint uses `try_claim_refresh()` so the second request gets 409.
-- `get_status()` reflects `_task_pending` as running=True so the UI also shows busy.
+- `_task_pending` is cleared only after `_status["running"]` is set True inside
+  `_refresh_all_accounts()`. Both assignments are synchronous with no await between
+  them, so there is no window where both flags are False.
+- `try_claim_refresh()` blocks on `_task_pending` until `running` takes over, so the
+  second request always gets 409.
 """
 import sys
 import unittest
@@ -60,33 +61,46 @@ class EPGRefreshRaceTests(unittest.TestCase):
             "Claim must fail when a refresh is already running.",
         )
 
-    def test_task_pending_cleared_after_refresh_all_accounts_called(self):
-        """_task_pending must be False once refresh_all_accounts() starts executing."""
+    def test_second_claim_blocked_during_log_await(self):
+        """try_claim_refresh must return False even while the first task is suspended
+        at an await point inside refresh_all_accounts(), before running is set True.
+
+        This is the interleaved path Cleo identified: _task_pending was cleared at the
+        top of refresh_all_accounts before any await, leaving a window where both
+        _task_pending and running were False. The fix keeps _task_pending True until
+        running is set True inside _refresh_all_accounts.
+        """
         import asyncio
 
-        self.manager.try_claim_refresh()
-        self.assertTrue(self.manager._task_pending)
+        manager = EPGIngestManager()
+        second_claim_result = []
+        log_was_awaited = asyncio.Event()
+        log_may_proceed = asyncio.Event()
 
-        cleared = []
+        async def pausing_log(*args, **kwargs):
+            log_was_awaited.set()
+            await log_may_proceed.wait()
+
+        async def fake_refresh_all(*args, **kwargs):
+            manager._status.update({"running": True})
+            manager._task_pending = False
+
+        manager._log = pausing_log
+        manager._refresh_all_accounts = fake_refresh_all
 
         async def run():
-            original = self.manager._refresh_all_accounts
-
-            async def spy(*args, **kwargs):
-                cleared.append(self.manager._task_pending)
-
-            self.manager._refresh_all_accounts = spy
-            try:
-                await self.manager.refresh_all_accounts()
-            finally:
-                self.manager._refresh_all_accounts = original
+            manager.try_claim_refresh()
+            task = asyncio.create_task(manager.refresh_all_accounts())
+            await log_was_awaited.wait()
+            second_claim_result.append(manager.try_claim_refresh())
+            log_may_proceed.set()
+            await task
 
         asyncio.run(run())
 
-        self.assertEqual(
-            cleared,
-            [False],
-            "_task_pending must be False by the time refresh_all_accounts body executes.",
+        self.assertFalse(
+            second_claim_result[0],
+            "Second claim must be blocked even while refresh task is suspended at _log await.",
         )
 
 

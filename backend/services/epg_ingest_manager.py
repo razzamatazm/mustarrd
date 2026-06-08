@@ -85,7 +85,6 @@ class EPGIngestManager:
             await asyncio.sleep(self._interval)
 
     async def refresh_all_accounts(self, force: bool = False):
-        self._task_pending = False
         async with self._refresh_lock:
             if force:
                 await self._log("Starting forced full EPG refresh across active accounts.")
@@ -162,6 +161,7 @@ class EPGIngestManager:
             "started_at": datetime.now(timezone.utc),
             "last_error": None,
         })
+        self._task_pending = False
 
         if not accounts:
             await self._log("No active accounts found for EPG refresh.")
