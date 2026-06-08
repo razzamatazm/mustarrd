@@ -11,7 +11,7 @@ from typing import Optional, Callable, Dict, Set, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from models import Download, DownloadStatus, AppSettings, XtreamAccount, PlexServer, ScheduledRecording
+from models import Download, DownloadStatus, AppSettings, XtreamAccount, PlexServer, ScheduledRecording, ScheduledStatus
 from config import settings as app_settings, is_docker_env
 from database import async_session_maker
 from services.log_stream import backend_log_stream
@@ -1507,6 +1507,7 @@ class DownloadManager:
                 download.downloaded_bytes = 0
                 download.error_message = None
                 download.completed_at = None
+                await self._sync_schedule_status(session, download_id, ScheduledStatus.QUEUED.value)
                 await session.commit()
 
                 self._cancelled.discard(download_id)
