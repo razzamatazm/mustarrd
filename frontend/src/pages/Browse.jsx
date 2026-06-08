@@ -1040,7 +1040,7 @@ export default function Browse() {
                         </Text>
                       )}
                     </Stack>
-                  ) : (
+                  ) : channelsIsError ? null : (
                     <Stack align="center" justify="center" style={{ flex: 1, minHeight: 0 }}>
                       <IconVideo size={48} opacity={0.3} />
                       <Text c="dimmed">Select a channel to view its EPG</Text>
