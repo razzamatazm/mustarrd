@@ -76,6 +76,8 @@ class XtreamClient:
             if response.status != 200:
                 raise Exception(f"Failed to get EPG: HTTP {response.status}")
             data = await response.json(content_type=None)
+            if isinstance(data, list):
+                return data
             return data.get("epg_listings") or []
 
     async def get_short_epg(self, stream_id: str, limit: int = 10) -> list:
@@ -86,6 +88,8 @@ class XtreamClient:
             if response.status != 200:
                 raise Exception(f"Failed to get short EPG: HTTP {response.status}")
             data = await response.json(content_type=None)
+            if isinstance(data, list):
+                return data
             return data.get("epg_listings") or []
 
     async def get_xmltv(self) -> bytes:
