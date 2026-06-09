@@ -39,8 +39,11 @@ def _parse_program(program: dict) -> tuple[datetime, datetime, int, int, int, st
     stop_timestamp = _coerce_ts(program.get("stop_timestamp"))
 
     if start_timestamp and stop_timestamp:
-        start_time = datetime.fromtimestamp(int(start_timestamp), tz=timezone.utc)
-        end_time = datetime.fromtimestamp(int(stop_timestamp), tz=timezone.utc)
+        try:
+            start_time = datetime.fromtimestamp(int(start_timestamp), tz=timezone.utc)
+            end_time = datetime.fromtimestamp(int(stop_timestamp), tz=timezone.utc)
+        except (OverflowError, OSError) as exc:
+            raise ValueError(f"Program timestamp out of range: {exc}") from exc
     elif isinstance(program.get("start_time"), str) and isinstance(program.get("end_time"), str):
         start_time = datetime.fromisoformat(program["start_time"])
         end_time = datetime.fromisoformat(program["end_time"])

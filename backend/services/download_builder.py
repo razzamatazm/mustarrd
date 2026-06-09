@@ -32,8 +32,11 @@ def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, dateti
     ts_start = _coerce_ts(start_timestamp)
     ts_stop = _coerce_ts(stop_timestamp)
     if ts_start and ts_stop:
-        program_start_utc = datetime.fromtimestamp(ts_start, tz=timezone.utc)
-        program_end_utc = datetime.fromtimestamp(ts_stop, tz=timezone.utc)
+        try:
+            program_start_utc = datetime.fromtimestamp(ts_start, tz=timezone.utc)
+            program_end_utc = datetime.fromtimestamp(ts_stop, tz=timezone.utc)
+        except (OverflowError, OSError) as exc:
+            raise ValueError(f"Program timestamp out of range: {exc}") from exc
         duration_minutes = int((program_end_utc - program_start_utc).total_seconds() / 60)
     else:
         start_time = program.get("start_time")
