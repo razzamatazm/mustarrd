@@ -141,6 +141,42 @@ class RateLimitProxyBucketTests(unittest.TestCase):
             _enforce_rate_limit("login", repeat_req)
         self.assertEqual(ctx.exception.status_code, 429)
 
+    def test_spoofed_xff_from_public_peer_is_ignored(self):
+        """X-Forwarded-For from a public-internet peer must be ignored.
+
+        An attacker connecting directly from a public IP can set any value in
+        X-Forwarded-For. If the fix trusted XFF regardless of the direct peer,
+        the attacker could forge X-Forwarded-For: 10.0.0.X on every request to
+        mint an unlimited supply of fresh buckets, bypassing the rate limit.
+
+        Fix: XFF is trusted only when request.client.host is a private/loopback
+        address. Public peers are bucketed by their real IP directly.
+
+        This test FAILS with a fix that blindly trusts XFF from all peers and
+        passes with a correctly gated fix.
+        """
+        PUBLIC_IP = "8.8.8.8"  # Google DNS, verifiably public (not private or loopback)
+
+        # Attacker makes 20 attempts with a forged XFF private address.
+        # If XFF were trusted, each attempt uses a different private IP and
+        # mints a fresh bucket, bypassing the limit entirely.
+        for i in range(20):
+            req = _make_request(client_host=PUBLIC_IP, forwarded_for=f"10.0.0.{i + 1}")
+            _enforce_rate_limit("login", req)
+
+        # 21st attempt from same public IP (different forged XFF) must be blocked.
+        # If XFF is trusted: bucket for "10.0.0.21" is empty, no 429. Test fails.
+        # If XFF is ignored: bucket for "203.0.113.5" is full, 429 raised. Test passes.
+        repeat_req = _make_request(client_host=PUBLIC_IP, forwarded_for="10.0.0.21")
+        with self.assertRaises(HTTPException) as ctx:
+            _enforce_rate_limit("login", repeat_req)
+        self.assertEqual(
+            ctx.exception.status_code,
+            429,
+            "Public peer with forged X-Forwarded-For should be rate-limited "
+            "by their real IP, not get a fresh bucket per forged header value.",
+        )
+
     def test_multi_hop_xff_uses_leftmost_ip(self):
         """Multi-hop X-Forwarded-For (client, proxy1, proxy2) must use the
         left-most IP as the real client address.

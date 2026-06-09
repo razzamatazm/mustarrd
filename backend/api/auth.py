@@ -88,7 +88,15 @@ def _is_local_or_private_client(host: str | None) -> bool:
 
 
 def _client_key(request: Request) -> str:
-    host = request.client.host if request.client else "unknown"
+    host = request.client.host if request.client else None
+    # Trust X-Forwarded-For only when the direct peer is private (e.g. NPM on Docker
+    # bridge). Public peers must not be able to spoof this header to get a fresh bucket.
+    if _is_local_or_private_client(host):
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            real_ip = xff.split(",")[0].strip()
+            if real_ip:
+                return real_ip
     return host or "unknown"
 
 
