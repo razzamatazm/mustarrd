@@ -704,6 +704,10 @@ export default function Downloads() {
             </Card>
           ) : (
             <Stack gap="sm">
+              <Text size="xs" c="dimmed">
+                To cancel or edit a recording, go to{' '}
+                <Link to="/scheduled" style={{ color: 'var(--mantine-color-orange-5)' }}>Scheduled Recordings</Link>.
+              </Text>
               {upcomingRecordings.map((rec) => {
                 const guideOffset = accountGuideOffsets[Number(rec.account_id)] || 0
                 const airStart = formatAirDateTime(rec, 'start', guideOffset)
