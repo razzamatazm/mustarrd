@@ -831,6 +831,8 @@ class DownloadManager:
     async def _execute_post_process(self, download_id: int):
         """Execute post-processing for a downloaded file."""
         async with async_session_maker() as session:
+            working_input_path: Optional[str] = None
+            completed_output_path: Optional[str] = None
             try:
                 result = await session.execute(
                     select(Download).where(Download.id == download_id)
@@ -853,6 +855,7 @@ class DownloadManager:
                 download_folder = self._resolve_download_folder(settings)
 
                 original_path = download.output_path
+                working_input_path = original_path
                 original_file = Path(original_path)
                 if not original_file.is_file():
                     processed_found = None
@@ -901,6 +904,7 @@ class DownloadManager:
 
                 final_path = self._select_final_path(original_path, final_path)
                 completed_path = self._move_to_completed(final_path, completed_folder, download_folder)
+                completed_output_path = completed_path
                 download.output_path = completed_path
                 if warnings:
                     download.error_message = f"Completed with warnings: {'; '.join(warnings)}"
@@ -954,6 +958,15 @@ class DownloadManager:
                     download.status = DownloadStatus.CANCELLED.value
                     await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                     await session.commit()
+                    # Remove Comskip artifacts and partial transcode outputs left
+                    # by the cancelled run. The original recording is kept.
+                    if working_input_path:
+                        self._cleanup_working_files(
+                            working_input_path,
+                            completed_output_path or working_input_path,
+                            keep_logs=False,
+                            delete_original=False,
+                        )
                     await self._broadcast_progress(
                         download_id, download.progress, DownloadStatus.CANCELLED.value
                     )
@@ -971,6 +984,17 @@ class DownloadManager:
                     download.error_message = _friendly_error(e)
                     await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
                     await session.commit()
+
+                # Remove Comskip artifacts and partial transcode outputs left by
+                # the failed run. Logs are kept for debugging and the original
+                # recording stays in the download folder.
+                if working_input_path:
+                    self._cleanup_working_files(
+                        working_input_path,
+                        completed_output_path or working_input_path,
+                        keep_logs=True,
+                        delete_original=False,
+                    )
 
                 await self._broadcast_progress(
                     download_id,
