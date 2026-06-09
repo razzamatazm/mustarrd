@@ -6,6 +6,21 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Guide (EPG) refresh is more resilient — no more wiped guides, missing channels, or wrong-time downloads
+
+**What you would notice:** Several guide problems that could appear after an EPG refresh are gone:
+
+- A "Force refresh" no longer wipes your entire guide when the provider serves a truncated or broken guide file. Previously, the old guide rows were deleted before the new file was checked, so a half-written file from the provider could leave the guide empty until the provider recovered. Now the existing guide is kept and whatever can be read from the broken file is merged in.
+- If two channels in your provider's list share the same guide ID (common for HD/SD pairs of the same channel), both channels now show the program guide. Previously one of them silently ended up with an empty guide, and a warning is now logged so you can spot the duplicate in the Logs page.
+- Channels whose programs appear before the channel definitions inside the provider's guide file are no longer skipped. Some providers order their guide files this way, which used to result in those channels showing no programs.
+- When the provider's API is completely down during the guide gap-filling step (backfill), Mustarrd no longer pretends the backfill succeeded. It retries on the next refresh instead of waiting out a 6+ hour cooldown with gaps in your guide.
+- If a guide backfill is interrupted (app restart or shutdown), the channels that were already fetched are kept, so the next refresh picks up where it left off instead of redoing everything.
+- Downloads of programs whose guide entry was missing the provider's local start time no longer fetch the wrong time window. Those entries are now repaired automatically on the next guide refresh, so the catchup download lines up with the actual show instead of being shifted by the provider's timezone offset.
+
+**What changed:** Six fixes in the EPG ingest service: the force-refresh delete is now gated on the guide file parsing cleanly; channels sharing a guide ID each receive the programme data (with a warning logged); the guide file is scanned for channel definitions before programmes are matched; a backfill where every channel fetch fails is not recorded as complete; backfill progress is committed per channel; and the guide upsert now repairs rows that were stored without the provider-local start time. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Fixed: Recordings no longer download the wrong hour when your provider uses timezone abbreviations in the program guide
 
 **What you would notice:** If your IPTV provider includes timezone names like EST, PST, or CET in their program guide data, Mustarrd was silently falling back to UTC when building the download URL. A show listed at 8:30 PM EST would download content starting at 8:30 PM UTC instead, which is five hours off. After this fix, Mustarrd correctly strips the timezone abbreviation before parsing the timestamp, so the right hour of content is fetched.
