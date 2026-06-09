@@ -97,6 +97,10 @@ def _normalize_provider_start_token(provider_start: str, pre_padding_minutes: in
         token = re.sub(r"([+-])(\d)(:\d{2})$", r"\g<1>0\2\3", token)
         token = re.sub(r"([+-])(\d)(\d{2})$", r"\g<1>0\2\3", token)
         bare = re.sub(r"\s*([+-]\d{2}:?\d{2}|Z)$", "", token).strip()
+        # Strip trailing named TZ abbreviations (EST, PST, CET, MSK, etc.) that
+        # some providers include in XMLTV start attributes.  Numeric offsets were
+        # already removed above; this handles the remaining letters-only form.
+        bare = re.sub(r"\s+[A-Z]{2,5}$", "", bare).strip()
         for fmt, candidate in (
             ("%Y-%m-%d %H:%M:%S", bare),
             ("%Y-%m-%d %H:%M",    bare),
