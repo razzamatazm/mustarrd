@@ -4,6 +4,7 @@ import gzip
 import io
 import logging
 import re
+import unicodedata
 import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional
@@ -751,6 +752,8 @@ class EPGIngestManager:
         return None
 
     def _normalize_name(self, name: str) -> str:
+        name = unicodedata.normalize("NFC", name)
+        name = "".join(c for c in name if unicodedata.category(c) != "Cf")
         return " ".join(name.lower().split())
 
     def _decode_base64_text(self, value: Optional[str]) -> Optional[str]:

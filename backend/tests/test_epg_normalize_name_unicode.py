@@ -79,13 +79,6 @@ class NormalizeNameUnicodeTests(unittest.TestCase):
         provider_name = "BBC\u200bHD"
         xmltv_name = "BBCHD"
 
-        self.assertNotEqual(
-            self.manager._normalize_name(provider_name),
-            self.manager._normalize_name(xmltv_name),
-            "Precondition failed: U+200B already stripped by _normalize_name "
-            "(test is checking fixed behavior, update or remove this test).",
-        )
-
         programs = self._programs_for(provider_name, xmltv_name)
         self.assertEqual(
             len(programs),
@@ -112,13 +105,6 @@ class NormalizeNameUnicodeTests(unittest.TestCase):
             nfd_name,
             "Test setup error: NFC and NFD forms are already equal.",
         )
-        self.assertNotEqual(
-            self.manager._normalize_name(nfd_name),
-            self.manager._normalize_name(nfc_name),
-            "Precondition failed: _normalize_name already applies Unicode "
-            "normalization (update or remove this test).",
-        )
-
         programs = self._programs_for(nfd_name, nfc_name)
         self.assertEqual(
             len(programs),
@@ -139,12 +125,6 @@ class NormalizeNameUnicodeTests(unittest.TestCase):
         """
         provider_name = "\ufeffBBC HD"
         xmltv_name = "BBC HD"
-
-        self.assertNotEqual(
-            self.manager._normalize_name(provider_name),
-            self.manager._normalize_name(xmltv_name),
-            "Precondition failed: BOM already stripped by _normalize_name.",
-        )
 
         programs = self._programs_for(provider_name, xmltv_name)
         self.assertEqual(
