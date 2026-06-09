@@ -1045,9 +1045,18 @@ export default function Browse() {
                     </Stack>
                   ) : channelsIsError ? (
                     <Stack align="center" justify="center" style={{ flex: 1, minHeight: 0 }}>
-                      <IconVideo size={48} opacity={0.3} />
+                      <IconAlertCircle size={48} color="var(--mantine-color-red-5)" opacity={0.6} />
                       <Text c="dimmed" ta="center">
-                        Channel guide will appear here once your provider is connected.
+                        {authStatus?.is_admin ? (
+                          <>
+                            Could not reach your provider.{' '}
+                            <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+                              Check Settings → Accounts.
+                            </Link>
+                          </>
+                        ) : (
+                          'Could not reach the provider. Contact your administrator.'
+                        )}
                       </Text>
                     </Stack>
                   ) : (
