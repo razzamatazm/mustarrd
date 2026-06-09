@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Program guide no longer goes blank when your provider sends incomplete data
+
+**What you would notice:** Some IPTV providers occasionally include empty or incomplete entries in their guide data. Previously, a single bad entry caused Mustarrd to stop loading the program guide for every channel, not just the affected one. Your account would show a red "connection failed" badge even though the provider was reachable. Because the app never recorded a successful sync, it kept retrying and failing on every cycle, leaving the guide empty until you restarted. After this fix, bad entries are quietly skipped and the guide loads all valid channels normally.
+
+**What changed:** The guide import loop now checks each entry before processing it. Null or non-standard entries are skipped without stopping the rest of the import. No user settings or configuration were changed.
+
+---
+
+### Fixed: Program guide now updates correctly for providers that use deflate compression
+
+**What you would notice:** Some IPTV providers compress their guide data using deflate instead of the more common gzip format. If your provider used deflate, Mustarrd would log a parse error, your account badge would turn red, and your guide would slowly go empty as old entries expired. The last-synced time in Settings > Guide would still show the previous successful time, giving no hint that syncs were failing. After this fix, Mustarrd handles deflate-compressed guides transparently, the same way it already handles gzip and plain XML.
+
+**What changed:** The guide decompression step was updated to try two deflate methods when gzip detection does not match. No user settings or configuration were changed.
+
+---
+
 ### Improved: Browse EPG shows an error immediately when your provider cannot be reached
 
 **What you would notice:** Opening Browse EPG while your IPTV provider was unreachable used to show an orange loading spinner that never stopped. There was no message and no way to know something was wrong without waiting several minutes. After this fix, the error appears within a second: a red alert saying "Could not reach your provider" with a direct link to Settings, Accounts so you can correct the issue without hunting through menus.
