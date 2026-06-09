@@ -336,7 +336,18 @@ class EPGIngestManager:
             async with async_session_maker() as session:
                 async with session.begin():
                     if force:
-                        if total_programs:
+                        if total_programs and not xmltv_parse_ok:
+                            # The document is truncated or malformed: only part
+                            # of it (possibly nothing) would be re-imported.
+                            # Deleting first would lose guide data that cannot
+                            # be restored until the provider serves a good file.
+                            await self._log(
+                                "Force mode requested but XMLTV is truncated or malformed: "
+                                "existing guide rows preserved; parsable entries will be merged.",
+                                level="warning",
+                                account=account,
+                            )
+                        elif total_programs:
                             await self._log(
                                 "Force mode enabled: clearing existing guide rows before reload.",
                                 account=account,
