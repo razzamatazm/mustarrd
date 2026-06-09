@@ -761,6 +761,21 @@ class DownloadManager:
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
+                if download and download.status == DownloadStatus.COMPLETED.value:
+                    # Exception fired after _move_to_completed updated output_path in
+                    # memory but before (or during) session.commit(). The file is
+                    # already in the completed folder; commit the completed state and
+                    # leave it untouched, mirroring the CancelledError guard above.
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
+                    await session.commit()
+                    await self._broadcast_progress(
+                        download_id, 100, DownloadStatus.COMPLETED.value
+                    )
+                    await self._broadcast_log(
+                        download_id,
+                        f"Download completed: {os.path.basename(download.output_path)}"
+                    )
+                    return
                 if download:
                     download.status = DownloadStatus.FAILED.value
                     if not download.completed_at:
