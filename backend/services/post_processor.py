@@ -630,6 +630,14 @@ class PostProcessor:
             env_cmd.append(f"LIBVA_DRIVER_NAME={details['driver']}")
         return [*env_cmd, *cmd]
 
+    def _remove_partial_output(self, output_path: Path) -> None:
+        """Remove a partially-written ffmpeg output file, ignoring errors."""
+        try:
+            if output_path.exists():
+                output_path.unlink()
+        except Exception:
+            pass
+
     def _escape_concat_path(self, path: Path) -> str:
         text = str(path)
         text = text.replace("\\", "\\\\")
@@ -876,67 +884,74 @@ class PostProcessor:
 
         # Run ffmpeg with progress
         duration = await self._get_duration(input_path, log_callback=log_callback)
-        returncode, stderr = await self._run_ffmpeg_with_progress(
-            cmd,
-            duration,
-            progress_callback,
-            env=ffmpeg_env,
-        )
-        if returncode != 0:
-            if remux_only and output_format in [OutputFormat.MP4, OutputFormat.MKV]:
-                await self._notify_log(
-                    log_callback,
-                    "ffmpeg remux failed; retrying with full transcode (video+audio)."
-                )
-                if output_path.exists():
-                    try:
-                        output_path.unlink()
-                    except Exception:
-                        pass
-                retry_cmd = [self._ffmpeg_path]
-                if hw_accel == HardwareAccel.VAAPI:
-                    retry_cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
-                retry_cmd.extend([
-                    "-i", str(input_path),
-                    "-y",
-                ])
-                retry_cmd = self._with_error_tolerant_flags(retry_cmd)
-                if input_file.suffix.lower() == ".ts":
-                    retry_cmd.extend(selected_map_args)
-                else:
-                    retry_cmd.extend(["-map", "0"])
-                retry_cmd.extend(self._get_encoder_args(
-                    hw_accel,
-                    self._preferred_video_codec(hw_accel),
-                    quality
-                ))
-                retry_cmd.extend(["-c:a", "aac", "-avoid_negative_ts", "make_zero"])
-                retry_cmd.extend([
-                    "-progress", "pipe:1",
-                    "-nostats",
-                    str(output_path)
-                ])
-                await self._notify_log(
-                    log_callback,
-                    f"ffmpeg retry cmd: {' '.join(shlex.quote(str(c)) for c in retry_cmd)}"
-                )
-                if hw_accel == HardwareAccel.VAAPI:
-                    retry_cmd = self._prepend_vaapi_env(retry_cmd)
-                returncode, stderr = await self._run_ffmpeg_with_progress(
-                    retry_cmd,
-                    duration,
-                    progress_callback,
-                    env=ffmpeg_env,
-                )
-                if returncode == 0:
-                    if remove_original and output_path.exists():
-                        os.remove(input_path)
-                    return str(output_path)
+        try:
+            returncode, stderr = await self._run_ffmpeg_with_progress(
+                cmd,
+                duration,
+                progress_callback,
+                env=ffmpeg_env,
+            )
+            if returncode != 0:
+                if remux_only and output_format in [OutputFormat.MP4, OutputFormat.MKV]:
+                    await self._notify_log(
+                        log_callback,
+                        "ffmpeg remux failed; retrying with full transcode (video+audio)."
+                    )
+                    if output_path.exists():
+                        try:
+                            output_path.unlink()
+                        except Exception:
+                            pass
+                    retry_cmd = [self._ffmpeg_path]
+                    if hw_accel == HardwareAccel.VAAPI:
+                        retry_cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
+                    retry_cmd.extend([
+                        "-i", str(input_path),
+                        "-y",
+                    ])
+                    retry_cmd = self._with_error_tolerant_flags(retry_cmd)
+                    if input_file.suffix.lower() == ".ts":
+                        retry_cmd.extend(selected_map_args)
+                    else:
+                        retry_cmd.extend(["-map", "0"])
+                    retry_cmd.extend(self._get_encoder_args(
+                        hw_accel,
+                        self._preferred_video_codec(hw_accel),
+                        quality
+                    ))
+                    retry_cmd.extend(["-c:a", "aac", "-avoid_negative_ts", "make_zero"])
+                    retry_cmd.extend([
+                        "-progress", "pipe:1",
+                        "-nostats",
+                        str(output_path)
+                    ])
+                    await self._notify_log(
+                        log_callback,
+                        f"ffmpeg retry cmd: {' '.join(shlex.quote(str(c)) for c in retry_cmd)}"
+                    )
+                    if hw_accel == HardwareAccel.VAAPI:
+                        retry_cmd = self._prepend_vaapi_env(retry_cmd)
+                    returncode, stderr = await self._run_ffmpeg_with_progress(
+                        retry_cmd,
+                        duration,
+                        progress_callback,
+                        env=ffmpeg_env,
+                    )
+                    if returncode == 0:
+                        if remove_original and output_path.exists():
+                            os.remove(input_path)
+                        return str(output_path)
 
-            log_path = self._write_ffmpeg_log(str(input_path), "transcode", stderr)
-            if log_path:
-                await self._notify_log(log_callback, f"ffmpeg log saved: {log_path}")
-            raise Exception(f"ffmpeg failed: {stderr.decode(errors='ignore')}")
+                log_path = self._write_ffmpeg_log(str(input_path), "transcode", stderr)
+                if log_path:
+                    await self._notify_log(log_callback, f"ffmpeg log saved: {log_path}")
+                self._remove_partial_output(output_path)
+                raise Exception(f"ffmpeg failed: {stderr.decode(errors='ignore')}")
+        except asyncio.CancelledError:
+            # The ffmpeg process was already terminated by _run_ffmpeg_with_progress;
+            # remove whatever partial output it left behind.
+            self._remove_partial_output(output_path)
+            raise
 
         # Remove original if requested
         if remove_original and output_path.exists():
@@ -1305,7 +1320,11 @@ class PostProcessor:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
-                _, seg_stderr = await process.communicate()
+                try:
+                    _, seg_stderr = await process.communicate()
+                except asyncio.CancelledError:
+                    await self._terminate_process(process)
+                    raise
                 if process.returncode != 0:
                     log_path = self._write_ffmpeg_log(str(input_path), f"seg{i}", seg_stderr or b"")
                     if log_path:
@@ -1428,8 +1447,10 @@ class PostProcessor:
                     os.remove(temp_path)
             if concat_file.exists():
                 os.remove(concat_file)
-            if same_path_output and not concat_succeeded and work_output_path.exists():
-                work_output_path.unlink()
+            # Remove the partially-written output on any failed or cancelled run.
+            # When concat succeeded, work_output_path is the finished recording.
+            if not concat_succeeded:
+                self._remove_partial_output(work_output_path)
 
         self._cleanup_comskip_outputs(input_path, edl_path)
 
