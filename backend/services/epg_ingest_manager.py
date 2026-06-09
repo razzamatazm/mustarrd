@@ -1132,6 +1132,13 @@ class EPGIngestManager:
                     if len(batch) >= 1000:
                         await flush_batch()
 
+                # Commit each channel's rows as soon as the channel is done so
+                # progress survives an interrupt (restart/cancel). Channels
+                # whose rows are persisted drop out of the backfill targets on
+                # the next run, so a restart resumes instead of redoing the
+                # whole backfill.
+                await flush_batch()
+
                 if index % 100 == 0:
                     await self._log(
                         f"Backfill checked {index:,}/{len(channel_targets):,} channels."
