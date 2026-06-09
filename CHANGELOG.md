@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Settings panels now explain what each section does
+
+**What you would notice:** Two settings panels that previously showed only a title with no explanation now include a short description. Settings > Accounts now reads "Connect your IPTV providers. Mustarrd reads your channel list and program guide from these accounts." Settings > Users now reads "Can browse channels, schedule recordings, and download programs. Cannot access Settings." Every other settings panel already had a description; these two were the only ones missing one.
+
+**What changed:** A description line was added below the title in the Accounts section and the Users section of Settings. The Accounts section button layout was also adjusted so the buttons align to the top of the title instead of vertically centering. Frontend only, no backend changes.
+
+---
+
 ### Fixed: Scheduling the same program twice no longer creates duplicate recordings for providers without guide data
 
 **What you would notice:** Some IPTV providers do not include EPG IDs with their program data. Previously, if you accidentally scheduled the same program twice using such a provider, Mustarrd would create two scheduled recordings and attempt to download both at the same time, potentially corrupting the output file. Now, scheduling the same program twice returns "This program is already scheduled," matching the behavior you would see with a provider that includes full guide data.
