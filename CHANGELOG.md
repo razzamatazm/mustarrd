@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Recordings are no longer lost when a cancel or an error arrives just as a download finishes
+
+**What you would notice:** Pressing Cancel at the exact moment a recording finished downloading could delete the fully-downloaded file and mark the recording as cancelled, even though every byte was already on disk. Similarly, a hiccup at the very end of a download or during post-processing — for example the database briefly failing while saving the final status, or a crash right after the file was moved into your completed folder — could leave the recording stuck, marked as failed, or queued for a full re-download even though the finished file was sitting safely in the completed folder (and retrying such a "failed" recording could overwrite or delete the good file). After this fix, once the last byte has been written, the recording is always kept: it is moved to the completed folder and shown as completed, regardless of late cancels, database errors, or post-processing crashes.
+
+**What changed:** The download manager now remembers when a transfer has fully finished and when the file has been moved to the completed folder. Cancel and error handlers check this before touching the file, finalize the recording as completed (retrying on a fresh database session if the original one broke), and never delete a file that reached the completed folder. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Fixed: Temporary files are now cleaned up when post-processing fails or is cancelled
 
 **What you would notice:** Cancelling a recording during commercial detection or transcoding, or having post-processing fail partway through, no longer leaves junk behind in your download folder. Previously, half-written video files, Comskip working files (`.edl`, `.txt`, `.logo` and similar), and intermediate `_comskip_input` files could silently pile up and eat disk space. Cancelling now also actually stops the background FFmpeg helpers instead of leaving them running and writing to disk. In addition: empty Show/Season folders are removed from the download folder after a series episode moves to your completed folder; post-processing now checks free disk space before starting a transcode and fails with a clear error instead of dying mid-write and leaving a partial file; and a corrupt recording can no longer freeze post-processing forever while probing the file.
