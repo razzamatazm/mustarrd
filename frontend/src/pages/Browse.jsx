@@ -1060,7 +1060,7 @@ export default function Browse() {
                       <IconVideo size={48} opacity={0.3} />
                       <Text c="dimmed" ta="center">
                         {channelsIsError
-                          ? 'Channel guide will appear here once your provider is connected.'
+                          ? 'Channel guide will appear here once your provider connection is restored.'
                           : 'Select a channel to view its program guide.'}
                       </Text>
                     </Stack>
