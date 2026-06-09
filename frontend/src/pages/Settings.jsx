@@ -802,10 +802,10 @@ export default function Settings() {
               </Badge>
             </Group>
             {toolsStatus.ffmpeg?.error && (
-              <Text size="xs" c="red">ffmpeg error: {toolsStatus.ffmpeg.error}</Text>
+              <Text size="xs" c="dimmed">ffmpeg error: {toolsStatus.ffmpeg.error}</Text>
             )}
             {toolsStatus.comskip?.error && (
-              <Text size="xs" c="red">Comskip error: {toolsStatus.comskip.error}</Text>
+              <Text size="xs" c="dimmed">Comskip error: {toolsStatus.comskip.error}</Text>
             )}
             {toolsStatus.vaapi?.enabled && (
               <Text size="xs" c="dimmed">
