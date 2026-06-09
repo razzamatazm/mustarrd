@@ -143,6 +143,7 @@ function DownloadCard({
   const [showLogDetails, setShowLogDetails] = useState(false)
   const isActive = ['pending', 'downloading', 'processing'].includes(download.status)
   const canRetry = ['failed', 'cancelled'].includes(download.status)
+  const retryLabel = download.status === 'cancelled' ? 'Download Again' : 'Retry'
   const downloadProgress = typeof download.download_progress === 'number'
     ? download.download_progress
     : (download.status === 'processing' ? 100 : (download.progress ?? 0))
@@ -194,7 +195,7 @@ function DownloadCard({
                     leftSection={<IconRefresh size={14} />}
                     onClick={() => onRetry(download)}
                   >
-                    Retry
+                    {retryLabel}
                   </Menu.Item>
                 )}
                 {!isActive && (
@@ -390,7 +391,7 @@ function DownloadCard({
               leftSection={<IconRefresh size={14} />}
               onClick={() => onRetry(download)}
             >
-              Retry
+              {retryLabel}
             </Button>
           </Group>
         )}
