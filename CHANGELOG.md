@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Plex settings page now shows clear instructions when no Plex account is connected
+
+**What you would notice:** Settings > Plex Integration used to show empty dropdowns for Plex Server, Connection URI, and Libraries to Refresh even when you had never linked a Plex account. The form appeared broken with no explanation of what to do next. Now, when no account is connected, the form is hidden and replaced with a single message explaining that you need to click "Connect Plex Account" first. The Disconnect and Refresh Servers buttons are also hidden until an account is linked. Once you connect, the full form reappears as normal.
+
+**What changed:** The Plex section of Settings now checks whether a Plex account is linked before showing the configuration form. Frontend only, no backend or settings changes.
+
+---
+
+### Fixed: Program guide no longer wipes itself when a program description contains XML-like text
+
+**What you would notice:** If your IPTV provider includes program descriptions that happen to contain the text `<programme` (for example, a description that mentions XML or EPG formats), a forced guide refresh would silently delete your entire program guide and then show nothing. The Browse EPG page would appear empty until the next automatic refresh ran. After this fix, those descriptions are handled correctly and the guide is not affected.
+
+**What changed:** The guide import code was updated so that text appearing inside description blocks cannot be mistaken for real guide data. The guard that decides whether to clear the guide before a fresh import now ignores text inside those blocks. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Improved: Security settings now requires you to confirm your new password before saving
 
 **What you would notice:** Settings > Security used to have two password fields: Current Admin Password and New Admin Password. If you mistyped the new password there was no warning, and you could lock yourself out of Mustarrd with a password you never intended to set. Now there is a third field, Confirm New Admin Password. If the two new password fields do not match, a red "Passwords do not match" message appears as you type so you can correct the typo before saving.
