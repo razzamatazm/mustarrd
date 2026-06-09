@@ -1598,6 +1598,24 @@ class DownloadManager:
                         )
                     else:
                         if offset > 0:
+                            # Provider ignored the Range request and returned the
+                            # full resource. If its Content-Length shows the file
+                            # we already have on disk is complete, keep it instead
+                            # of re-downloading the whole stream.
+                            if total_size > 0:
+                                try:
+                                    disk_size = os.path.getsize(output_path)
+                                except OSError:
+                                    disk_size = -1
+                                if disk_size >= total_size:
+                                    await self._broadcast_log(
+                                        download_id,
+                                        f"Provider ignored Range request; file on disk "
+                                        f"({disk_size:,} B) already covers the full "
+                                        f"content length ({total_size:,} B). "
+                                        f"Keeping existing file.",
+                                    )
+                                    return disk_size
                             await self._broadcast_log(
                                 download_id,
                                 "Provider did not honour Range request; re-downloading from start."
