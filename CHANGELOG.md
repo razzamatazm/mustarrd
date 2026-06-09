@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Security settings now requires you to confirm your new password before saving
+
+**What you would notice:** Settings > Security used to have two password fields: Current Admin Password and New Admin Password. If you mistyped the new password there was no warning, and you could lock yourself out of Mustarrd with a password you never intended to set. Now there is a third field, Confirm New Admin Password. If the two new password fields do not match, a red "Passwords do not match" message appears as you type so you can correct the typo before saving.
+
+**What changed:** A confirm password field was added to the Security section of Settings. The section description was also updated to clarify that the password controls access to the whole app, not just Settings. Frontend only, no backend changes.
+
+---
+
 ### Improved: Variable chips on the File Naming settings page now click to insert
 
 **What you would notice:** On Settings > File Naming, the small chips showing available variables (like `{show}`, `{season}`, `{date}`) used to be display-only. You could hover over them to read a tooltip, but clicking did nothing. Now clicking any chip inserts it directly into the template field at your cursor position, so you can build a template without typing the variable names by hand. A "Variables:" label has also been added so the chips are easier to find at a glance.
