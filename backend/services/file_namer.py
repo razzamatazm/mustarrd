@@ -22,9 +22,10 @@ class FileNamer:
         # Remove stylized "Live" markers frequently injected by providers
         name = re.sub(r'[\[\(\-–—|:]*\s*ᴸᶦᵛᵉ\s*[\]\)]*\s*(?:-\s*)?', ' ', name)
 
-        # Remove invisible Unicode format/directional chars (zero-width, BOM, soft hyphen).
-        # Use empty replacement so they vanish without splitting surrounding words.
-        name = re.sub('[\u00ad\u200b\u200c\u200d\u200e\u200f\ufeff]', '', name)
+        # Remove invisible Unicode format/directional chars: zero-width, BOM, soft hyphen,
+        # and bidi override/isolate controls (U+202A-202E, U+2066-2069) that can make
+        # filenames display reversed in terminals and file managers.
+        name = re.sub('[\u00ad\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\ufeff]', '', name)
 
         # Replace invalid filesystem chars with spaces (includes null byte and control chars)
         invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
