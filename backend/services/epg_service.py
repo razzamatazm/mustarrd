@@ -131,9 +131,16 @@ class EPGService:
         channel_id: str,
         use_cache: bool = True,
         prefer_live: bool = False,
-        days_back: Optional[int] = None
+        days_back: Optional[int] = None,
+        archive_days: Optional[int] = None,
     ) -> list:
-        """Get EPG data for a specific channel."""
+        """Get EPG data for a specific channel.
+
+        *archive_days*: pass the value from an earlier get_channel_archive_days
+        call to skip the internal lookup, which fetches the provider's entire
+        channel list. Callers that already resolved it (e.g. the Browse EPG and
+        Catchup endpoints) would otherwise trigger that fetch twice per request.
+        """
         account_result = await session.execute(
             select(XtreamAccount).where(XtreamAccount.id == account_id)
         )
@@ -154,10 +161,11 @@ class EPGService:
         if use_cache and not prefer_live and self._is_cache_valid(cache_key):
             return self._cache[cache_key]["data"]
 
-        try:
-            archive_days = await self.get_channel_archive_days(session, account_id, channel_id)
-        except NoCatchupSupportError:
-            return []
+        if archive_days is None:
+            try:
+                archive_days = await self.get_channel_archive_days(session, account_id, channel_id)
+            except NoCatchupSupportError:
+                return []
         if archive_days <= 0:
             return []
         if days_back is None:
@@ -296,14 +304,16 @@ class EPGService:
         session: AsyncSession,
         account_id: int,
         channel_id: str,
-        days_back: int = 7
+        days_back: int = 7,
+        archive_days: Optional[int] = None,
     ) -> list:
         """Get past programs that are available for catchup."""
         epg_data = await self.get_epg_for_channel(
             session,
             account_id,
             channel_id,
-            days_back=days_back
+            days_back=days_back,
+            archive_days=archive_days,
         )
 
         now = datetime.now(timezone.utc)

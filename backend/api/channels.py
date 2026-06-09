@@ -119,6 +119,9 @@ async def get_channel_epg(
             channel_id,
             prefer_live=fresh,
             days_back=actual_days,
+            # Already resolved above; passing it through avoids fetching the
+            # provider's entire channel list a second time in the same request.
+            archive_days=channel_archive_days,
         )
         return epg_data
     except NoCatchupSupportError:
@@ -155,7 +158,10 @@ async def get_catchup_programs(
         if actual_days <= 0:
             return []
         programs = await epg_service.get_past_programs(
-            session, account_id, channel_id, actual_days
+            session, account_id, channel_id, actual_days,
+            # Already resolved above; passing it through avoids fetching the
+            # provider's entire channel list a second time in the same request.
+            archive_days=channel_archive_days,
         )
         return programs
     except NoCatchupSupportError:
