@@ -54,6 +54,19 @@ class GetEpgListResponseTests(unittest.IsolatedAsyncioTestCase):
         result = await client.get_epg("123")
         self.assertEqual(result, [])
 
+    async def test_dict_response_dict_epg_listings_returns_list(self):
+        # Some providers return epg_listings as {"0": {...}, "1": {...}} instead
+        # of a list.  get_epg must coerce to list; returning a dict causes
+        # _backfill_from_api to silently skip all entries (dict keys are strings,
+        # not dicts) and fetch_live_epg to raise AttributeError on .get() calls.
+        entries = {"0": {"id": "1", "title": "News"}, "1": {"id": "2", "title": "Sport"}}
+        client = _client()
+        client._get_session = _mock_session({"epg_listings": entries})
+        result = await client.get_epg("123")
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual({e["title"] for e in result}, {"News", "Sport"})
+
 
 class GetShortEpgListResponseTests(unittest.IsolatedAsyncioTestCase):
     async def test_bare_list_response_returns_list(self):
@@ -82,6 +95,16 @@ class GetShortEpgListResponseTests(unittest.IsolatedAsyncioTestCase):
         client._get_session = _mock_session({"epg_listings": None})
         result = await client.get_short_epg("123")
         self.assertEqual(result, [])
+
+    async def test_dict_response_dict_epg_listings_returns_list(self):
+        # Same coercion bug as get_epg: dict epg_listings must be converted to list.
+        entries = {"0": {"id": "1", "title": "Movie"}, "1": {"id": "2", "title": "Sport"}}
+        client = _client()
+        client._get_session = _mock_session({"epg_listings": entries})
+        result = await client.get_short_epg("123")
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual({e["title"] for e in result}, {"Movie", "Sport"})
 
 
 if __name__ == "__main__":
