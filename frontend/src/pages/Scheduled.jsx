@@ -15,7 +15,7 @@ import {
   Select,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -278,6 +278,7 @@ function ScheduleCard({
 export default function Scheduled() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [localItems, setLocalItems] = useState([])
   const [historyFilter, setHistoryFilter] = useState('all')
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
@@ -439,7 +440,10 @@ export default function Scheduled() {
     <Stack>
       <Title order={2}>Scheduled Recordings</Title>
 
-      <Tabs defaultValue="upcoming">
+      <Tabs
+        value={['upcoming', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'upcoming'}
+        onChange={(val) => setSearchParams({ tab: val }, { replace: true })}
+      >
         <Tabs.List>
           <Tabs.Tab value="upcoming" leftSection={<IconCalendar size={16} />}>
             Upcoming {activeSchedules.length > 0 && `(${activeSchedules.length})`}
