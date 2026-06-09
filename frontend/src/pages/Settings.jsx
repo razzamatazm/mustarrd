@@ -865,6 +865,8 @@ export default function Settings() {
             <Alert color="yellow" variant="light">
               <Text size="sm">
                 ffmpeg is unavailable. The Docker image includes ffmpeg; install or fix it manually if running locally.
+                {' '}To save recordings without converting, switch the format above to{' '}
+                <Text component="span" fw={500}>Keep original (.ts)</Text>.
               </Text>
             </Alert>
           )}
