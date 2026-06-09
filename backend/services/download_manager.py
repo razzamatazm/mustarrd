@@ -330,6 +330,15 @@ class DownloadManager:
         except Exception:
             return False
 
+    def _folders_equal(self, folder_a: str, folder_b: str) -> bool:
+        try:
+            return (
+                os.path.realpath(os.path.abspath(folder_a))
+                == os.path.realpath(os.path.abspath(folder_b))
+            )
+        except Exception:
+            return False
+
     async def process_queue(self):
         """Main loop for processing download queue."""
         self._running = True
@@ -467,6 +476,10 @@ class DownloadManager:
                         pass
             completed_folder = self._resolve_completed_folder(settings)
             download_folder = self._resolve_download_folder(settings)
+            # When both folders are the same directory, "the file is under the
+            # completed folder" says nothing about whether post-processing ran:
+            # the raw downloaded input lives there too.
+            folders_equal = self._folders_equal(download_folder, completed_folder)
 
             result = await session.execute(
                 select(Download).where(
@@ -557,7 +570,15 @@ class DownloadManager:
                     continue
 
                 if download.status == DownloadStatus.PROCESSING.value:
-                    if input_file.is_file() and self._path_is_under(str(input_file), completed_folder):
+                    # Only trust "file already in the completed folder" as proof
+                    # that post-processing finished when the completed folder is
+                    # distinct from the download folder. With equal folders the
+                    # raw input sits there before processing has run.
+                    if (
+                        input_file.is_file()
+                        and self._path_is_under(str(input_file), completed_folder)
+                        and not (folders_equal and self._needs_post_processing(download, settings))
+                    ):
                         download.status = DownloadStatus.COMPLETED.value
                         download.progress = 100.0
                         if not download.completed_at:

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Literal, Optional
+import logging
 import os
 
 from auth import require_admin, require_authenticated, AuthContext
@@ -23,6 +24,8 @@ from services.post_processor import post_processor
 
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _paths_match(path_a: Optional[str], path_b: Optional[str]) -> bool:
@@ -235,6 +238,13 @@ async def update_settings(
     # is the valid "fast remux + skip commercials" profile written by onboarding.
     if settings.comskip_enabled:
         settings.transcode_enabled = True
+
+    if _paths_match(settings.download_folder, settings.completed_folder):
+        logger.warning(
+            "Download folder and completed folder are set to the same path (%s). "
+            "Finished recordings will stay in place instead of being moved.",
+            settings.download_folder,
+        )
 
     await session.commit()
     await session.refresh(settings)

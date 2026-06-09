@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Commercial skip and transcoding no longer get skipped after a restart when the download and completed folders are the same
+
+**What you would notice:** If you point the download folder and the completed folder at the same directory, restarting Mustarrd while a recording was waiting for (or in the middle of) commercial detection or transcoding used to mark that recording as completed without ever processing it — you would end up with the raw recording, commercials and all. After this fix, the recording is picked up again after the restart and goes through commercial skip and transcoding as configured. Saving Settings with both folders set to the same path now also logs a warning so the setup is easy to spot in the Logs page.
+
+**What changed:** The restart-recovery check that treated "the file is already in the completed folder" as proof that post-processing had finished is no longer trusted when the download and completed folders resolve to the same directory — in that case the raw file lives there before processing has run, so the recording is re-queued for post-processing instead. Moving a finished file "to the completed folder" was already a no-op when both folders match, so nothing else changes. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Fixed: First-run setup stays local-only behind a reverse proxy, and provider download links are checked more strictly
 
 **What you would notice:** Two security tighten-ups. First, if you run Mustarrd behind a reverse proxy in Docker (for example Unraid with Nginx Proxy Manager) and expose it to the internet, the initial "set admin password" screen was reachable by anyone on the internet before you finished setup — the app saw every proxied visitor as the proxy's local address and waved them through the "local network only" restriction. Now the app looks at the real visitor address reported by the proxy, so only visitors on your local/private network can complete first-run setup (unless you explicitly enable remote setup with `CATCHUP_ALLOW_REMOTE_SETUP`). Direct local access without a proxy works exactly as before. Second, when your IPTV provider supplies a direct download link for a movie or episode, Mustarrd only trusts it if it points back at your provider's server — that check now requires the port to match too, not just the server name, so a link to a different service on the same machine is no longer trusted.
