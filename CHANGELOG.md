@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Completed recording no longer deleted when a database glitch occurs right after the file is saved
+
+**What you would notice:** On Unraid or NAS setups where the database file sits on a network share, a recording could disappear from your completed folder at the exact moment the share went briefly offline or the disk filled up. The download would finish and the file would move to your completed folder, but a split-second database error caused Mustarrd to delete its own completed recording. You would see the download marked as Failed with no file to show for it, even though the recording finished successfully. After this fix, if a database error fires after the file is already in your completed folder, Mustarrd leaves the file alone and marks the download Completed.
+
+**What changed:** The download error handler was updated so that when a recording has already moved to the completed folder, a subsequent database error no longer deletes the file. Backend only, no user settings or configuration were changed.
+
+---
+
+### Improved: Settings now shows tool availability errors as quiet detail instead of a second alarm
+
+**What you would notice:** Settings > Post-Processing used to show a red badge (FFMPEG UNAVAILABLE or COMSKIP UNAVAILABLE) followed immediately by another line of red text with a technical error message. For a non-technical user, the page looked like it had four separate problems. The error detail text is now displayed in gray, so the red badge remains the clear headline and the technical message reads as supporting detail below it.
+
+**What changed:** Two color changes in the Settings page. No logic, settings values, or recording behavior was changed.
+
+---
+
 ### Improved: Browse EPG right panel now shows a clear error when your provider cannot be reached
 
 **What you would notice:** In Browse EPG, when your IPTV provider is temporarily unreachable, the right panel (where the channel guide appears after you select a channel) used to show a plain video icon and the message "Channel guide will appear here once your provider is connected." That message implied your provider was not set up yet, which was confusing if you had already configured it. After this fix, the right panel shows a red alert icon and the message "Could not reach your provider." Admins see a link to Settings > Accounts so you can check your credentials without leaving the page. Non-admin users see a prompt to contact their administrator. Both panels in Browse EPG now give the same clear signal when the provider is unreachable.
