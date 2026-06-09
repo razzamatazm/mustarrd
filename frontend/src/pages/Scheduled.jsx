@@ -198,6 +198,13 @@ function ScheduleCard({
           </Group>
         )}
 
+        {schedule.status === 'cancelled' && !schedule.status_message && !schedule.download_id && (
+          <Text size="xs" c="dimmed">
+            Cancelled before downloading. If this program is still in your provider&apos;s catchup window, you can find it in{' '}
+            <Link to="/browse" style={{ color: 'var(--mantine-color-orange-5)' }}>Browse EPG</Link>.
+          </Text>
+        )}
+
         {schedule.download_status === 'completed' && schedule.download_id && (
           <Group gap="xs">
             {isDesktop ? (
