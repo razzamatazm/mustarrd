@@ -14,6 +14,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Scheduled recordings now download the correct content for providers in India, Newfoundland, Iran, and Myanmar
+
+**What you would notice:** If your IPTV provider uses a half-hour time zone offset, such as India (+5:30), Newfoundland (-3:30), Iran (+3:30), or Myanmar (+6:30), your scheduled recordings may have been downloading content from the wrong time slot, typically five to six hours earlier than the program you actually scheduled. The guide showed the correct program time and the recording started on schedule, but when you played the file back, the content was from a different program entirely. This fix was a companion to the guide-time fix released earlier today: the guide was corrected first, and this update applies the same correction to the download itself.
+
+**What changed:** The part of Mustarrd that builds the download URL for scheduled recordings now applies the same time zone normalization that was added to the guide parser earlier. Short time zone offsets like `+5:30` and `+530` are zero-padded before being used to calculate the correct playback position on the provider's server. Previously, those offsets were silently ignored and UTC was used instead. No user-visible setting or configuration was changed.
+
+---
+
 ### Fixed: Show titles containing & no longer leave your program guide empty
 
 **What you would notice:** If your IPTV provider lists programs with titles like "R&B Music," "News & Events," or "AT&T Special," Mustarrd would crash while importing the guide and leave your Browse page empty. The error happened because a bare `&` is not valid in the XML format providers use for guide data. After this fix, Mustarrd escapes those characters before parsing so the guide loads correctly. Standard XML codes like `&amp;` and `&#160;` are left unchanged.
