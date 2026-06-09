@@ -105,6 +105,7 @@ Then open **http://localhost:4177** in your browser.
 
 - Browse to an upcoming program and use the **Schedule** option to download it automatically when it airs
 - Make sure to turn on the view future programming switch
+- The **History** tab on the Scheduled Recordings page shows past scheduled runs. FAILED entries show a **Retry** button directly on the card to re-queue the download without navigating away
 
 | Desktop | Mobile |
 |---------|--------|

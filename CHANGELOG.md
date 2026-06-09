@@ -6,6 +6,24 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Settings now warns you when your program guide sync fails
+
+**What you would notice:** The Settings > Guide section used to show "Last synced: Today at 5:55 AM" even when your program guide was failing to update. If your IPTV provider became unreachable or your credentials expired, you would see a reassuring timestamp with no hint that your guide was going stale. After this fix, the label changes to "Last sync attempt" and an orange alert appears with a direct link to the Accounts section whenever a real sync failure occurs. If the sync was successful, the section continues to show the normal "Last synced" timestamp with no alert.
+
+A related false-alarm was also fixed: a single channel timing out during a guide refresh used to trigger the sync failure alert even though the rest of the guide updated correctly. That no longer happens.
+
+**What changed:** The backend was updated so that per-channel timeout errors during guide backfill no longer count as a full sync failure. The Settings > Guide section in the frontend was updated to show the alert and the updated label only when the sync genuinely fails. No user settings or configuration were changed.
+
+---
+
+### Improved: Failed scheduled recordings now have a Retry button in Scheduled Recordings history
+
+**What you would notice:** When a scheduled recording failed, the Scheduled Recordings > History tab showed the error message but offered no action. To retry the recording, you had to navigate to Downloads > History to find the Retry button there. A Retry button now appears directly on the failed card in Scheduled Recordings > History, so you can re-queue the download without leaving the page.
+
+**What changed:** A Retry button was added to FAILED cards in the Scheduled Recordings history tab. The button only appears on FAILED entries, not on CANCELLED or COMPLETED ones. No backend or scheduling logic was changed.
+
+---
+
 ### Fixed: Program guide no longer goes blank when your provider sends incomplete data
 
 **What you would notice:** Some IPTV providers occasionally include empty or incomplete entries in their guide data. Previously, a single bad entry caused Mustarrd to stop loading the program guide for every channel, not just the affected one. Your account would show a red "connection failed" badge even though the provider was reachable. Because the app never recorded a successful sync, it kept retrying and failing on every cycle, leaving the guide empty until you restarted. After this fix, bad entries are quietly skipped and the guide loads all valid channels normally.
