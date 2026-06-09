@@ -32,6 +32,10 @@ TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt numbe
 # matches the default used by services.disk_space.check_disk_space.
 MIN_FREE_SPACE_FALLBACK_GB = 25
 
+# For chunked transfers (no Content-Length) percent progress is unknown, so
+# progress is persisted and broadcast every this-many bytes instead.
+CHUNKED_PROGRESS_INTERVAL_BYTES = 8 * 1024 * 1024
+
 
 def _is_transient_network_error(e: BaseException) -> bool:
     """True for network-level errors worth retrying (disconnects, timeouts).
@@ -497,10 +501,15 @@ class DownloadManager:
                             and download.file_size == 0
                             and download.downloaded_bytes > 0
                         ):
-                            # Chunked stream (no Content-Length). The DB records
-                            # downloaded_bytes as written; if on-disk size matches, the
-                            # download finished cleanly before the crash.
-                            is_complete = input_file.stat().st_size == download.downloaded_bytes
+                            # Chunked stream (no Content-Length). The final
+                            # post-stream commit records downloaded_bytes with
+                            # progress=100; periodic mid-stream commits keep
+                            # progress at 0, so a crash right after one of them
+                            # is not mistaken for a finished download.
+                            is_complete = (
+                                input_file.stat().st_size == download.downloaded_bytes
+                                and bool(download.progress)
+                            )
                         else:
                             is_complete = False
                     except Exception:
@@ -1432,6 +1441,7 @@ class DownloadManager:
 
         downloaded = downloaded_start
         last_progress_update = 0
+        last_bytes_update = downloaded_start
 
         async with aiofiles.open(output_path, file_mode) as f:
             async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
@@ -1443,11 +1453,23 @@ class DownloadManager:
 
                 if total_size > 0:
                     progress = (downloaded / total_size) * 100
+                    should_update = (
+                        progress - last_progress_update >= 1
+                        or downloaded == total_size
+                    )
                 else:
+                    # Chunked transfer: no Content-Length, so percent progress
+                    # is unknown. Emit on a byte cadence instead so the DB and
+                    # UI still see the transfer advancing.
                     progress = 0
+                    should_update = (
+                        downloaded - last_bytes_update
+                        >= CHUNKED_PROGRESS_INTERVAL_BYTES
+                    )
 
-                if progress - last_progress_update >= 1 or downloaded == total_size:
+                if should_update:
                     last_progress_update = progress
+                    last_bytes_update = downloaded
 
                     await session.execute(
                         update(Download)
@@ -1460,23 +1482,26 @@ class DownloadManager:
                     )
                     await session.commit()
 
+                    extra = {"indeterminate": True} if total_size == 0 else {}
                     await self._broadcast_progress(
                         download_id,
                         progress,
                         DownloadStatus.DOWNLOADING.value,
                         downloaded_bytes=downloaded,
                         file_size=total_size,
-                        download_progress=progress
+                        download_progress=progress,
+                        **extra
                     )
 
-        # For chunked streams (total_size == 0) the progress-based commit inside
-        # the loop never fires, so downloaded_bytes stays 0 in the DB. Commit the
-        # final byte count here so recovery after a crash can detect a complete file.
+        # For chunked streams (total_size == 0), commit the final byte count with
+        # progress=100 so recovery after a crash can detect a complete file.
+        # Periodic mid-stream commits above keep progress at 0, so only this
+        # final commit marks the stream as fully transferred.
         if total_size == 0:
             await session.execute(
                 update(Download)
                 .where(Download.id == download_id)
-                .values(downloaded_bytes=downloaded)
+                .values(downloaded_bytes=downloaded, progress=100.0)
             )
             await session.commit()
 
