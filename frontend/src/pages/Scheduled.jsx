@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Title,
   Card,
@@ -13,6 +13,8 @@ import {
   Alert,
   Button,
   Select,
+  Switch,
+  Tooltip,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
@@ -32,11 +34,13 @@ import {
   IconFolderOpen,
   IconFilter,
   IconRefresh,
+  IconFileExport,
+  IconFileImport,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 
-import { accountsApi, downloadsApi, schedulesApi } from '../api'
+import { accountsApi, authApi, downloadsApi, schedulesApi, settingsApi } from '../api'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
@@ -281,6 +285,7 @@ export default function Scheduled() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [localItems, setLocalItems] = useState([])
   const [historyFilter, setHistoryFilter] = useState('all')
+  const importInputRef = useRef(null)
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
   const isDesktop = Boolean(desktopApi?.openFileLocation && desktopApi?.playFile)
 
@@ -293,6 +298,18 @@ export default function Scheduled() {
   const { data: accounts } = useQuery({
     queryKey: ['accounts', 'public'],
     queryFn: accountsApi.publicList,
+  })
+
+  const { data: authStatus } = useQuery({
+    queryKey: ['auth', 'status'],
+    queryFn: authApi.status,
+  })
+  const isAdmin = Boolean(authStatus?.is_admin)
+
+  const { data: appSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: settingsApi.get,
+    enabled: isAdmin,
   })
 
   useEffect(() => {
@@ -351,6 +368,91 @@ export default function Scheduled() {
       })
     },
   })
+
+  const autoRetryMutation = useMutation({
+    mutationFn: (enabled) => settingsApi.update({ auto_retry_failed_downloads: enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (error) => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      notifications.show({
+        title: 'Error',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (doc) => schedulesApi.importDoc(doc),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['schedules'] })
+      const skipped = result.skipped || []
+      const details = skipped
+        .slice(0, 3)
+        .map((s) => `${s.title}: ${s.reason}`)
+        .join('; ')
+      notifications.show({
+        title: 'Import Complete',
+        message: skipped.length
+          ? `Created ${result.created}, skipped ${skipped.length} (${details}${skipped.length > 3 ? '; ...' : ''}).`
+          : `Created ${result.created} schedule${result.created === 1 ? '' : 's'}.`,
+        color: skipped.length ? 'yellow' : 'green',
+      })
+    },
+    onError: (error) => {
+      notifications.show({
+        title: 'Import Failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
+  const handleExport = async () => {
+    try {
+      const doc = await schedulesApi.exportAll()
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `mustarrd-schedules-${dayjs().format('YYYY-MM-DD')}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      notifications.show({
+        title: 'Schedules Exported',
+        message: `Exported ${doc.schedules.length} schedule${doc.schedules.length === 1 ? '' : 's'}.`,
+        color: 'green',
+      })
+    } catch (error) {
+      notifications.show({
+        title: 'Export Failed',
+        message: error.message,
+        color: 'red',
+      })
+    }
+  }
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    let doc
+    try {
+      doc = JSON.parse(await file.text())
+    } catch {
+      notifications.show({
+        title: 'Import Failed',
+        message: 'The selected file is not a valid JSON schedule export.',
+        color: 'red',
+      })
+      return
+    }
+    importMutation.mutate(doc)
+  }
 
   const handleOpenFileLocation = async (schedule) => {
     if (!desktopApi?.openFileLocation) return
@@ -438,7 +540,50 @@ export default function Scheduled() {
 
   return (
     <Stack>
-      <Title order={2}>Scheduled Recordings</Title>
+      <Group justify="space-between" align="center" wrap="wrap">
+        <Title order={2}>Scheduled Recordings</Title>
+        <Group gap="sm">
+          {isAdmin && (
+            <Tooltip
+              label="Automatically retry failed downloads while the program is still inside the channel's catchup window"
+              multiline
+              w={280}
+            >
+              <Switch
+                size="sm"
+                label="Auto-retry failed downloads"
+                checked={Boolean(appSettings?.auto_retry_failed_downloads)}
+                onChange={(event) => autoRetryMutation.mutate(event.currentTarget.checked)}
+                disabled={autoRetryMutation.isPending || !appSettings}
+              />
+            </Tooltip>
+          )}
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconFileExport size={14} />}
+            onClick={handleExport}
+          >
+            Export
+          </Button>
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconFileImport size={14} />}
+            onClick={() => importInputRef.current?.click()}
+            loading={importMutation.isPending}
+          >
+            Import
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={handleImportFile}
+          />
+        </Group>
+      </Group>
 
       <Tabs
         value={['upcoming', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'upcoming'}

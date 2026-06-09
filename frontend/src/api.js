@@ -142,6 +142,8 @@ export const schedulesApi = {
   list: () => request('/schedules'),
   create: (data) => request('/schedules', { method: 'POST', body: data }),
   cancel: (id) => request(`/schedules/${id}`, { method: 'DELETE' }),
+  exportAll: () => request('/schedules/export'),
+  importDoc: (doc) => request('/schedules/import', { method: 'POST', body: doc }),
 }
 
 // VOD (On Demand)
