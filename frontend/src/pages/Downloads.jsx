@@ -212,14 +212,9 @@ function DownloadCard({
           </Group>
         </Group>
 
-        <Group gap="xs" wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            {formatAirDateTime(download, 'start', guideOffsetHours) || 'Unknown'}
-          </Text>
-          <Text size="xs" c="dimmed">
-            ({formatDuration(download.duration_minutes)})
-          </Text>
-        </Group>
+        <Text size="xs" c="dimmed">
+          Aired: {formatAirDateTime(download, 'start', guideOffsetHours) || 'Unknown'} - {formatChannelDateTime(download, 'end', guideOffsetHours, 'h:mm A') || 'Unknown'} ({formatDuration(download.duration_minutes)})
+        </Text>
 
         {isAdmin && (
           <Text size="xs" c="dimmed">
