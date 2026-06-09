@@ -206,7 +206,9 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
         )}
         {account.expiration_date && (
           <Badge variant="outline" size="sm" color={isExpired ? 'red' : 'yellow'}>
-            {isExpired ? 'Expired' : `Expires ${dayjs(account.expiration_date).format('MMM D, YYYY')}`}
+            {isExpired
+              ? `Expired ${dayjs(account.expiration_date).format('MMM D, YYYY')}`
+              : `Expires ${dayjs(account.expiration_date).format('MMM D, YYYY')}`}
           </Badge>
         )}
       </Group>
@@ -240,16 +242,20 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
             {account.last_connection_ok === true
               ? 'Connected'
               : account.last_connection_ok === false
-              ? 'Unreachable'
+              ? isExpired
+                ? 'Subscription Expired'
+                : 'Unreachable'
               : 'Not checked yet'}
             {account.last_connection_checked_at
               ? ` · ${timeAgo(account.last_connection_checked_at)}`
               : ''}
           </Text>
         </Group>
-        {account.last_connection_ok === false && account.last_connection_error && (
+        {account.last_connection_ok === false && (
           <Text size="xs" c="dimmed" ml={14}>
-            {account.last_connection_error}
+            {isExpired
+              ? 'Subscription has expired. Renew with your IPTV provider to continue.'
+              : account.last_connection_error || 'Cannot reach provider.'}
           </Text>
         )}
         {account.last_connection_ok === false && (
