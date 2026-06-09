@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Cancelled downloads now show "Download Again" instead of "Retry"
+
+**What you would notice:** In the Downloads history, a recording you intentionally cancelled used to show a button labelled **Retry**, the same as a recording that failed due to an error. This made it hard to tell at a glance whether something went wrong. Cancelled downloads now show **Download Again** to make it clear the recording stopped because you stopped it, not because something broke. Failed recordings still show **Retry** as before.
+
+**What changed:** A small label change was made to the Downloads history card. No download logic was changed.
+
+---
+
+### Improved: Settings now tells you how to save recordings when ffmpeg is not installed
+
+**What you would notice:** If you are running Mustarrd outside Docker and do not have ffmpeg installed, the warning in Settings > Post-Processing used to say to install ffmpeg manually but did not tell you what to do if you could not. It now adds: "To save recordings without converting, switch the format above to **Keep original (.ts)**." This gives you a working path forward without needing to install anything.
+
+**What changed:** One sentence was added to the ffmpeg unavailable warning in Settings > Post-Processing. No settings values or recording logic were changed.
+
+---
+
 ### Improved: ComSkip configuration fields now appear in Settings whenever ComSkip is installed
 
 **What you would notice:** On a fresh Docker install with ComSkip available, the binary path and INI path fields in Settings > Post-Processing were invisible unless you had already switched to a ComSkip recording format. This was a catch-22: you could not see or adjust the ComSkip paths without first picking a format that required them. After this fix, those fields appear whenever Mustarrd detects the ComSkip binary, regardless of which format you have selected.

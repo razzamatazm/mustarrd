@@ -94,7 +94,7 @@ Then open **http://localhost:4177** in your browser.
 - A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
 - When any scheduled recording is paused for low disk space, or when free space drops below the configured minimum, an orange banner appears at the top of every page, not just Downloads, so you are alerted no matter where you are in the app
 - The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Failed, or Cancelled entries
-- Failed and cancelled downloads show a **Retry** button directly on the card
+- Failed downloads show a **Retry** button directly on the card; cancelled downloads show a **Download Again** button
 - Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries are not cleared so you can still retry them)
 
 | Desktop | Mobile |
