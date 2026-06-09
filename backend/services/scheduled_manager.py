@@ -8,9 +8,8 @@ from models import ScheduledRecording, ScheduledStatus, AppSettings
 from services.download_builder import build_download_from_program
 from services.download_manager import download_manager
 from services.epg_service import epg_service, NoCatchupSupportError
+from services.disk_space import get_free_space_gb
 from config import settings as app_settings
-import os
-import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +115,7 @@ class ScheduledManager:
             if not ready:
                 return
 
-            free_gb = self._get_free_space_gb(download_folder)
+            free_gb = await self._get_free_space_gb(download_folder)
             # Free space is read once per tick, but recordings dispatched in
             # this tick have not written any bytes yet. Track their expected
             # size so a batch of N due schedules cannot collectively dispatch
@@ -124,6 +123,17 @@ class ScheduledManager:
             projected_used_gb = 0.0
 
             for schedule in ready:
+                if free_gb is None:
+                    # Folder missing or unreachable (e.g. NAS not mounted).
+                    # Fail safe: hold the schedule instead of recording onto
+                    # whatever disk happens to back the path right now.
+                    schedule.status = ScheduledStatus.PAUSED_LOW_SPACE.value
+                    schedule.status_message = (
+                        f"Download folder {download_folder} is missing or "
+                        f"unreachable. Waiting for it to become available."
+                    )
+                    schedule.updated_at = datetime.utcnow()
+                    continue
                 available_gb = free_gb - projected_used_gb
                 if available_gb < min_free_gb:
                     schedule.status = ScheduledStatus.PAUSED_LOW_SPACE.value
@@ -222,11 +232,16 @@ class ScheduledManager:
         minutes += int(schedule.post_padding_minutes or 0)
         return max(minutes, 0) / 60.0 * ESTIMATED_RECORDING_GB_PER_HOUR
 
-    def _get_free_space_gb(self, path: str) -> float:
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
-        usage = shutil.disk_usage(path)
-        return usage.free / (1024 ** 3)
+    async def _get_free_space_gb(self, path: str) -> float | None:
+        """Read-only free-space probe; None when the folder is missing or unreachable.
+
+        Must never create the folder: when a NAS mount is missing, os.makedirs
+        would silently create the path on the container's root filesystem and
+        the check would pass against the wrong disk, filling the root disk.
+        The blocking stat runs off the event loop with a timeout so a hung
+        mount cannot stall the scheduler or anything else on the loop.
+        """
+        return await get_free_space_gb(path)
 
     def _should_log_loop_error(self, cooldown_seconds: int = 60) -> bool:
         now = datetime.utcnow()

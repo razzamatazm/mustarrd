@@ -673,8 +673,9 @@ class DownloadManager:
                     if settings and settings.min_free_space_gb is not None
                     else 25
                 ) or 0
-                if min_free_gb > 0 and os.path.exists(download_folder):
-                    free_gb = shutil.disk_usage(download_folder).free / (1024 ** 3)
+                if min_free_gb > 0 and await asyncio.to_thread(os.path.exists, download_folder):
+                    usage = await asyncio.to_thread(shutil.disk_usage, download_folder)
+                    free_gb = usage.free / (1024 ** 3)
                     if free_gb < min_free_gb:
                         download_by_id = {d.id: d for d in downloads}
                         for dl_id in list(recovered_download_ids):
@@ -1444,7 +1445,8 @@ class DownloadManager:
             return
         folder = os.path.dirname(output_path) or "."
         try:
-            free_bytes = shutil.disk_usage(folder).free
+            usage = await asyncio.to_thread(shutil.disk_usage, folder)
+            free_bytes = usage.free
         except OSError:
             # Cannot stat the folder; let the download proceed and fail
             # naturally (e.g. ENOSPC) if space truly runs out.
