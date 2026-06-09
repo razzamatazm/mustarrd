@@ -322,6 +322,14 @@ class EPGIngestManager:
             else:
                 await self._log("XMLTV response was empty.", level="warning", account=account)
 
+            # Pre-scan <channel> elements so programmes are matched regardless
+            # of element order, and learn whether the document parses cleanly
+            # before doing anything destructive to the existing guide rows.
+            xmltv_to_stream: Dict[str, list] = {}
+            xmltv_parse_ok = True
+            if xmltv_bytes:
+                xmltv_to_stream, xmltv_parse_ok = self._scan_channel_map(xmltv_bytes, channel_maps)
+
             now_utc = datetime.now(timezone.utc)
             earliest_start_by_channel: dict[str, datetime] = {}
 
@@ -395,6 +403,7 @@ class EPGIngestManager:
                         xmltv_bytes,
                         channel_maps,
                         now_utc,
+                        xmltv_to_stream=xmltv_to_stream,
                     )
 
                     batch: list[dict] = []
@@ -567,19 +576,71 @@ class EPGIngestManager:
             return [str(v) for v in value]
         return [str(value)]
 
+    def _scan_channel_map(self, xmltv_bytes: bytes, channel_maps: dict) -> tuple[Dict[str, list], bool]:
+        """First pass over the XMLTV document.
+
+        Builds the complete xmltv-id -> stream-ids mapping from <channel>
+        elements before any <programme> is processed, so programmes are
+        matched regardless of element order (the XMLTV format does not
+        guarantee that channel definitions precede programmes).
+
+        Also reports whether the document parsed to the end without error,
+        so callers can avoid destructive operations (force-delete) on a
+        guide that would only be partially re-imported.
+        """
+        stream_by_name = channel_maps["stream_by_name"]
+        stream_info = channel_maps["stream_info"]
+        xmltv_to_stream: Dict[str, list] = {
+            key: self._as_stream_ids(value)
+            for key, value in channel_maps["stream_by_xmltv_id"].items()
+        }
+        parse_ok = True
+        try:
+            sanitized = io.BytesIO(_sanitize_html_entities(xmltv_bytes))
+            for _, elem in ET.iterparse(sanitized, events=("end",)):
+                local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if local_tag == "channel":
+                    xmltv_id = elem.get("id")
+                    display_name = self._extract_text(elem, "display-name")
+                    if xmltv_id and xmltv_id not in xmltv_to_stream:
+                        if xmltv_id in stream_info:
+                            xmltv_to_stream[xmltv_id] = [xmltv_id]
+                        elif display_name:
+                            name_key = self._normalize_name(display_name)
+                            stream_id = stream_by_name.get(name_key)
+                            if stream_id:
+                                xmltv_to_stream[xmltv_id] = [stream_id]
+                # Only clear top-level elements: clearing every end event would
+                # wipe child text (e.g. <display-name>) before its parent
+                # <channel> element is processed.
+                if local_tag in ("channel", "programme"):
+                    elem.clear()
+        except ET.ParseError as exc:
+            parse_ok = False
+            logger.warning(
+                "XMLTV channel scan stopped early; document is truncated or malformed. (%s)",
+                exc,
+            )
+        return xmltv_to_stream, parse_ok
+
     def _iter_programs(
         self,
         xmltv_bytes: bytes,
         channel_maps: dict,
         now_utc: datetime,
+        xmltv_to_stream: Optional[Dict[str, list]] = None,
     ) -> Iterable[dict]:
-        stream_by_xmltv_id = channel_maps["stream_by_xmltv_id"]
         stream_by_name = channel_maps["stream_by_name"]
         stream_info = channel_maps["stream_info"]
-        xmltv_to_stream: Dict[str, list] = {
-            key: self._as_stream_ids(value)
-            for key, value in stream_by_xmltv_id.items()
-        }
+        if xmltv_to_stream is None:
+            # No prebuilt mapping: pre-scan the document so programmes that
+            # appear before their <channel> element are still matched.
+            xmltv_to_stream, _parse_ok = self._scan_channel_map(xmltv_bytes, channel_maps)
+        else:
+            xmltv_to_stream = {
+                key: self._as_stream_ids(value)
+                for key, value in xmltv_to_stream.items()
+            }
 
         xmltv_bytes = _sanitize_html_entities(xmltv_bytes)
 
