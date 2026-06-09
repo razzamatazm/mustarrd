@@ -1049,7 +1049,8 @@ class DownloadManager:
             select(ScheduledRecording).where(ScheduledRecording.download_id == download_id)
         )
         schedule = result.scalar_one_or_none()
-        if schedule and schedule.status != new_status:
+        _protected = {ScheduledStatus.CANCELLED.value, ScheduledStatus.COMPLETED.value}
+        if schedule and schedule.status != new_status and schedule.status not in _protected:
             schedule.status = new_status
             schedule.status_message = None
             schedule.updated_at = datetime.utcnow()
