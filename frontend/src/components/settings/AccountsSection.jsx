@@ -515,12 +515,15 @@ export default function AccountsSection({ showTitle = true }) {
       <Flex
         direction={{ base: 'column', sm: 'row' }}
         justify={{ sm: 'space-between' }}
-        align={{ sm: 'center' }}
+        align={{ sm: 'flex-start' }}
         gap="xs"
       >
-        {showTitle ? <Title order={2}>Accounts</Title> : <Title order={4}>Accounts</Title>}
+        <Stack gap={2}>
+          {showTitle ? <Title order={2}>Accounts</Title> : <Title order={4}>Accounts</Title>}
+          <Text size="sm" c="dimmed">Connect your IPTV providers. Mustarrd reads your channel list and program guide from these accounts.</Text>
+        </Stack>
         {accounts?.length > 0 && (
-          <Group gap="xs">
+          <Group gap="xs" style={{ flexShrink: 0 }}>
             <Button
               variant="light"
               color="orange"
