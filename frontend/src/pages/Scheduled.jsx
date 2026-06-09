@@ -104,9 +104,9 @@ function ScheduleCard({
   const isActive = activeStatuses.includes(schedule.status)
   const isTerminal = terminalStatuses.includes(schedule.status)
   const canDelete = !isActive
-  const startHasPassed = schedule.start_timestamp
-    ? schedule.start_timestamp < Date.now() / 1000
-    : isTerminal
+  const startHasPassed = isTerminal
+    ? true
+    : (schedule.start_timestamp ? schedule.start_timestamp < Date.now() / 1000 : false)
 
   const startTime = formatAirDateTime(schedule, 'start', guideOffsetHours)
   const endTime = formatChannelDateTime(schedule, 'end', guideOffsetHours, 'h:mm A')
