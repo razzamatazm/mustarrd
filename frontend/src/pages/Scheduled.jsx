@@ -31,11 +31,12 @@ import {
   IconPlayerPlay,
   IconFolderOpen,
   IconFilter,
+  IconRefresh,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 
-import { accountsApi, schedulesApi } from '../api'
+import { accountsApi, downloadsApi, schedulesApi } from '../api'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 
 dayjs.extend(duration)
@@ -97,6 +98,7 @@ function ScheduleCard({
   onDelete,
   onOpenFileLocation,
   onPlayFile,
+  onRetryDownload,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const activeStatuses = ['scheduled', 'queued', 'downloading', 'processing', 'paused_low_space']
@@ -182,6 +184,18 @@ function ScheduleCard({
           <Alert color="red" variant="light" p="xs">
             <Text size="xs">{renderErrorMessage(schedule.download_error_message)}</Text>
           </Alert>
+        )}
+        {schedule.download_status === 'failed' && schedule.download_id && (
+          <Group>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconRefresh size={14} />}
+              onClick={() => onRetryDownload(schedule)}
+            >
+              Retry
+            </Button>
+          </Group>
         )}
 
         {schedule.download_status === 'completed' && schedule.download_id && (
@@ -306,6 +320,26 @@ export default function Scheduled() {
         title: 'Schedule Deleted',
         message: 'The schedule has been removed',
         color: 'green',
+      })
+    },
+  })
+
+  const retryDownloadMutation = useMutation({
+    mutationFn: (schedule) => downloadsApi.retry(schedule.download_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['schedules'] })
+      queryClient.invalidateQueries({ queryKey: ['downloads'] })
+      notifications.show({
+        title: 'Download Queued',
+        message: 'The download has been re-queued.',
+        color: 'green',
+      })
+    },
+    onError: (error) => {
+      notifications.show({
+        title: 'Retry Failed',
+        message: error.message,
+        color: 'red',
       })
     },
   })
@@ -438,6 +472,7 @@ export default function Scheduled() {
                   onDelete={(s) => deleteMutation.mutate(s)}
                   onOpenFileLocation={handleOpenFileLocation}
                   onPlayFile={handlePlayFile}
+                  onRetryDownload={(s) => retryDownloadMutation.mutate(s)}
                 />
               ))}
             </Stack>
@@ -487,6 +522,7 @@ export default function Scheduled() {
                   onDelete={(s) => deleteMutation.mutate(s)}
                   onOpenFileLocation={handleOpenFileLocation}
                   onPlayFile={handlePlayFile}
+                  onRetryDownload={(s) => retryDownloadMutation.mutate(s)}
                 />
               ))}
             </Stack>
