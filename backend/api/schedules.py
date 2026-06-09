@@ -16,6 +16,9 @@ from services.file_namer import file_namer
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+SCHEDULE_EXPORT_FORMAT = "mustarrd-schedules"
+SCHEDULE_EXPORT_VERSION = 1
+
 
 class ScheduleCreate(BaseModel):
     account_id: int
@@ -25,6 +28,33 @@ class ScheduleCreate(BaseModel):
     custom_filename: Optional[str] = None
     pre_padding_minutes: Optional[conint(ge=0, le=120)] = 0
     post_padding_minutes: Optional[conint(ge=0, le=120)] = 0
+
+
+class ScheduleExportItem(BaseModel):
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    channel_id: str
+    channel_name: str
+    channel_category_name: Optional[str] = None
+    program_id: Optional[str] = None
+    epg_id: Optional[str] = None
+    program_title: str = "Unknown"
+    program_description: Optional[str] = None
+    program_start: Optional[str] = None
+    program_end: Optional[str] = None
+    start_timestamp: Optional[int] = 0
+    stop_timestamp: Optional[int] = 0
+    provider_start: Optional[str] = None
+    provider_stop: Optional[str] = None
+    pre_padding_minutes: Optional[conint(ge=0, le=120)] = 0
+    post_padding_minutes: Optional[conint(ge=0, le=120)] = 0
+    custom_filename: Optional[str] = None
+
+
+class ScheduleImportDocument(BaseModel):
+    format: Optional[str] = None
+    version: int
+    schedules: list[ScheduleExportItem]
 
 
 def _coerce_ts(value) -> int:
@@ -135,12 +165,16 @@ async def list_schedules(
     return response
 
 
-@router.post("")
-async def create_schedule(
+async def _create_schedule_record(
     data: ScheduleCreate,
-    auth: AuthContext = Depends(require_admin_or_download_user),
-    session: AsyncSession = Depends(get_session)
-):
+    auth: AuthContext,
+    session: AsyncSession,
+) -> ScheduledRecording:
+    """Validate and persist a new schedule (shared by create and import).
+
+    Raises HTTPException: 404 unknown account, 400 invalid/already-ended
+    program, 409 duplicate of an active schedule.
+    """
     result = await session.execute(
         select(XtreamAccount).where(XtreamAccount.id == data.account_id)
     )
@@ -236,7 +270,143 @@ async def create_schedule(
     await session.commit()
     await session.refresh(schedule)
 
+    return schedule
+
+
+@router.post("")
+async def create_schedule(
+    data: ScheduleCreate,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session)
+):
+    schedule = await _create_schedule_record(data, auth, session)
     return schedule.to_dict()
+
+
+@router.get("/export")
+async def export_schedules(
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Export schedules as a versioned JSON document for backup/restore.
+
+    Non-admins only get their own schedules. Internal state (download_id,
+    status, timestamps) is excluded; only the fields needed to recreate the
+    schedules via the import endpoint are included.
+    """
+    query = select(ScheduledRecording).order_by(ScheduledRecording.program_start.asc())
+    if not auth.is_admin:
+        query = query.where(ScheduledRecording.requested_by_user_id == auth.user_id)
+    result = await session.execute(query)
+    schedules = result.scalars().all()
+
+    accounts_result = await session.execute(
+        select(XtreamAccount.id, XtreamAccount.name)
+    )
+    account_names = {row.id: row.name for row in accounts_result}
+
+    items = []
+    for schedule in schedules:
+        items.append({
+            "account_id": schedule.account_id,
+            "account_name": account_names.get(schedule.account_id),
+            "channel_id": schedule.channel_id,
+            "channel_name": schedule.channel_name,
+            "channel_category_name": schedule.channel_category_name,
+            "program_id": schedule.program_id,
+            "epg_id": schedule.epg_id,
+            "program_title": schedule.program_title,
+            "program_description": schedule.program_description,
+            "program_start": schedule.program_start.isoformat() if schedule.program_start else None,
+            "program_end": schedule.program_end.isoformat() if schedule.program_end else None,
+            "start_timestamp": schedule.start_timestamp,
+            "stop_timestamp": schedule.stop_timestamp,
+            "provider_start": schedule.provider_start,
+            "provider_stop": schedule.provider_stop,
+            "pre_padding_minutes": schedule.pre_padding_minutes,
+            "post_padding_minutes": schedule.post_padding_minutes,
+            "custom_filename": schedule.custom_filename,
+        })
+
+    return {
+        "format": SCHEDULE_EXPORT_FORMAT,
+        "version": SCHEDULE_EXPORT_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "schedules": items,
+    }
+
+
+@router.post("/import")
+async def import_schedules(
+    doc: ScheduleImportDocument,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Recreate schedules from an exported document.
+
+    Each entry goes through the normal schedule creation path, so duplicates,
+    already-ended programs and unknown accounts are skipped and reported
+    instead of failing the whole import.
+    """
+    if doc.version != SCHEDULE_EXPORT_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported schedule export version {doc.version}; "
+                f"this server supports version {SCHEDULE_EXPORT_VERSION}."
+            ),
+        )
+
+    accounts_result = await session.execute(select(XtreamAccount))
+    accounts = accounts_result.scalars().all()
+    accounts_by_id = {a.id: a for a in accounts}
+    accounts_by_name = {a.name: a for a in accounts}
+
+    created = 0
+    skipped = []
+    for item in doc.schedules:
+        account = accounts_by_id.get(item.account_id) if item.account_id is not None else None
+        if account is None and item.account_name:
+            account = accounts_by_name.get(item.account_name)
+        if account is None:
+            skipped.append({"reason": "Account not found", "title": item.program_title})
+            continue
+
+        data = ScheduleCreate(
+            account_id=account.id,
+            channel_id=item.channel_id,
+            channel_name=item.channel_name,
+            program={
+                "title": item.program_title,
+                "description": item.program_description,
+                "start_time": item.program_start,
+                "end_time": item.program_end,
+                "start_timestamp": item.start_timestamp,
+                "stop_timestamp": item.stop_timestamp,
+                "provider_start": item.provider_start,
+                "provider_stop": item.provider_stop,
+                "epg_id": item.epg_id,
+                "id": item.program_id,
+                "category": item.channel_category_name,
+            },
+            custom_filename=item.custom_filename,
+            pre_padding_minutes=item.pre_padding_minutes or 0,
+            post_padding_minutes=item.post_padding_minutes or 0,
+        )
+        try:
+            await _create_schedule_record(data, auth, session)
+            created += 1
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            if exc.status_code == 409:
+                reason = "Already scheduled"
+            elif "already ended" in detail:
+                reason = "Program already ended"
+            else:
+                reason = detail
+            skipped.append({"reason": reason, "title": item.program_title})
+
+    return {"created": created, "skipped": skipped}
 
 
 @router.delete("/{schedule_id}")
