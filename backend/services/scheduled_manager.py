@@ -140,10 +140,12 @@ class ScheduledManager:
                     schedule.status = ScheduledStatus.QUEUED.value
                     schedule.status_message = None
                     schedule.updated_at = datetime.utcnow()
+                    await session.commit()
                 except Exception as exc:
                     schedule.status = ScheduledStatus.FAILED.value
                     schedule.status_message = str(exc)
                     schedule.updated_at = datetime.utcnow()
+                    await session.commit()
 
             await session.commit()
 
