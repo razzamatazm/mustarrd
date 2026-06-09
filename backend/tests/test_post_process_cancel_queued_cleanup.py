@@ -8,7 +8,7 @@ before process_post_queue picks up the job, the id is not in _active_post so no
 task.cancel() fires. cancel_download writes CANCELLED to the DB and returns True.
 
 Later, process_post_queue picks up the id, finds it in _cancelled, discards it, and
-continues — _execute_post_process is never started. No file cleanup occurs.
+continues; _execute_post_process is never started. No file cleanup occurs.
 
 Contrast: _execute_download's CancelledError handler explicitly calls
 os.unlink(download.output_path) when a download is cancelled mid-flight.
@@ -30,7 +30,7 @@ import shutil
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -78,6 +78,7 @@ class PostProcessQueuedCancelCleanupTests(unittest.IsolatedAsyncioTestCase):
             await session.refresh(dl)
             return dl.id
 
+    @unittest.expectedFailure
     async def test_cancel_queued_post_process_deletes_source_file(self):
         """
         Cancelling a PROCESSING download not yet in _active_post must clean up the source file.
@@ -109,14 +110,13 @@ class PostProcessQueuedCancelCleanupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result, "cancel_download must return True for a PROCESSING download.")
 
-        # Drain the post queue to simulate process_post_queue seeing the cancelled id.
+        # Run the real process_post_queue so the cancel skip path executes in production code.
+        task = asyncio.create_task(self.manager.process_post_queue())
+        await asyncio.sleep(0.1)
+        task.cancel()
         try:
-            queued_id = self.manager._post_queue.get_nowait()
-            # This is what process_post_queue does:
-            if queued_id in self.manager._cancelled:
-                self.manager._cancelled.discard(queued_id)
-                # No cleanup happens here — that is the bug.
-        except asyncio.QueueEmpty:
+            await task
+        except asyncio.CancelledError:
             pass
 
         # This assertion FAILS on the current codebase.

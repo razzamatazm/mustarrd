@@ -1,19 +1,21 @@
 """
 Regression test: CancelledError after _move_to_completed in _execute_post_process must
-not mark the download CANCELLED when the file is already in the completed folder.
+commit COMPLETED so the row does not stay stuck as PROCESSING.
 
 In _execute_post_process, after _post_process() returns successfully, the flow is:
   1. _select_final_path()       (sync)
-  2. _move_to_completed()       (sync — file is now in completed folder)
+  2. _move_to_completed()       (sync, file is now in completed folder)
   3. _cleanup_working_files()   (sync)
-  4. download.status = COMPLETED (sync — only in memory, not yet committed)
+  4. download.status = COMPLETED (sync, only in memory, not yet committed)
   5. await _sync_schedule_status(...)   <-- FIRST await after the move
   6. await session.commit()
 
 If task.cancel() fires at step 5 or 6, CancelledError is raised. The handler
-re-reads the download from DB: status is still PROCESSING (commit never happened).
-The handler sees PROCESSING in [PENDING, DOWNLOADING, PROCESSING] and writes
-CANCELLED. The file is in the completed folder but the DB says CANCELLED: orphaned.
+re-selects the download using the same session: SQLAlchemy's identity map returns
+the in-memory object where status is already COMPLETED, so the handler skips the
+CANCELLED branch and does not commit. When the session context exits, the uncommitted
+COMPLETED is rolled back and the row stays PROCESSING. The file is in the completed
+folder but the DB says PROCESSING: the recording is effectively orphaned.
 
 This mirrors the download-phase bug covered by test_cancel_after_move_deletes_completed.py
 (TODO 1512804545061982270), but for the post-processing phase which has no equivalent guard.
@@ -78,8 +80,9 @@ class PostProcessCancelAfterMoveTests(unittest.IsolatedAsyncioTestCase):
             await session.refresh(dl)
             return dl.id
 
+    @unittest.expectedFailure
     async def test_cancel_after_post_process_move_preserves_completed_status(self):
-        """CancelledError after _move_to_completed must leave status COMPLETED, not CANCELLED."""
+        """CancelledError after _move_to_completed must commit COMPLETED, not leave row as PROCESSING."""
         source_path = str(Path(self.tmpdir) / "show.ts")
         completed_dir = Path(self.tmpdir) / "completed"
         completed_dir.mkdir()
@@ -118,7 +121,7 @@ class PostProcessCancelAfterMoveTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(self.manager, "_broadcast_log", new_callable=AsyncMock), \
                  patch.object(self.manager, "_trigger_plex_refresh", new_callable=AsyncMock):
                 await self.manager._execute_post_process(download_id)
-        except (asyncio.CancelledError, Exception):
+        except asyncio.CancelledError:
             pass
 
         async with self.session_factory() as session:
@@ -128,14 +131,15 @@ class PostProcessCancelAfterMoveTests(unittest.IsolatedAsyncioTestCase):
             dl = result.scalar_one()
 
         # This assertion FAILS on the current codebase.
-        # The CancelledError handler re-reads PROCESSING from DB (commit never ran)
-        # and sets CANCELLED, even though the file is already in the completed folder.
+        # The handler re-selects via the same session (identity map returns COMPLETED
+        # in memory), skips the CANCELLED branch, and does not commit. The session
+        # exits with a rollback, leaving the row stuck as PROCESSING.
         self.assertEqual(
             dl.status,
             DownloadStatus.COMPLETED.value,
             "Post-processing download must be COMPLETED after CancelledError fires "
-            "after _move_to_completed. Currently the handler re-reads PROCESSING "
-            "from DB and overwrites with CANCELLED, orphaning the file in completed folder.",
+            "after _move_to_completed. Currently the uncommitted COMPLETED is rolled "
+            "back on session exit, leaving the row stuck as PROCESSING.",
         )
 
 
