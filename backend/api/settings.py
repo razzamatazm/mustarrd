@@ -4,8 +4,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Literal, Optional
+import asyncio
+import errno
 import logging
 import os
+import tempfile
 
 from auth import require_admin, require_authenticated, AuthContext
 from database import get_session
@@ -26,6 +29,44 @@ from services.post_processor import post_processor
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+def _probe_folder_writable(path: str) -> dict:
+    """Check that a recording folder exists and is writable.
+
+    The write test creates and immediately deletes a hidden temp file in the
+    folder, so a folder that merely *lists* fine but sits on a disconnected
+    mount, a read-only filesystem, or a permission-restricted share is reported
+    with a concrete reason instead of failing silently at download time.
+    """
+    info = {"path": path, "exists": False, "writable": False, "error": None}
+    if not path:
+        info["error"] = "No folder is configured."
+        return info
+    if not os.path.isdir(os.path.expanduser(path)):
+        info["error"] = (
+            "Folder does not exist. If it is on an external drive or network "
+            "share, check that the mount is connected."
+        )
+        return info
+    info["exists"] = True
+    try:
+        fd, probe_path = tempfile.mkstemp(
+            prefix=".mustarrd-write-test-", dir=os.path.expanduser(path)
+        )
+        os.close(fd)
+        os.unlink(probe_path)
+        info["writable"] = True
+    except PermissionError:
+        info["error"] = "No permission to write to this folder."
+    except OSError as exc:
+        if exc.errno == errno.EROFS:
+            info["error"] = "The folder is on a read-only filesystem."
+        elif exc.errno == errno.ENOSPC:
+            info["error"] = "The disk is full."
+        else:
+            info["error"] = f"Write test failed: {exc.strerror or exc}"
+    return info
 
 
 def _paths_match(path_a: Optional[str], path_b: Optional[str]) -> bool:
@@ -259,6 +300,26 @@ async def update_settings(
         epg_service.clear_cache()
 
     return settings.to_dict()
+
+
+@router.get("/folders/status")
+async def get_folders_status(
+    _admin: None = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Report the resolved recording folders with existence and write-test results.
+
+    Uses the same folder resolution as the download pipeline so the reported
+    paths are exactly where recordings will be written.
+    """
+    result = await session.execute(select(AppSettings))
+    settings_row = result.scalar_one_or_none()
+    download_folder = download_manager._resolve_download_folder(settings_row)
+    completed_folder = download_manager._resolve_completed_folder(settings_row)
+    return {
+        "download_folder": await asyncio.to_thread(_probe_folder_writable, download_folder),
+        "completed_folder": await asyncio.to_thread(_probe_folder_writable, completed_folder),
+    }
 
 
 @router.get("/templates")

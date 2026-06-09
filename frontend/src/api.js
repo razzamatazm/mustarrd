@@ -175,6 +175,7 @@ export const settingsApi = {
   update: (data) => request('/settings', { method: 'PUT', body: data }),
   getTemplates: () => request('/settings/templates'),
   getTools: () => request('/settings/tools'),
+  getFoldersStatus: () => request('/settings/folders/status'),
 }
 
 // Authentication
