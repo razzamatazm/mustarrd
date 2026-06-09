@@ -632,6 +632,16 @@ class EPGIngestManager:
                 return gzip.decompress(data)
             except (gzip.BadGzipFile, EOFError, OSError, zlib.error):
                 return b""
+        # Try zlib-framed deflate (RFC 1950), then raw deflate (RFC 1951).
+        # Some providers send Content-Encoding: deflate without the gzip magic bytes.
+        try:
+            return zlib.decompress(data)
+        except zlib.error:
+            pass
+        try:
+            return zlib.decompress(data, -15)
+        except zlib.error:
+            pass
         return data
 
     def _ensure_aware(self, value: Optional[datetime]) -> Optional[datetime]:
