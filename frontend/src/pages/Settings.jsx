@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { UNSAFE_NavigationContext, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   Title,
@@ -57,17 +57,44 @@ function isPlexNotConnectedError(message) {
 }
 
 function TemplateSection({ label, template, variables, example, renderedExample, onChange }) {
+  const inputRef = useRef(null)
+
+  function insertVariable(varName) {
+    const insertion = `{${varName}}`
+    const input = inputRef.current
+    if (input) {
+      const start = input.selectionStart ?? template.length
+      const end = input.selectionEnd ?? template.length
+      const newVal = template.slice(0, start) + insertion + template.slice(end)
+      onChange(newVal)
+      requestAnimationFrame(() => {
+        input.focus()
+        const pos = start + insertion.length
+        input.setSelectionRange(pos, pos)
+      })
+    } else {
+      onChange(template + insertion)
+    }
+  }
+
   return (
     <Stack gap="xs">
       <TextInput
+        ref={inputRef}
         label={label}
         value={template}
         onChange={(e) => onChange(e.target.value)}
         placeholder={example}
       />
-      <Group gap="xs" wrap="wrap">
+      <Group gap="xs" wrap="wrap" align="center">
+        <Text size="xs" c="dimmed">Variables:</Text>
         {variables.map((v) => (
-          <Code key={v.name} style={{ cursor: 'help' }} title={v.description}>
+          <Code
+            key={v.name}
+            style={{ cursor: 'pointer' }}
+            title={v.description}
+            onClick={() => insertVariable(v.name)}
+          >
             {`{${v.name}}`}
           </Code>
         ))}
