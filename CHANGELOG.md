@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Browse EPG right panel now shows a clear error when your provider cannot be reached
+
+**What you would notice:** In Browse EPG, when your IPTV provider is temporarily unreachable, the right panel (where the channel guide appears after you select a channel) used to show a plain video icon and the message "Channel guide will appear here once your provider is connected." That message implied your provider was not set up yet, which was confusing if you had already configured it. After this fix, the right panel shows a red alert icon and the message "Could not reach your provider." Admins see a link to Settings > Accounts so you can check your credentials without leaving the page. Non-admin users see a prompt to contact their administrator. Both panels in Browse EPG now give the same clear signal when the provider is unreachable.
+
+**What changed:** The right panel in Browse EPG was updated to detect when the channel list fails to load and show an appropriate error instead of the generic placeholder message used when no provider has been configured. Frontend only, no backend or settings changes.
+
+---
+
 ### Improved: Settings now warns you when your program guide sync fails
 
 **What you would notice:** The Settings > Guide section used to show "Last synced: Today at 5:55 AM" even when your program guide was failing to update. If your IPTV provider became unreachable or your credentials expired, you would see a reassuring timestamp with no hint that your guide was going stale. After this fix, the label changes to "Last sync attempt" and an orange alert appears with a direct link to the Accounts section whenever a real sync failure occurs. If the sync was successful, the section continues to show the normal "Last synced" timestamp with no alert.
