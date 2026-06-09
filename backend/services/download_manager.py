@@ -1129,7 +1129,30 @@ class DownloadManager:
             except OSError:
                 pass
             raise
+        if download_folder:
+            # Series episodes live in Show/Season subfolders of the download
+            # folder; remove any now-empty parents so they don't accumulate.
+            self._prune_empty_parent_dirs(os.path.dirname(path), download_folder)
         return dest
+
+    def _prune_empty_parent_dirs(self, start_dir: str, root: str) -> None:
+        """Remove empty directories from *start_dir* up to, but never including, *root*."""
+        try:
+            root_real = os.path.realpath(os.path.abspath(root))
+            current = os.path.realpath(os.path.abspath(start_dir))
+            while current != root_real and self._path_is_under(current, root):
+                try:
+                    if not os.path.isdir(current) or os.listdir(current):
+                        break
+                    os.rmdir(current)
+                except OSError:
+                    break
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+        except Exception:
+            pass
 
     def _cleanup_working_files(self, original_path: str, completed_path: str, keep_logs: bool, delete_original: bool = True) -> None:
         try:
