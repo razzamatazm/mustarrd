@@ -98,6 +98,8 @@ export const channelsApi = {
     return request(`/accounts/${accountId}/channels?${params}`)
   },
   getChannel: (accountId, channelId) => request(`/accounts/${accountId}/channels/${channelId}`),
+  toggleStar: (accountId, channelId) =>
+    request(`/accounts/${accountId}/channels/${channelId}/star`, { method: 'POST' }),
   getEpg: (accountId, channelId, daysBack = 7, fresh = false) =>
     request(
       `/accounts/${accountId}/channels/${channelId}/epg?days_back=${daysBack}&fresh=${fresh ? 'true' : 'false'}`

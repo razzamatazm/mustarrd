@@ -8,6 +8,7 @@ import {
   Stack,
   TextInput,
   ScrollArea,
+  ActionIcon,
   Badge,
   Loader,
   Box,
@@ -26,6 +27,8 @@ import {
   IconClock,
   IconPlayerPlay,
   IconChevronLeft,
+  IconStar,
+  IconStarFilled,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 
@@ -43,14 +46,16 @@ import {
   getNowUtc,
 } from '../utils/channelTime'
 
-function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading, isError, isAdmin }) {
+function ChannelList({ channels, selectedChannel, onSelectChannel, onToggleStar, isLoading, isError, isAdmin }) {
   const [search, setSearch] = useState('')
 
   const filteredChannels = useMemo(() => {
     if (!channels) return []
-    if (!search) return channels
+    // Starred channels float to the top; provider order is kept otherwise
+    const sorted = [...channels].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0))
+    if (!search) return sorted
     const searchLower = search.toLowerCase()
-    return channels.filter((ch) => ch.name?.toLowerCase().includes(searchLower))
+    return sorted.filter((ch) => ch.name?.toLowerCase().includes(searchLower))
   }, [channels, search])
 
   if (isLoading) {
@@ -133,6 +138,19 @@ function ChannelList({ channels, selectedChannel, onSelectChannel, isLoading, is
                     </Text>
                   )}
                 </Stack>
+                <ActionIcon
+                  variant="subtle"
+                  color={channel.starred ? 'yellow' : 'gray'}
+                  size="sm"
+                  aria-label={channel.starred ? 'Unstar channel' : 'Star channel'}
+                  title={channel.starred ? 'Unstar channel' : 'Star channel'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleStar?.(channel)
+                  }}
+                >
+                  {channel.starred ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                </ActionIcon>
               </Group>
             </Card>
           ))}
@@ -416,6 +434,27 @@ export default function Browse() {
     enabled: !!selectedAccountId,
     retry: false,
   })
+
+  const toggleStarMutation = useMutation({
+    mutationFn: (channel) => channelsApi.toggleStar(selectedAccountId, channel.stream_id),
+    onSuccess: (data, channel) => {
+      queryClient.setQueryData(['channels', selectedAccountId], (old) =>
+        old?.map((ch) =>
+          ch.stream_id?.toString() === channel.stream_id?.toString()
+            ? { ...ch, starred: data.starred }
+            : ch
+        )
+      )
+    },
+  })
+
+  const handleToggleStar = useCallback(
+    (channel) => {
+      if (!selectedAccountId || toggleStarMutation.isPending) return
+      toggleStarMutation.mutate(channel)
+    },
+    [selectedAccountId, toggleStarMutation]
+  )
 
   // Fetch EPG for selected channel, going back as far as its catchup archive allows
   const selectedChannelArchiveDays = getChannelArchiveDays(selectedChannel)
@@ -957,6 +996,7 @@ export default function Browse() {
                     channels={channels}
                     selectedChannel={selectedChannel}
                     onSelectChannel={handleSelectChannel}
+                    onToggleStar={handleToggleStar}
                     isLoading={channelsLoading}
                     isError={channelsIsError}
                     isAdmin={authStatus?.is_admin}
@@ -990,6 +1030,7 @@ export default function Browse() {
                     channels={channels}
                     selectedChannel={selectedChannel}
                     onSelectChannel={handleSelectChannel}
+                    onToggleStar={handleToggleStar}
                     isLoading={channelsLoading}
                     isError={channelsIsError}
                     isAdmin={authStatus?.is_admin}

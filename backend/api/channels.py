@@ -1,12 +1,13 @@
+import logging
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Optional
-import logging
 
 from auth import require_admin_or_download_user, AuthContext
 from database import get_session
-from models import XtreamAccount
+from models import StarredChannel, XtreamAccount
 from services.epg_service import epg_service, NoCatchupSupportError
 from services.account_credentials import resolve_account_password_with_migration
 from services.xtream_client import XtreamClient
@@ -48,7 +49,7 @@ async def get_channels(
     account_id: int,
     category_id: Optional[str] = Query(None),
     catchup_only: bool = Query(True, description="Only show channels with catchup/timeshift support"),
-    _admin: None = Depends(require_admin_or_download_user),
+    auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Get channels for an account, optionally filtered by category."""
@@ -61,6 +62,14 @@ async def get_channels(
         raise HTTPException(status_code=404, detail="Account not found")
 
     try:
+        starred_result = await session.execute(
+            select(StarredChannel.channel_id).where(
+                StarredChannel.user_id == auth.user_id,
+                StarredChannel.account_id == account_id,
+            )
+        )
+        starred_ids = set(starred_result.scalars().all())
+
         password = await resolve_account_password_with_migration(session, account)
         client = XtreamClient(account.server_url, account.username, password)
         try:
@@ -73,9 +82,13 @@ async def get_channels(
                     if _channel_has_tv_archive(ch) and epg_service.archive_days_for_channel(ch) > 0
                 ]
 
-            # Add archive duration info
+            # Add archive duration info and the per-user starred flag
             for ch in channels:
                 ch["tv_archive_duration"] = epg_service.archive_days_for_channel(ch)
+                ch["starred"] = str(ch.get("stream_id")) in starred_ids
+
+            # Starred channels float to the top; provider order is kept otherwise
+            channels.sort(key=lambda ch: not ch["starred"])
 
             return channels
         finally:
@@ -88,6 +101,48 @@ async def get_channels(
             category_id,
         )
         raise HTTPException(status_code=400, detail="Failed to load channels from provider")
+
+
+@router.post("/accounts/{account_id}/channels/{channel_id}/star")
+async def toggle_channel_star(
+    account_id: int,
+    channel_id: str,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Toggle the requesting user's star on a channel."""
+    result = await session.execute(
+        select(XtreamAccount).where(XtreamAccount.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    channel_key = str(channel_id)
+    existing_result = await session.execute(
+        select(StarredChannel).where(
+            StarredChannel.user_id == auth.user_id,
+            StarredChannel.account_id == account_id,
+            StarredChannel.channel_id == channel_key,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if existing:
+        await session.delete(existing)
+        await session.commit()
+        return {"starred": False}
+
+    session.add(
+        StarredChannel(
+            user_id=auth.user_id,
+            account_id=account_id,
+            channel_id=channel_key,
+        )
+    )
+    await session.commit()
+    return {"starred": True}
 
 
 @router.get("/accounts/{account_id}/channels/{channel_id}/epg")
