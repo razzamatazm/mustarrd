@@ -34,6 +34,7 @@ RATE_LIMIT_WINDOW_SECONDS = 15 * 60
 RATE_LIMITS = {
     "setup": 6,
     "login": 20,
+    "plex_start": 10,
     "plex_complete": 30,
 }
 _attempt_log: dict[tuple[str, str], list[float]] = {}
@@ -369,7 +370,8 @@ async def login_download_user_legacy(
 
 
 @router.post("/plex/login/start")
-async def plex_login_start(session: AsyncSession = Depends(get_session)):
+async def plex_login_start(request: Request, session: AsyncSession = Depends(get_session)):
+    _enforce_rate_limit("plex_start", request)
     plex_result = await session.execute(select(PlexServer).limit(1))
     plex_server = plex_result.scalar_one_or_none()
     if not plex_server or not plex_server.auto_allow_all_server_users or not (plex_server.connection_uri or plex_server.base_url):
