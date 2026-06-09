@@ -1049,80 +1049,85 @@ class PostProcessor:
                 return f"...{value[-max_len:]}"
             return value
 
+        async def run_prep_ffmpeg(cmd: List[str]) -> tuple[int, bytes]:
+            """Run a Comskip prep ffmpeg command, killing it if the task is cancelled."""
+            prep_process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                _, prep_stderr = await prep_process.communicate()
+            except asyncio.CancelledError:
+                await self._terminate_process(prep_process)
+                raise
+            prep_returncode = prep_process.returncode if prep_process.returncode is not None else -1
+            return prep_returncode, prep_stderr or b""
+
         returncode, combined_output = await run_comskip_once(input_path)
         active_input_file = input_file
         temp_probe_file: Optional[Path] = None
 
-        if returncode != 0 and input_file.suffix.lower() == ".ts" and self.ffmpeg_available:
-            failed_excerpt = excerpt(combined_output, 600)
-            if failed_excerpt:
-                await self._notify_log(log_callback, f"Comskip failed (exit {returncode}): {failed_excerpt}")
-            await self._notify_log(
-                log_callback,
-                "Comskip failed on TS input; retrying on normalized intermediate file."
-            )
-            selected_map_args = await self._select_best_av_map_args(input_path, log_callback)
-            video_map = selected_map_args[1] if len(selected_map_args) >= 2 else "0:v:0"
-            temp_probe_file = input_file.with_stem(f"{input_file.stem}_comskip_input").with_suffix(".mkv")
-
-            prep_cmd = [self._ffmpeg_path, "-i", str(input_file), "-y"]
-            prep_cmd = self._with_error_tolerant_flags(prep_cmd)
-            prep_cmd.extend(selected_map_args)
-            prep_cmd.extend([
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-af", "aresample=async=1:first_pts=0",
-                "-avoid_negative_ts", "make_zero",
-                str(temp_probe_file)
-            ])
-            await self._notify_log(
-                log_callback,
-                f"Comskip prep cmd: {' '.join(shlex.quote(str(c)) for c in prep_cmd)}"
-            )
-            prep_process = await asyncio.create_subprocess_exec(
-                *prep_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, prep_stderr = await prep_process.communicate()
-
-            if prep_process.returncode != 0:
+        try:
+            if returncode != 0 and input_file.suffix.lower() == ".ts" and self.ffmpeg_available:
+                failed_excerpt = excerpt(combined_output, 600)
+                if failed_excerpt:
+                    await self._notify_log(log_callback, f"Comskip failed (exit {returncode}): {failed_excerpt}")
                 await self._notify_log(
                     log_callback,
-                    "Comskip prep with audio failed; retrying prep with video-only stream."
+                    "Comskip failed on TS input; retrying on normalized intermediate file."
                 )
-                video_only_cmd = [self._ffmpeg_path, "-i", str(input_file), "-y"]
-                video_only_cmd = self._with_error_tolerant_flags(video_only_cmd)
-                video_only_cmd.extend([
-                    "-map", video_map,
-                    "-an",
+                selected_map_args = await self._select_best_av_map_args(input_path, log_callback)
+                video_map = selected_map_args[1] if len(selected_map_args) >= 2 else "0:v:0"
+                temp_probe_file = input_file.with_stem(f"{input_file.stem}_comskip_input").with_suffix(".mkv")
+
+                prep_cmd = [self._ffmpeg_path, "-i", str(input_file), "-y"]
+                prep_cmd = self._with_error_tolerant_flags(prep_cmd)
+                prep_cmd.extend(selected_map_args)
+                prep_cmd.extend([
                     "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-af", "aresample=async=1:first_pts=0",
                     "-avoid_negative_ts", "make_zero",
                     str(temp_probe_file)
                 ])
                 await self._notify_log(
                     log_callback,
-                    f"Comskip prep cmd (video-only): {' '.join(shlex.quote(str(c)) for c in video_only_cmd)}"
+                    f"Comskip prep cmd: {' '.join(shlex.quote(str(c)) for c in prep_cmd)}"
                 )
-                prep_process = await asyncio.create_subprocess_exec(
-                    *video_only_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                _, prep_stderr = await prep_process.communicate()
+                prep_returncode, prep_stderr = await run_prep_ffmpeg(prep_cmd)
 
-            if prep_process.returncode == 0:
-                active_input_file = temp_probe_file
-                returncode, combined_output = await run_comskip_once(
-                    str(temp_probe_file),
-                    progress_prefix="Comskip retry"
-                )
-            else:
-                prep_excerpt = excerpt((prep_stderr or b"").decode(errors="ignore"), 400)
-                if prep_excerpt:
-                    await self._notify_log(log_callback, f"Comskip prep failed: {prep_excerpt}")
+                if prep_returncode != 0:
+                    await self._notify_log(
+                        log_callback,
+                        "Comskip prep with audio failed; retrying prep with video-only stream."
+                    )
+                    video_only_cmd = [self._ffmpeg_path, "-i", str(input_file), "-y"]
+                    video_only_cmd = self._with_error_tolerant_flags(video_only_cmd)
+                    video_only_cmd.extend([
+                        "-map", video_map,
+                        "-an",
+                        "-c:v", "copy",
+                        "-avoid_negative_ts", "make_zero",
+                        str(temp_probe_file)
+                    ])
+                    await self._notify_log(
+                        log_callback,
+                        f"Comskip prep cmd (video-only): {' '.join(shlex.quote(str(c)) for c in video_only_cmd)}"
+                    )
+                    prep_returncode, prep_stderr = await run_prep_ffmpeg(video_only_cmd)
 
-        try:
+                if prep_returncode == 0:
+                    active_input_file = temp_probe_file
+                    returncode, combined_output = await run_comskip_once(
+                        str(temp_probe_file),
+                        progress_prefix="Comskip retry"
+                    )
+                else:
+                    prep_excerpt = excerpt((prep_stderr or b"").decode(errors="ignore"), 400)
+                    if prep_excerpt:
+                        await self._notify_log(log_callback, f"Comskip prep failed: {prep_excerpt}")
+
             if returncode != 0:
                 failed_excerpt = excerpt(combined_output, 600)
                 if failed_excerpt:
@@ -1148,11 +1153,22 @@ class PostProcessor:
                 await self._notify_log(log_callback, "Comskip finished without EDL output.")
             return None
         finally:
-            if temp_probe_file and temp_probe_file.exists():
-                try:
-                    os.remove(temp_probe_file)
-                except Exception:
-                    pass
+            if temp_probe_file:
+                # Remove the intermediate probe file plus any Comskip sidecar
+                # outputs generated for it (.edl excluded: it may be the result
+                # returned to the caller). The "_comskip_input" stem is generated
+                # by this run, so these are never user files.
+                cleanup_candidates = [temp_probe_file]
+                cleanup_candidates.extend(
+                    temp_probe_file.with_suffix(suffix)
+                    for suffix in (".txt", ".log", ".logo", ".csv", ".vdr", ".xml")
+                )
+                for candidate in cleanup_candidates:
+                    if candidate.exists():
+                        try:
+                            os.remove(candidate)
+                        except Exception:
+                            pass
 
     async def remove_commercials(
         self,
