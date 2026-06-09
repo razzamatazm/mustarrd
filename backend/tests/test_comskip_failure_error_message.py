@@ -53,6 +53,7 @@ class ComSkipFailureErrorMessageTests(unittest.IsolatedAsyncioTestCase):
                 remux_only=False,
                 download_folder=self.tmpdir,
                 completed_folder=self.tmpdir,
+                min_free_space_gb=0,
             )
             session.add(settings)
             await session.flush()

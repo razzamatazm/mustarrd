@@ -61,6 +61,7 @@ class PartialTranscodeOutputOrphanTests(unittest.IsolatedAsyncioTestCase):
                 completed_folder=self.completed_dir,
                 delete_original_after_transcode=False,
                 remux_only=True,
+                min_free_space_gb=0,
             )
             session.add(settings)
             await session.flush()

@@ -17,6 +17,7 @@ from config import settings as app_settings, is_docker_env
 from database import async_session_maker
 from services.log_stream import backend_log_stream
 from services.credential_crypto import credential_crypto
+from services.disk_space import get_free_space_shortfall
 from services.plex_service import plex_service
 
 logger = logging.getLogger(__name__)
@@ -1469,6 +1470,25 @@ class DownloadManager:
 
         if not will_comskip and not will_transcode:
             return current_path, warnings
+
+        # Disk-space preflight: transcoding/commercial removal writes a second
+        # copy of the recording next to the original. Refuse to start when free
+        # space is already below the configured minimum so ffmpeg cannot die
+        # mid-write with ENOSPC and leave a partial output behind.
+        min_free_gb = (
+            settings.min_free_space_gb if settings.min_free_space_gb is not None else 25
+        )
+        shortfall = await get_free_space_shortfall(
+            self._resolve_download_folder(settings), min_free_gb
+        )
+        if shortfall:
+            free_gb, required_gb = shortfall
+            raise Exception(
+                f"Not enough disk space to start post-processing. "
+                f"{free_gb:.1f} GB free, {required_gb} GB required. "
+                f"The raw recording is still in the download folder. "
+                f"Free up space and retry."
+            )
 
         async def log_callback(message: str):
             await self._broadcast_log(download_id, message)

@@ -43,6 +43,7 @@ class ComSkipExceptionFallthroughTests(unittest.IsolatedAsyncioTestCase):
             transcode_enabled=True,
             remux_only=False,
             transcode_format="mkv",
+            min_free_space_gb=0,
         )
         session.add(settings)
         await session.commit()
