@@ -919,7 +919,6 @@ class EPGIngestManager:
                 try:
                     epg_entries = await client.get_epg(stream_id)
                 except Exception as exc:
-                    self._status["last_error"] = f"EPG fetch failed for channel {stream_id}: {exc}"
                     await self._log(
                         f"Backfill failed for channel {stream_id}: {exc}",
                         level="warning",
