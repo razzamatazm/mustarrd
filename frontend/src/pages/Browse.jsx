@@ -318,6 +318,14 @@ function formatArchiveDuration(days) {
   return `${Math.floor(parsed)} days`
 }
 
+function getChannelArchiveDays(channel) {
+  const parsed = Number(channel?.tv_archive_duration)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null
+  }
+  return Math.min(365, Math.max(1, Math.trunc(parsed)))
+}
+
 const previousDownloadStatusMeta = {
   pending: { label: 'Queued', color: 'yellow' },
   downloading: { label: 'Downloading', color: 'yellow' },
@@ -409,10 +417,12 @@ export default function Browse() {
     retry: false,
   })
 
-  // Fetch EPG for selected channel
+  // Fetch EPG for selected channel, going back as far as its catchup archive allows
+  const selectedChannelArchiveDays = getChannelArchiveDays(selectedChannel)
   const { data: epgData, isLoading: epgLoading } = useQuery({
-    queryKey: ['epg', selectedAccountId, selectedChannel?.stream_id],
-    queryFn: () => channelsApi.getEpg(selectedAccountId, selectedChannel.stream_id, 7, true),
+    queryKey: ['epg', selectedAccountId, selectedChannel?.stream_id, selectedChannelArchiveDays],
+    queryFn: () =>
+      channelsApi.getEpg(selectedAccountId, selectedChannel.stream_id, selectedChannelArchiveDays || 7, true),
     enabled: !!selectedAccountId && !!selectedChannel,
     staleTime: 0,
     refetchOnWindowFocus: false,
