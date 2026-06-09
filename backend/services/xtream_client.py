@@ -5,6 +5,9 @@ from urllib.parse import urljoin, urlencode, quote
 
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
+# Full channel list and per-channel EPG backfill responses are as heavy as VOD
+# lists on large providers; the 30s session default times them out.
+LIST_TIMEOUT = aiohttp.ClientTimeout(total=90)
 XMLTV_TIMEOUT = aiohttp.ClientTimeout(total=300)
 
 
@@ -62,7 +65,7 @@ class XtreamClient:
         """Get list of live streams/channels."""
         url = self._build_api_url("get_live_streams", category_id=category_id)
         session = await self._get_session()
-        async with session.get(url) as response:
+        async with session.get(url, timeout=LIST_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get streams: HTTP {response.status}")
             data = await response.json(content_type=None)
@@ -72,7 +75,7 @@ class XtreamClient:
         """Get full EPG for a specific channel."""
         url = self._build_api_url("get_simple_data_table", stream_id=stream_id)
         session = await self._get_session()
-        async with session.get(url) as response:
+        async with session.get(url, timeout=LIST_TIMEOUT) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get EPG: HTTP {response.status}")
             data = await response.json(content_type=None)
