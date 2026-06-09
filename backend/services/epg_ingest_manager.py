@@ -622,7 +622,7 @@ class EPGIngestManager:
             for _, elem in ET.iterparse(sanitized, events=("end",)):
                 local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
                 if local_tag == "channel":
-                    xmltv_id = elem.get("id")
+                    xmltv_id = (elem.get("id") or "").lower() or None
                     display_name = self._extract_text(elem, "display-name")
                     if xmltv_id and xmltv_id not in xmltv_to_stream:
                         if xmltv_id in stream_info:
@@ -670,7 +670,7 @@ class EPGIngestManager:
             for _, elem in ET.iterparse(io.BytesIO(xmltv_bytes), events=("end",)):
                 local_tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
                 if local_tag == "channel":
-                    xmltv_id = elem.get("id")
+                    xmltv_id = (elem.get("id") or "").lower() or None
                     display_name = self._extract_text(elem, "display-name")
                     if xmltv_id and xmltv_id not in xmltv_to_stream:
                         if xmltv_id in stream_info:
@@ -686,7 +686,7 @@ class EPGIngestManager:
                 if local_tag != "programme":
                     continue
 
-                xmltv_id = elem.get("channel")
+                xmltv_id = (elem.get("channel") or "").lower() or None
                 if not xmltv_id:
                     elem.clear()
                     continue
@@ -876,7 +876,7 @@ class EPGIngestManager:
         for key in ("epg_channel_id", "tvg_id", "tvgid", "tvg_name", "tvg-id"):
             value = channel.get(key)
             if value:
-                return str(value).strip()
+                return str(value).strip().lower()
         return None
 
     def _normalize_name(self, name: str) -> str:
