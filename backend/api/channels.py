@@ -94,7 +94,7 @@ async def get_channels(
 async def get_channel_epg(
     account_id: int,
     channel_id: str,
-    days_back: int = Query(7, ge=1, le=14),
+    days_back: int = Query(7, ge=1, le=365),
     fresh: bool = Query(False, description="Fetch live channel EPG before falling back to stored guide data"),
     _admin: None = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session)
@@ -136,7 +136,7 @@ async def get_channel_epg(
 async def get_catchup_programs(
     account_id: int,
     channel_id: str,
-    days_back: int = Query(7, ge=1, le=14),
+    days_back: int = Query(7, ge=1, le=365),
     _admin: None = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session)
 ):
