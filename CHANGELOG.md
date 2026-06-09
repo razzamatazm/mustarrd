@@ -6,6 +6,54 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Plex Integration settings panel now matches the layout of all other settings sections
+
+**What you would notice:** The Plex Integration section in Settings previously had no subtitle and its Connect Plex Account button appeared in a muted brownish color instead of the orange used everywhere else. It now shows a short description below the heading and the button is filled orange, matching every other primary action button in the app.
+
+**What changed:** The Plex Integration panel title size and subtitle were updated to match all other settings panels. The Connect Plex Account button style was changed from light to filled. Frontend only, no backend changes.
+
+---
+
+### Improved: Your selected Downloads tab is now remembered when you share a link or reload the page
+
+**What you would notice:** On the Downloads page, the three tabs (Active, History, Upcoming) are now reflected in the page address. If you navigate to the History tab and copy the URL, sharing it will open the History tab directly. Reloading the page keeps you on the tab you were viewing instead of always jumping back to Active.
+
+**What changed:** The Downloads page was updated to read and write the active tab to a `?tab=` query parameter in the URL. Frontend only, no backend changes.
+
+---
+
+### Improved: Downloads history cards now show the full aired time range
+
+**What you would notice:** Each card in Downloads > History used to show only the start time and how long the recording ran. It now shows "Aired: [start time] - [end time] ([duration])", matching the format already used on Scheduled Recordings history cards. This makes it easier to confirm exactly what window was captured.
+
+**What changed:** The Downloads history card layout was updated to display both the start and end air times. Frontend only, no backend changes.
+
+---
+
+### Fixed: Cancelling a scheduled recording mid-dispatch no longer launches the download anyway
+
+**What you would notice:** There was a narrow timing window where pressing Cancel on a pending scheduled recording had no effect: if the cancel arrived while the recorder was in the middle of queuing the download, the download would launch anyway and the recording would proceed as if you had not cancelled. After this fix, if you cancel during that window, the queued download is stopped and the recording stays cancelled.
+
+**What changed:** The scheduler now re-checks the recording status after queuing a download and cancels it if the status changed to CANCELLED in the meantime. Each scheduled recording in a batch is also committed individually, so a cancel arriving during batch dispatch cannot be silently overwritten. Backend only, no frontend changes.
+
+---
+
+### Fixed: Commercial removal no longer leaves a leftover temp file when it fails
+
+**What you would notice:** When commercial removal ran on a recording in TS format and failed at the step where it assembled the final file, a temporary file named something like `My Show S01E01_postproc_tmp.ts` would remain in your recordings folder with no indication of what it was. After this fix, that temp file is deleted when the operation fails, keeping your recordings folder clean.
+
+**What changed:** The post-processor was updated to clean up the temporary work file when the final concat step fails. Backend only, no frontend changes.
+
+---
+
+### Fixed: Clicking Retry on a failed download no longer accidentally re-activates a cancelled scheduled recording
+
+**What you would notice:** If you had cancelled a scheduled recording and later used the Retry button on its associated failed download entry, Mustarrd would silently mark the schedule as active again. This caused a confusing error if you then tried to reschedule the same program. After this fix, Retry leaves cancelled and completed schedules alone and only updates the status for schedules that are genuinely still pending.
+
+**What changed:** The retry function was updated to skip the schedule status update when the linked schedule is already in CANCELLED or COMPLETED state. Backend only, no frontend changes.
+
+---
+
 ### Fixed: Downloaded file names are no longer scrambled by hidden characters injected by your IPTV provider
 
 **What you would notice:** Some IPTV providers inject invisible Unicode directional characters into program titles. These characters can cause the file name to appear reversed or garbled in your terminal, file manager, Plex library, or Jellyfin library. For example, a file genuinely named `My Show S01E01.ts` could display as `st.10E10S wohS yM`. After this fix, those hidden characters are stripped before the file is saved to disk, so names display and match correctly.
