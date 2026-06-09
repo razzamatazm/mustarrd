@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: IPTV providers with HTML entities in guide data no longer wipe the program guide
+
+**What you would notice:** Some IPTV providers build their program guide data from web pages and include HTML shortcuts like `&nbsp;` (a special space) or `&eacute;` (the letter e with an accent) in show descriptions. These are valid in HTML but not in the XML format Mustarrd uses to read guide data. When Mustarrd tried to import a guide containing these characters, the XML parser would crash mid-import. If you had "Force Refresh" selected, the old guide was deleted first, and then the crash left you with a completely empty Browse page and no error message. Every automatic guide refresh after that repeated the wipe. After this fix, those HTML characters are converted to a safe form before parsing. The guide loads correctly, descriptions are preserved, and no data is lost.
+
+**What changed:** The part of Mustarrd that reads incoming guide data now automatically escapes HTML-style character codes to safe XML equivalents before the XML parser sees them. Standard XML characters (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`) and numeric codes are left unchanged.
+
+---
+
+### Improved: Downloads > Upcoming tab now tells you how to cancel a scheduled recording
+
+**What you would notice:** The Downloads page has an Upcoming tab that shows your scheduled recordings before they run. The cards there were read-only: no buttons, no links, and no explanation of what to do if you wanted to cancel or change one. Users were often confused about where to go. A small line of text now appears at the top of the Upcoming list that reads "To cancel or edit a recording, go to Scheduled Recordings." and includes a clickable link that takes you straight there.
+
+**What changed:** A single hint line with a navigation link was added to the top of the Upcoming recordings list. No download or scheduling logic was changed.
+
+---
+
 ### Improved: Scheduled Recordings history now has a status filter
 
 **What you would notice:** The Scheduled Recordings history tab showed all recordings mixed together with no way to narrow the list. The Downloads history tab already had a status filter, but Scheduled did not. A filter dropdown now appears at the top of the Scheduled history tab. You can select All, Completed, Failed, or Cancelled to see only the recordings you care about. If no recordings match the selected filter, a plain message explains why the list is empty.
