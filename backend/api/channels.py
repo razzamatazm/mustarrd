@@ -1,13 +1,19 @@
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from auth import require_admin_or_download_user, AuthContext
 from database import get_session
 from models import StarredChannel, XtreamAccount
+from services.download_builder import _normalize_provider_start_token
 from services.epg_service import epg_service, NoCatchupSupportError
 from services.account_credentials import resolve_account_password_with_migration
 from services.xtream_client import XtreamClient
@@ -15,6 +21,30 @@ from services.xtream_client import XtreamClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Stream-preview proxy limits: previews relay provider bytes through the
+# backend so credentials embedded in provider URLs never reach the browser.
+PREVIEW_MAX_CONCURRENT = 2
+PREVIEW_MAX_SECONDS = 300
+PREVIEW_CHUNK_SIZE = 64 * 1024
+PREVIEW_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60)
+
+_active_preview_count = 0
+
+
+def _release_preview_slot() -> None:
+    global _active_preview_count
+    _active_preview_count = max(0, _active_preview_count - 1)
+
+
+async def _close_preview_connection(provider_response, http_session) -> None:
+    """Close the provider response and its session, tolerating partial setup."""
+    try:
+        if provider_response is not None:
+            provider_response.close()
+    finally:
+        if http_session is not None and not http_session.closed:
+            await http_session.close()
 
 
 def _channel_has_tv_archive(ch: dict) -> bool:
@@ -228,6 +258,132 @@ async def get_catchup_programs(
             channel_id,
         )
         raise HTTPException(status_code=500, detail="Failed to load catchup programs")
+
+
+@router.get("/accounts/{account_id}/channels/{channel_id}/preview")
+async def preview_channel_stream(
+    account_id: int,
+    channel_id: str,
+    mode: str = Query("live", pattern="^(live|catchup)$"),
+    start_timestamp: Optional[int] = Query(None, ge=0),
+    stop_timestamp: Optional[int] = Query(None, ge=0),
+    provider_start: Optional[str] = Query(None, max_length=64),
+    _auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Relay a short-lived preview of a live or catchup stream.
+
+    The provider URL embeds account credentials, so it never leaves the
+    backend: the stream is opened server-side and bytes are proxied to the
+    authenticated browser session.
+    """
+    global _active_preview_count
+
+    result = await session.execute(
+        select(XtreamAccount).where(XtreamAccount.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    password = await resolve_account_password_with_migration(session, account)
+    client = XtreamClient(account.server_url, account.username, password)
+
+    if mode == "catchup":
+        if not start_timestamp or not stop_timestamp or stop_timestamp <= start_timestamp:
+            raise HTTPException(
+                status_code=400,
+                detail="Catchup preview requires valid start and stop timestamps",
+            )
+        try:
+            start_utc = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid start timestamp")
+        duration_minutes = max(1, (stop_timestamp - start_timestamp) // 60)
+        normalized_start = (
+            _normalize_provider_start_token(provider_start, 0) if provider_start else None
+        )
+        stream_url = client.build_timeshift_url(
+            channel_id,
+            start_utc,
+            duration_minutes,
+            provider_start=normalized_start,
+        )
+    else:
+        stream_url = client.build_stream_url(channel_id, "ts")
+
+    if _active_preview_count >= PREVIEW_MAX_CONCURRENT:
+        raise HTTPException(
+            status_code=429,
+            detail="Preview limit reached. Close another preview and try again.",
+        )
+    _active_preview_count += 1
+
+    http_session = None
+    provider_response = None
+    try:
+        http_session = aiohttp.ClientSession(timeout=PREVIEW_TIMEOUT)
+        provider_response = await http_session.get(stream_url)
+        if provider_response.status != 200:
+            # Never echo the provider URL: it carries credentials.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Provider refused the preview stream (HTTP {provider_response.status})",
+            )
+    except HTTPException:
+        await _close_preview_connection(provider_response, http_session)
+        _release_preview_slot()
+        raise
+    except Exception:
+        await _close_preview_connection(provider_response, http_session)
+        _release_preview_slot()
+        logger.exception(
+            "Preview stream failed account_id=%s channel_id=%s mode=%s",
+            account_id,
+            channel_id,
+            mode,
+        )
+        raise HTTPException(status_code=502, detail="Could not connect to the provider for preview")
+
+    cleanup_done = False
+
+    async def cleanup():
+        # Idempotent: invoked from the generator's finally and from the
+        # response background task, whichever runs first wins.
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        cleanup_done = True
+        await _close_preview_connection(provider_response, http_session)
+        _release_preview_slot()
+
+    async def relay():
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + PREVIEW_MAX_SECONDS
+            async for chunk in provider_response.content.iter_chunked(PREVIEW_CHUNK_SIZE):
+                yield chunk
+                if loop.time() >= deadline:
+                    break
+        finally:
+            # Runs on normal completion, the deadline break, and client
+            # disconnect (generator aclose), so the provider connection
+            # never outlives the preview.
+            await cleanup()
+
+    return StreamingResponse(
+        relay(),
+        media_type="video/mp2t",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+        # Safety net for a disconnect before the first byte is sent: closing
+        # a never-started generator skips its finally block, but Starlette
+        # still runs the background task after the response ends.
+        background=BackgroundTask(cleanup),
+    )
 
 
 @router.get("/accounts/{account_id}/channels/{channel_id}")

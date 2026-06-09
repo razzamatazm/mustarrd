@@ -35,6 +35,7 @@ import dayjs from 'dayjs'
 import { accountsApi, authApi, channelsApi, downloadsApi, epgApi, settingsApi, vodApi } from '../api'
 import EPGGrid from '../components/EPGGrid'
 import DownloadModal from '../components/DownloadModal'
+import PreviewModal from '../components/PreviewModal'
 import ScheduleModal from '../components/ScheduleModal'
 import MovieModal from '../components/VodMovieModal'
 import SeriesModal from '../components/VodSeriesModal'
@@ -388,6 +389,7 @@ export default function Browse() {
   const [selectedChannel, setSelectedChannel] = useState(null)
   const [downloadProgram, setDownloadProgram] = useState(null)
   const [scheduleProgram, setScheduleProgram] = useState(null)
+  const [previewTarget, setPreviewTarget] = useState(null)
   const [programSearch, setProgramSearch] = useState('')
   const [globalSearch, setGlobalSearch] = useState('')
   const [debouncedGlobalSearch] = useDebouncedValue(globalSearch, 400)
@@ -712,6 +714,10 @@ export default function Browse() {
   }, [browseTab, vodTab, isMobile, viewportHeight])
 
   const handleProgramClick = (program, meta = {}) => {
+    if (meta.action === 'preview') {
+      setPreviewTarget({ program, mode: meta.mode || 'catchup' })
+      return
+    }
     if (meta.action === 'schedule') {
       setScheduleProgram(program)
       return
@@ -1472,6 +1478,14 @@ export default function Browse() {
         channel={selectedChannel}
         accountId={selectedAccountId}
         guideOffsetHours={selectedGuideOffsetHours}
+      />
+      <PreviewModal
+        opened={!!previewTarget}
+        onClose={() => setPreviewTarget(null)}
+        program={previewTarget?.program}
+        channel={selectedChannel}
+        accountId={selectedAccountId}
+        mode={previewTarget?.mode || 'catchup'}
       />
       <MovieModal
         opened={!!selectedMovie}

@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Added: Star your favorite channels and preview programs before downloading in Browse
+
+**What you would notice:** Two additions to the Browse page. First, every channel in the channel list now has a star button — starred channels jump to the top of the list so the channels you record from most are always one click away. Stars are personal: each signed-in user (including download-only users) keeps their own favorites, and they are remembered across sessions and devices. Second, programs in the channel guide that can still be downloaded — and the program airing right now — show a small "Preview" button. Clicking it opens a player so you can check you have the right program (or watch the live channel) before queueing a download. Whether the preview actually plays depends on your browser's support for the provider's broadcast format; if it stays black, downloads are unaffected. To keep your provider connection limits safe, at most two previews can run at the same time.
+
+**What changed:** Stars are stored server-side in a new `starred_channels` table keyed per user, with a toggle endpoint and a `starred` flag in the channel list response; the list sorts starred channels first while keeping the provider's order otherwise. Previews are relayed through a new authenticated backend endpoint that opens the live or timeshift stream on the server and proxies the bytes to the browser, so the provider URL — which contains your account credentials — never reaches the page. The proxy caps concurrent previews at two, limits each preview to five minutes, and closes the provider connection as soon as the preview window is closed.
+
+---
+
 ### Added: Account cards warn before your subscription expires and show what each provider supports
 
 **What you would notice:** On the Accounts page, each account card now shows a yellow "Expires in N days" warning badge during the last week of your subscription (hover over it to see the exact date), so a renewal doesn't sneak up on you. Each card also shows a compact summary of what the provider actually offers: how many channels have catchup, the longest archive window seen (for example "Catchup: 1,234 channels · up to 7 days"), and whether the provider has a VOD (movies/series) library. These summaries come from data Mustarrd already collects during its regular guide refresh, so the Accounts page no longer asks your provider for the full channel list every time you open it — the page loads faster and puts less load on your provider. The summaries appear after the first guide refresh following this update.

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useEffect } from 'react'
-import { Stack, Text, Group, Badge, ScrollArea, Box, Divider, Tooltip } from '@mantine/core'
+import { Stack, Text, Group, Badge, Button, ScrollArea, Box, Divider, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
-import { IconClock, IconDownload, IconCalendar } from '@tabler/icons-react'
+import { IconClock, IconDownload, IconCalendar, IconPlayerPlay } from '@tabler/icons-react'
 import {
   getChannelDisplayTime,
   getGuideOffsetHours,
@@ -47,6 +47,9 @@ function ProgramBlock({
   const isClickable = isDownloadable || isSchedulable
   const actionIcon = isDownloadable ? IconDownload : isSchedulable ? IconCalendar : null
   const ActionIcon = actionIcon
+  // Live preview: currently airing programs stream live, past programs still
+  // inside the catchup window stream via timeshift.
+  const canPreview = isCurrent || isDownloadable
 
   return (
     <Box
@@ -113,6 +116,20 @@ function ProgramBlock({
           <Badge size="xs" variant="light" color={isCurrent ? 'green' : isPast ? 'gray' : 'yellow'}>
             {program.duration_minutes}m
           </Badge>
+          {canPreview && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="gray"
+              leftSection={<IconPlayerPlay size={12} />}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClick(program, { action: 'preview', mode: isCurrent ? 'live' : 'catchup' })
+              }}
+            >
+              Preview
+            </Button>
+          )}
           {isExpired && (
             <Tooltip label="No longer available — outside this channel's catchup window" withArrow>
               <Badge size="xs" variant="light" color="gray">
