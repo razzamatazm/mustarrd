@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Downloads now survive brief provider hiccups, avoid pointless re-downloads, and show live progress for every stream type
+
+**What you would notice:** Four reliability improvements to downloading. First, a brief network glitch (the provider dropping the connection or timing out for a moment) no longer instantly fails your recording — Mustarrd now retries a few times with a short pause, picking up from where the transfer left off instead of starting over. Second, if Mustarrd restarts while a recording was finishing and the file on disk turns out to be complete already, it keeps the finished file instead of downloading the whole thing again — even with providers that don't support resuming. Third, if a recording is too big to fit on your disk (counting the minimum free space you configured in Settings), the download now fails immediately with a clear message instead of streaming for hours and dying when the disk fills up. Fourth, recordings from providers that don't report a file size used to sit frozen at 0% on the Downloads page until they finished; they now show the running download size as the transfer progresses.
+
+**What changed:** The download manager now retries transient network errors up to 3 times with backoff, resuming via HTTP Range when the provider supports it. When a provider ignores a resume request but its reported content length shows the file on disk is already complete, the existing file is kept. Before streaming begins, the reported content length is checked against free space on the download folder plus the minimum-free-space setting. Streams without a content length now persist and broadcast their byte count every 8 MB, and crash recovery was hardened so a partially transferred stream is never mistaken for a finished one. Backend only, no frontend changes.
+
+---
+
 ### Fixed: Catchup windows are now calculated correctly, and Browse EPG shows exactly what your provider can still serve
 
 **What you would notice:** Three related problems around how far back you can record are fixed. First, if your provider reports its archive length in hours (for example 168 for a 7-day archive), Mustarrd treated that number as days and advertised weeks of catchup that always failed to download; those channels now show the correct window (168 becomes 7 days). Second, channels with archives longer than 14 days were silently cut off at 14 in Browse EPG; the guide now goes back as far as the channel's actual archive allows. Third, programs that have aged out of the provider's archive no longer look downloadable: they appear greyed out with an "Expired" badge and a tooltip explaining they are outside the channel's catchup window, instead of queuing downloads that are guaranteed to fail.
