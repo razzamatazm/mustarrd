@@ -6,6 +6,20 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Canceling a download during or just after conversion no longer leaves orphaned files or wrong status
+
+**What you would notice:** Two separate cancellation bugs were fixed in this release.
+
+First: if you canceled a download right after it finished converting, the converted file would land in your completed folder but the Downloads page would show the recording as CANCELLED or make it disappear entirely. There was no way to find the file through the app, and it sat on your drive without Mustarrd knowing about it.
+
+Second: if you canceled a download that had finished downloading but had not started converting yet, the original .ts file was silently left in your download folder. The app showed CANCELLED as expected, but the file stayed on your drive consuming disk space. On Unraid with limited storage this could quietly fill your drive over time.
+
+After this fix, both cases are handled correctly. A recording canceled after conversion is properly marked completed. A recording canceled before conversion cleans up the source file automatically.
+
+**What changed:** Two gaps in the cancellation logic in the download manager were closed. No user-visible settings or configuration were changed.
+
+---
+
 ### Improved: Downloads history now shows how long ago a recording aired
 
 **What you would notice:** Download cards in the History, Active, and Upcoming tabs used to show air dates as fixed dates like "Jun 8, 2026 7:30 PM." They now show relative dates the same way the Scheduled Recordings page already did: "Yesterday at 7:30 PM" for recent items, and a short weekday form like "Tue, Nov 14, 2023 at 10:13 PM" for older ones. This matches what you already see on the Scheduled Recordings page and makes it easier to see at a glance how recent a recording is.
