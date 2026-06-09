@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Catchup windows are now calculated correctly, and Browse EPG shows exactly what your provider can still serve
+
+**What you would notice:** Three related problems around how far back you can record are fixed. First, if your provider reports its archive length in hours (for example 168 for a 7-day archive), Mustarrd treated that number as days and advertised weeks of catchup that always failed to download; those channels now show the correct window (168 becomes 7 days). Second, channels with archives longer than 14 days were silently cut off at 14 in Browse EPG; the guide now goes back as far as the channel's actual archive allows. Third, programs that have aged out of the provider's archive no longer look downloadable: they appear greyed out with an "Expired" badge and a tooltip explaining they are outside the channel's catchup window, instead of queuing downloads that are guaranteed to fail.
+
+**What changed:** The shared archive-duration helper now treats `tv_archive_duration` values above 30 as hours and converts them to days, and every consumer (EPG ingest, channel listing, EPG and catchup endpoints, the scheduler) goes through that helper. The `days_back` validation cap on the channel EPG and catchup endpoints was raised from 14 to 365, with the channel's real archive duration still applied as the effective limit. The Browse EPG page now requests the channel's full archive window and greys out past programs that ended before the window began.
+
+---
+
 ### Fixed: Recordings are no longer lost when a cancel or an error arrives just as a download finishes
 
 **What you would notice:** Pressing Cancel at the exact moment a recording finished downloading could delete the fully-downloaded file and mark the recording as cancelled, even though every byte was already on disk. Similarly, a hiccup at the very end of a download or during post-processing — for example the database briefly failing while saving the final status, or a crash right after the file was moved into your completed folder — could leave the recording stuck, marked as failed, or queued for a full re-download even though the finished file was sitting safely in the completed folder (and retrying such a "failed" recording could overwrite or delete the good file). After this fix, once the last byte has been written, the recording is always kept: it is moved to the completed folder and shown as completed, regardless of late cancels, database errors, or post-processing crashes.
