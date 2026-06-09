@@ -3,6 +3,7 @@ import base64
 import gzip
 import io
 import logging
+import re
 import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional
@@ -20,6 +21,23 @@ from services.epg_service import epg_service
 from services.log_stream import backend_log_stream
 
 logger = logging.getLogger(__name__)
+
+# Named entities valid in XML (no DTD required). Any other &name; in XMLTV
+# descriptions comes from HTML-origin feeds and will cause ET.iterparse to
+# raise ParseError. Replace them with &amp;name; before parsing.
+_XML_ENTITY_NAMES = frozenset([b"amp", b"lt", b"gt", b"apos", b"quot"])
+_HTML_ENTITY_RE = re.compile(rb"&([a-zA-Z][a-zA-Z0-9]*);")
+
+
+def _sanitize_html_entities(data: bytes) -> bytes:
+    """Escape non-XML named entities so expat does not choke on them."""
+    def _replace(m: "re.Match[bytes]") -> bytes:
+        name = m.group(1)
+        if name in _XML_ENTITY_NAMES:
+            return m.group(0)
+        return b"&amp;" + name + b";"
+    return _HTML_ENTITY_RE.sub(_replace, data)
+
 
 # Common XMLTV timezone abbreviations mapped to their UTC offset in minutes.
 # strptime("%z") only accepts numeric offsets; named zones raise ValueError.
@@ -495,6 +513,8 @@ class EPGIngestManager:
         stream_by_name = channel_maps["stream_by_name"]
         stream_info = channel_maps["stream_info"]
         xmltv_to_stream: Dict[str, str] = dict(stream_by_xmltv_id)
+
+        xmltv_bytes = _sanitize_html_entities(xmltv_bytes)
 
         try:
             for _, elem in ET.iterparse(io.BytesIO(xmltv_bytes), events=("end",)):
