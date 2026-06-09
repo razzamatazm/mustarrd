@@ -18,7 +18,7 @@ import {
   Select,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconDotsVertical,
@@ -212,14 +212,9 @@ function DownloadCard({
           </Group>
         </Group>
 
-        <Group gap="xs" wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            {formatAirDateTime(download, 'start', guideOffsetHours) || 'Unknown'}
-          </Text>
-          <Text size="xs" c="dimmed">
-            ({formatDuration(download.duration_minutes)})
-          </Text>
-        </Group>
+        <Text size="xs" c="dimmed">
+          Aired: {formatAirDateTime(download, 'start', guideOffsetHours) || 'Unknown'} - {formatChannelDateTime(download, 'end', guideOffsetHours, 'h:mm A') || 'Unknown'} ({formatDuration(download.duration_minutes)})
+        </Text>
 
         {isAdmin && (
           <Text size="xs" c="dimmed">
@@ -402,6 +397,7 @@ function DownloadCard({
 
 export default function Downloads() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [localProgress, setLocalProgress] = useState({})
   const [localLogs, setLocalLogs] = useState({})
@@ -638,7 +634,10 @@ export default function Downloads() {
         )}
       </Group>
 
-      <Tabs defaultValue="active">
+      <Tabs
+        value={['active', 'upcoming', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'active'}
+        onChange={(val) => setSearchParams({ tab: val }, { replace: true })}
+      >
         <Tabs.List grow style={{ flexWrap: 'nowrap' }}>
           <Tabs.Tab value="active" leftSection={<IconDownload size={16} />}>
             Active {activeDownloads.length > 0 && `(${activeDownloads.length})`}

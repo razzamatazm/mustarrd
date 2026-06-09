@@ -77,7 +77,7 @@ class PlexEnabledGuardTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.session_factory() as session:
             with self.assertRaises(HTTPException) as ctx:
-                await plex_login_start(session)
+                await plex_login_start(_mock_request(), session)
 
         self.assertEqual(ctx.exception.status_code, 403)
 
@@ -88,7 +88,7 @@ class PlexEnabledGuardTests(unittest.IsolatedAsyncioTestCase):
         create_pin_mock = AsyncMock(return_value={"id": 1, "code": "ABCD", "expires_in": 300})
         with patch("api.auth.plex_service.create_pin", create_pin_mock):
             async with self.session_factory() as session:
-                result = await plex_login_start(session)
+                result = await plex_login_start(_mock_request(), session)
 
         create_pin_mock.assert_called_once()
         self.assertIn("id", result)
