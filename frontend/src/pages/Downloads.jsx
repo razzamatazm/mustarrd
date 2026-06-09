@@ -213,7 +213,7 @@ function DownloadCard({
 
         <Group gap="xs" wrap="nowrap">
           <Text size="xs" c="dimmed">
-            {formatChannelDateTime(download, 'start', guideOffsetHours, 'MMM D, YYYY h:mm A') || 'Unknown'}
+            {formatAirDateTime(download, 'start', guideOffsetHours) || 'Unknown'}
           </Text>
           <Text size="xs" c="dimmed">
             ({formatDuration(download.duration_minutes)})
