@@ -88,6 +88,49 @@ def _is_local_or_private_client(host: str | None) -> bool:
     return ip.is_loopback or ip.is_private
 
 
+def _forwarded_client_host(request: Request) -> str | None:
+    """Return the client address reported by reverse-proxy forwarding headers.
+
+    Returns None when no forwarding headers are present (direct connection).
+    Uses the right-most X-Forwarded-For entry: that is the IP the trusted
+    proxy (e.g. NPM) appended; left-most entries are client-controlled and
+    spoofable. Falls back to X-Real-IP. A header that is present but empty
+    returns "" so callers fail closed.
+    """
+    xff = request.headers.get("X-Forwarded-For")
+    if xff is not None:
+        for entry in reversed(xff.split(",")):
+            entry = entry.strip()
+            if entry:
+                return entry
+        return ""
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip is not None:
+        return real_ip.strip()
+    return None
+
+
+def _setup_client_allowed(request: Request) -> bool:
+    """Gate for the initial admin-setup endpoint.
+
+    Behind a reverse proxy in Docker (e.g. Unraid + Nginx Proxy Manager) the
+    socket peer is the proxy container's private IP for every request, so the
+    peer alone cannot prove a request is local. When forwarding headers are
+    present, the effective client is the forwarded address and it must be
+    local/private as well. Forwarding headers are only consulted when the
+    direct peer is itself local/private, so a public peer cannot spoof them.
+    """
+    if settings.allow_remote_setup:
+        return True
+    peer_host = request.client.host if request.client else None
+    if not _is_local_or_private_client(peer_host):
+        return False
+    forwarded_host = _forwarded_client_host(request)
+    if forwarded_host is None:
+        return True
+    return _is_local_or_private_client(forwarded_host)
+
+
 def _client_key(request: Request) -> str:
     host = request.client.host if request.client else None
     # Trust X-Forwarded-For only when the direct peer is private (e.g. NPM on Docker
@@ -262,13 +305,11 @@ async def setup_auth(
 
     if app_settings.admin_password_hash:
         raise HTTPException(status_code=400, detail="Admin password is already configured")
-    if not settings.allow_remote_setup:
-        client_host = request.client.host if request.client else None
-        if not _is_local_or_private_client(client_host):
-            raise HTTPException(
-                status_code=403,
-                detail="Initial setup is restricted to local/private network clients",
-            )
+    if not _setup_client_allowed(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Initial setup is restricted to local/private network clients",
+        )
 
     hashed = hash_password(payload.password)
     desired_username = _normalize_username(payload.username or "admin")
