@@ -45,6 +45,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: A recording scheduled near the edge of your provider's catchup window no longer fails with a cryptic error
+
+**What you would notice:** If you scheduled a recording for a show that started just outside your provider's catchup window (for example, a two-hour movie that began 7 days and 2 hours ago on a 7-day provider), Mustarrd would attempt the download anyway and then fail with a confusing 404-style error from your provider. After this fix, Mustarrd checks whether the program's start time is still within the window before attempting the download. If it is not, the recording is immediately marked as failed with a plain message: "Program is no longer available for catchup. It aired about 7 days ago, past the 7-day catchup window." No download is attempted and your download queue is not cluttered with a doomed job.
+
+**What changed:** The scheduler now checks the program start time (not the end time) against your provider's catchup window before dispatching a download. Pre-padding is also included in the check: if the padded start falls outside the window, the schedule is marked failed rather than sending a URL the provider cannot serve. Backend only, no frontend changes.
+
+---
+
+### Improved: Your selected Scheduled Recordings tab is now remembered when you share a link or reload the page
+
+**What you would notice:** On the Scheduled Recordings page, the two tabs (Upcoming and History) are now reflected in the page address. If you navigate to the History tab and copy the URL, sharing it opens History directly. Reloading keeps you on the tab you were viewing instead of always jumping back to Upcoming. The Downloads page already worked this way; Scheduled Recordings now matches it.
+
+**What changed:** The Scheduled Recordings page was updated to read and write the active tab to a `?tab=` query parameter in the URL. Frontend only, no backend changes.
+
+---
+
 ### Fixed: Recordings no longer download the wrong hour when your provider uses timezone abbreviations in the program guide
 
 **What you would notice:** If your IPTV provider includes timezone names like EST, PST, or CET in their program guide data, Mustarrd was silently falling back to UTC when building the download URL. A show listed at 8:30 PM EST would download content starting at 8:30 PM UTC instead, which is five hours off. After this fix, Mustarrd correctly strips the timezone abbreviation before parsing the timestamp, so the right hour of content is fetched.
