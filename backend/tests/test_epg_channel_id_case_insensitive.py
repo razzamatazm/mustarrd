@@ -8,7 +8,7 @@ name-based fallback also fails.  _iter_programs must map the programme to the
 correct stream despite the case difference.
 
 Currently FAILS because stream_by_xmltv_id stores "BBC.ONE" but xmltv_to_stream
-lookup uses the raw XMLTV value "bbc.one" — a case-sensitive miss.
+lookup uses the raw XMLTV value "bbc.one", a case-sensitive miss.
 """
 import sys
 import textwrap
