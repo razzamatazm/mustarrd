@@ -6,7 +6,8 @@ final commit. If the user cancels the schedule while we await
 build_download_from_program or queue_download, the cancel's commit sets
 status=CANCELLED in the DB. Without the fix, the manager then overwrites that
 with status=QUEUED. With the fix it re-reads the status via session.refresh()
-and cancels the queued download instead.
+and rolls back the staged (uncommitted) download row, so the download is never
+persisted or enqueued.
 """
 import asyncio
 import sys
@@ -83,22 +84,18 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
     """_queue_ready_recordings must not queue a download for a cancelled schedule."""
 
     async def test_cancel_during_dispatch_aborts_download(self):
-        """Download must be cancelled and schedule must not be set to QUEUED
-        when the user cancels the schedule while build_download_from_program is running."""
+        """The staged download must be rolled back (never enqueued) and the
+        schedule must not be set to QUEUED when the user cancels the schedule
+        while build_download_from_program is running."""
         schedule = _make_ready_schedule()
-        cancelled_downloads: list = []
 
         async def fake_build(*args, **kwargs):
             dl = MagicMock()
             dl.id = 99
             return dl
 
-        async def fake_queue(dl):
+        async def fake_queue(dl, session=None):
             return dl
-
-        async def fake_cancel(download_id):
-            cancelled_downloads.append(download_id)
-            return True
 
         # Simulate the DB returning CANCELLED when session.refresh() is called.
         def on_refresh(obj):
@@ -106,7 +103,8 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         fake_dm = MagicMock()
         fake_dm.queue_download = AsyncMock(side_effect=fake_queue)
-        fake_dm.cancel_download = AsyncMock(side_effect=fake_cancel)
+        fake_dm.enqueue_persisted = AsyncMock(side_effect=lambda dl: dl)
+        fake_dm.cancel_download = AsyncMock()
 
         session_maker, session = _make_session_maker(schedule, on_refresh=on_refresh)
         manager = ScheduledManager()
@@ -120,11 +118,8 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
         ):
             await manager._queue_ready_recordings()
 
-        self.assertEqual(
-            cancelled_downloads,
-            [99],
-            "cancel_download must be called with the queued download's ID when user cancels mid-dispatch.",
-        )
+        fake_dm.enqueue_persisted.assert_not_called()
+        session.rollback.assert_called()
         self.assertNotEqual(
             schedule.status,
             ScheduledStatus.QUEUED.value,
@@ -140,13 +135,14 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
             dl.id = 77
             return dl
 
-        async def fake_queue(dl):
+        async def fake_queue(dl, session=None):
             return dl
 
         # on_refresh does nothing: status stays SCHEDULED (no cancel happened)
         session_maker, session = _make_session_maker(schedule)
         fake_dm = MagicMock()
         fake_dm.queue_download = AsyncMock(side_effect=fake_queue)
+        fake_dm.enqueue_persisted = AsyncMock(side_effect=lambda dl: dl)
         fake_dm.cancel_download = AsyncMock()
 
         manager = ScheduledManager()
@@ -191,7 +187,7 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
             events.append(f"build_{build_call[0]}")
             return dl
 
-        async def fake_queue(dl):
+        async def fake_queue(dl, session=None):
             return dl
 
         async def fake_commit():
@@ -227,6 +223,7 @@ class CancelDuringDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         fake_dm = MagicMock()
         fake_dm.queue_download = AsyncMock(side_effect=fake_queue)
+        fake_dm.enqueue_persisted = AsyncMock(side_effect=lambda dl: dl)
         fake_dm.cancel_download = AsyncMock()
 
         manager = ScheduledManager()

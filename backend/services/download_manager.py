@@ -272,37 +272,67 @@ class DownloadManager:
             **extra
         )
 
-    async def queue_download(self, download: Download) -> Download:
-        """Add a download to the queue."""
-        async with async_session_maker() as session:
-            _active = [
-                DownloadStatus.PENDING.value,
-                DownloadStatus.DOWNLOADING.value,
-                DownloadStatus.PROCESSING.value,
-            ]
-            _dup = await session.execute(
-                select(Download.id).where(
-                    Download.output_path == download.output_path,
-                    Download.status.in_(_active),
-                ).limit(1)
-            )
-            if _dup.scalar_one_or_none() is not None:
-                raise ValueError(
-                    f"A download is already active for this output file: "
-                    f"{os.path.basename(download.output_path)}"
-                )
+    async def find_active_output_conflicts(self, session: AsyncSession, output_paths: list) -> list:
+        """Return the subset of output_paths that already have an active download.
 
-            session.add(download)
-            await session.commit()
-            await session.refresh(download)
-            self._download_owners[download.id] = download.requested_by_user_id
-
-            await self._queue.put(download.id)
-            await self._broadcast_log(
-                download.id,
-                f"Queued download: {download.program_title} ({download.channel_name})."
+        Active means PENDING, DOWNLOADING or PROCESSING — i.e. another task is
+        (or will be) writing to that output file.
+        """
+        if not output_paths:
+            return []
+        _active = [
+            DownloadStatus.PENDING.value,
+            DownloadStatus.DOWNLOADING.value,
+            DownloadStatus.PROCESSING.value,
+        ]
+        result = await session.execute(
+            select(Download.output_path).where(
+                Download.output_path.in_(output_paths),
+                Download.status.in_(_active),
             )
+        )
+        return list(result.scalars().all())
+
+    async def _stage_download(self, session: AsyncSession, download: Download) -> None:
+        """Dedup-check and add the download row on *session* without committing."""
+        conflicts = await self.find_active_output_conflicts(session, [download.output_path])
+        if conflicts:
+            raise ValueError(
+                f"A download is already active for this output file: "
+                f"{os.path.basename(download.output_path)}"
+            )
+        session.add(download)
+        await session.flush()
+
+    async def queue_download(self, download: Download, session: Optional[AsyncSession] = None) -> Download:
+        """Add a download to the queue.
+
+        Without *session*, the row is committed on its own session and enqueued
+        immediately.
+
+        With *session*, the row is only staged (added and flushed) on that
+        session so the caller can commit it atomically with its own changes.
+        The caller must call enqueue_persisted() after a successful commit.
+        """
+        if session is not None:
+            await self._stage_download(session, download)
             return download
+
+        async with async_session_maker() as own_session:
+            await self._stage_download(own_session, download)
+            await own_session.commit()
+            await own_session.refresh(download)
+        return await self.enqueue_persisted(download)
+
+    async def enqueue_persisted(self, download: Download) -> Download:
+        """Enqueue a download whose DB row has already been committed."""
+        self._download_owners[download.id] = download.requested_by_user_id
+        await self._queue.put(download.id)
+        await self._broadcast_log(
+            download.id,
+            f"Queued download: {download.program_title} ({download.channel_name})."
+        )
+        return download
 
     def _needs_post_processing(self, download: Download, settings: Optional[AppSettings]) -> bool:
         if download.is_vod:

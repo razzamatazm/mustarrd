@@ -123,12 +123,13 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
             dl.id = 99
             return dl
 
-        async def fake_queue(dl):
+        async def fake_queue(dl, session=None):
             queued.append(dl.id)
             return dl
 
         fake_dm = MagicMock()
         fake_dm.queue_download = AsyncMock(side_effect=fake_queue)
+        fake_dm.enqueue_persisted = AsyncMock(side_effect=lambda dl: dl)
 
         manager = ScheduledManager()
         session_maker = _make_session_maker(schedule)

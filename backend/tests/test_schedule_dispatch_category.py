@@ -86,7 +86,8 @@ class ScheduleDispatchCategoryTests(unittest.IsolatedAsyncioTestCase):
             return dl
 
         fake_dm = MagicMock()
-        fake_dm.queue_download = AsyncMock(side_effect=lambda dl: dl)
+        fake_dm.queue_download = AsyncMock(side_effect=lambda dl, session=None: dl)
+        fake_dm.enqueue_persisted = AsyncMock(side_effect=lambda dl: dl)
 
         manager = ScheduledManager()
         session_maker = _make_session_maker(schedule)

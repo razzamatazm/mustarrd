@@ -98,8 +98,11 @@ class ScheduledManager:
                         continue
                     ready.append(schedule)
 
+            # Persist FAILED marks for expired/no-catchup schedules now, so a
+            # per-schedule rollback in the dispatch loop below cannot discard them.
+            await session.commit()
+
             if not ready:
-                await session.commit()
                 return
 
             free_gb = self._get_free_space_gb(download_folder)
@@ -143,7 +146,11 @@ class ScheduledManager:
                         request_source=schedule.request_source or "admin",
                     )
 
-                    download = await download_manager.queue_download(download)
+                    # Stage the download row on this session so it commits
+                    # atomically with the schedule update below. A commit
+                    # failure leaves neither row behind, so the next tick can
+                    # retry without producing a duplicate download.
+                    download = await download_manager.queue_download(download, session=session)
 
                     # Re-read status: user may have cancelled while we were
                     # awaiting build_download_from_program or queue_download.
@@ -152,7 +159,8 @@ class ScheduledManager:
                         ScheduledStatus.SCHEDULED.value,
                         ScheduledStatus.PAUSED_LOW_SPACE.value,
                     ):
-                        await download_manager.cancel_download(download.id)
+                        # Discard the staged (uncommitted) download row.
+                        await session.rollback()
                         continue
 
                     schedule.download_id = download.id
@@ -160,7 +168,9 @@ class ScheduledManager:
                     schedule.status_message = None
                     schedule.updated_at = datetime.utcnow()
                     await session.commit()
+                    await download_manager.enqueue_persisted(download)
                 except Exception as exc:
+                    await session.rollback()
                     schedule.status = ScheduledStatus.FAILED.value
                     schedule.status_message = str(exc)
                     schedule.updated_at = datetime.utcnow()
