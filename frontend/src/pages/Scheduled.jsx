@@ -166,7 +166,7 @@ function ScheduleCard({
 
         {(isActive || schedule.status === 'completed') && (
           <Text size="xs" c="dimmed">
-            Download starts: {availableAt || 'Unknown'} ({formatDuration(totalDuration)})
+            Download starts: {availableAt || 'Unknown'}{totalDuration !== (schedule.duration_minutes || 0) ? ` (${formatDuration(totalDuration)} with padding)` : ''}
           </Text>
         )}
 
