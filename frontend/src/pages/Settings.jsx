@@ -1257,7 +1257,7 @@ export default function Settings() {
   const renderPlex = () => (
     <Stack gap="md">
       <Text fw={600}>Plex Integration</Text>
-      <Group justify="space-between" align="center">
+      <Group align="center">
         <Button
           variant="light"
           onClick={() => {
@@ -1268,107 +1268,119 @@ export default function Settings() {
         >
           Connect Plex Account
         </Button>
-        <Button
-          variant="subtle"
-          onClick={() => listPlexResourcesMutation.mutate()}
-          loading={listPlexResourcesMutation.isPending}
-        >
-          Refresh Servers
-        </Button>
-        <Button
-          variant="subtle"
-          color="red"
-          onClick={() => disconnectPlexMutation.mutate()}
-          loading={disconnectPlexMutation.isPending}
-        >
-          Disconnect
-        </Button>
+        {plexConfig?.token_configured && (
+          <>
+            <Button
+              variant="subtle"
+              onClick={() => listPlexResourcesMutation.mutate()}
+              loading={listPlexResourcesMutation.isPending}
+            >
+              Refresh Servers
+            </Button>
+            <Button
+              variant="subtle"
+              color="red"
+              onClick={() => disconnectPlexMutation.mutate()}
+              loading={disconnectPlexMutation.isPending}
+            >
+              Disconnect
+            </Button>
+          </>
+        )}
       </Group>
 
-      <Select
-        label="Plex Server"
-        placeholder="Select an owned server"
-        data={plexResources.map((r) => ({
-          value: r.resource_id,
-          label: `${r.name}${r.platform ? ` (${r.platform})` : ''}`,
-        }))}
-        value={plexForm.resource_id || null}
-        onChange={(value) => {
-          if (!value) return
-          const selected = plexResources.find((r) => r.resource_id === value)
-          updatePlexForm((prev) => ({
-            ...prev,
-            resource_id: value,
-            resource_name: selected?.name || '',
-            machine_identifier: selected?.machine_identifier || null,
-            connection_uri: selected?.base_url || '',
-            base_url: selected?.base_url || '',
-          }))
-          setPlexLibraries([])
-          listPlexLibrariesMutation.mutate({ resourceId: value, connectionUri: selected?.base_url || '' })
-        }}
-      />
+      {!plexConfig?.token_configured ? (
+        <Alert color="blue" variant="light" icon={<IconAlertCircle size={16} />}>
+          No Plex account connected. Click Connect Plex Account to sign in with Plex. Your servers and libraries will appear here once connected.
+        </Alert>
+      ) : (
+        <>
+          <Select
+            label="Plex Server"
+            placeholder="Select an owned server"
+            data={plexResources.map((r) => ({
+              value: r.resource_id,
+              label: `${r.name}${r.platform ? ` (${r.platform})` : ''}`,
+            }))}
+            value={plexForm.resource_id || null}
+            onChange={(value) => {
+              if (!value) return
+              const selected = plexResources.find((r) => r.resource_id === value)
+              updatePlexForm((prev) => ({
+                ...prev,
+                resource_id: value,
+                resource_name: selected?.name || '',
+                machine_identifier: selected?.machine_identifier || null,
+                connection_uri: selected?.base_url || '',
+                base_url: selected?.base_url || '',
+              }))
+              setPlexLibraries([])
+              listPlexLibrariesMutation.mutate({ resourceId: value, connectionUri: selected?.base_url || '' })
+            }}
+          />
 
-      <Select
-        label="Connection URI"
-        placeholder="Select which Plex endpoint to use"
-        data={(plexResources.find((r) => r.resource_id === plexForm.resource_id)?.connections || []).map((conn) => ({
-          value: conn.uri,
-          label: `${conn.uri}${conn.local ? ' (Local)' : ''}${conn.relay ? ' (Relay)' : ''}`,
-        }))}
-        value={plexForm.connection_uri || null}
-        onChange={(value) => {
-          if (!value || !plexForm.resource_id) return
-          updatePlexForm((prev) => ({ ...prev, connection_uri: value, base_url: value }))
-          setPlexLibraries([])
-          listPlexLibrariesMutation.mutate({ resourceId: plexForm.resource_id, connectionUri: value })
-        }}
-      />
+          <Select
+            label="Connection URI"
+            placeholder="Select which Plex endpoint to use"
+            data={(plexResources.find((r) => r.resource_id === plexForm.resource_id)?.connections || []).map((conn) => ({
+              value: conn.uri,
+              label: `${conn.uri}${conn.local ? ' (Local)' : ''}${conn.relay ? ' (Relay)' : ''}`,
+            }))}
+            value={plexForm.connection_uri || null}
+            onChange={(value) => {
+              if (!value || !plexForm.resource_id) return
+              updatePlexForm((prev) => ({ ...prev, connection_uri: value, base_url: value }))
+              setPlexLibraries([])
+              listPlexLibrariesMutation.mutate({ resourceId: plexForm.resource_id, connectionUri: value })
+            }}
+          />
 
-      <MultiSelect
-        label="Libraries to Refresh"
-        placeholder="Choose one or more libraries"
-        data={plexLibraries.map((lib) => ({
-          value: String(lib.id),
-          label: `${lib.title}${lib.type ? ` (${lib.type})` : ''}`,
-        }))}
-        value={(plexForm.library_section_ids || []).map((v) => String(v))}
-        onChange={(values) => updatePlexForm((prev) => ({ ...prev, library_section_ids: values }))}
-        searchable
-      />
+          <MultiSelect
+            label="Libraries to Refresh"
+            placeholder="Choose one or more libraries"
+            data={plexLibraries.map((lib) => ({
+              value: String(lib.id),
+              label: `${lib.title}${lib.type ? ` (${lib.type})` : ''}`,
+            }))}
+            value={(plexForm.library_section_ids || []).map((v) => String(v))}
+            onChange={(values) => updatePlexForm((prev) => ({ ...prev, library_section_ids: values }))}
+            searchable
+          />
 
-      <Switch
-        label="Allow Plex server users to sign in to Mustarrd"
-        checked={plexForm.auto_allow_all_server_users}
-        onChange={(e) =>
-          updatePlexForm((prev) => ({ ...prev, auto_allow_all_server_users: e.currentTarget.checked }))
-        }
-      />
-      <Switch
-        label="Auto-refresh selected Plex libraries after downloads"
-        checked={plexForm.enabled}
-        onChange={(e) => updatePlexForm((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
-      />
-      <Group justify="flex-end">
-        <Button
-          onClick={() =>
-            savePlexMutation.mutate({
-              resource_id: plexForm.resource_id,
-              resource_name: plexForm.resource_name || null,
-              connection_uri: plexForm.connection_uri || plexForm.base_url,
-              base_url: plexForm.base_url,
-              machine_identifier: plexForm.machine_identifier || null,
-              library_section_ids: (plexForm.library_section_ids || []).map((s) => String(s)),
-              auto_allow_all_server_users: plexForm.auto_allow_all_server_users,
-              enabled: plexForm.enabled,
-            })
-          }
-          disabled={!plexForm.resource_id || !plexForm.base_url}
-          loading={savePlexMutation.isPending}
-        >
-          Save Plex Integration
-        </Button>
-      </Group>
+          <Switch
+            label="Allow Plex server users to sign in to Mustarrd"
+            checked={plexForm.auto_allow_all_server_users}
+            onChange={(e) =>
+              updatePlexForm((prev) => ({ ...prev, auto_allow_all_server_users: e.currentTarget.checked }))
+            }
+          />
+          <Switch
+            label="Auto-refresh selected Plex libraries after downloads"
+            checked={plexForm.enabled}
+            onChange={(e) => updatePlexForm((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+          />
+          <Group justify="flex-end">
+            <Button
+              onClick={() =>
+                savePlexMutation.mutate({
+                  resource_id: plexForm.resource_id,
+                  resource_name: plexForm.resource_name || null,
+                  connection_uri: plexForm.connection_uri || plexForm.base_url,
+                  base_url: plexForm.base_url,
+                  machine_identifier: plexForm.machine_identifier || null,
+                  library_section_ids: (plexForm.library_section_ids || []).map((s) => String(s)),
+                  auto_allow_all_server_users: plexForm.auto_allow_all_server_users,
+                  enabled: plexForm.enabled,
+                })
+              }
+              disabled={!plexForm.resource_id || !plexForm.base_url}
+              loading={savePlexMutation.isPending}
+            >
+              Save Plex Integration
+            </Button>
+          </Group>
+        </>
+      )}
     </Stack>
   )
 
