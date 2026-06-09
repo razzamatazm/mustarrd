@@ -84,7 +84,7 @@ class BackfillNullEntryTests(unittest.IsolatedAsyncioTestCase):
         with patch("services.epg_ingest_manager.async_session_maker", self.session_maker):
             with patch("services.epg_ingest_manager.backend_log_stream") as mock_stream:
                 mock_stream.emit = AsyncMock()
-                return await self.manager._backfill_from_api(
+                processed, inserted, _all_failed = await self.manager._backfill_from_api(
                     client=client,
                     channel_targets=channel_targets,
                     now_utc=self.now_utc,
@@ -93,6 +93,7 @@ class BackfillNullEntryTests(unittest.IsolatedAsyncioTestCase):
                     account_id=1,
                     insert_stmt=insert_stmt,
                 )
+                return processed, inserted
 
     async def _program_count(self):
         async with self.session_maker() as session:

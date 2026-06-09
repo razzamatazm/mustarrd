@@ -465,7 +465,7 @@ class EPGIngestManager:
                     f"Starting API backfill for {len(backfill_targets):,} channels.",
                     account=account
                 )
-                processed, inserted = await self._backfill_from_api(
+                processed, inserted, backfill_all_failed = await self._backfill_from_api(
                     client=client,
                     channel_targets=backfill_targets,
                     now_utc=now_utc,
@@ -474,7 +474,18 @@ class EPGIngestManager:
                     account_id=account.id,
                     insert_stmt=insert_stmt,
                 )
-                await self._mark_backfill_attempt(account.id, now_utc)
+                if backfill_all_failed:
+                    # Total provider API failure: do not start the cooldown,
+                    # otherwise the EPG gaps stay unfilled until the next
+                    # cooldown window (6+ hours) even though the provider may
+                    # recover within minutes.
+                    await self._log(
+                        "API backfill failed for every channel; backfill will be retried on the next refresh.",
+                        level="warning",
+                        account=account,
+                    )
+                else:
+                    await self._mark_backfill_attempt(account.id, now_utc)
             elif backfill_targets:
                 await self._log(
                     "Skipping API backfill (cooldown active).",
@@ -1014,7 +1025,15 @@ class EPGIngestManager:
         inserted: int,
         account_id: int,
         insert_stmt,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, bool]:
+        """Backfill EPG rows from the provider's per-channel API.
+
+        Returns (processed, inserted, all_failed) where all_failed is True
+        when every attempted get_epg call raised — a total provider API
+        failure that must not be recorded as a completed backfill.
+        """
+        fetch_attempts = 0
+        fetch_failures = 0
         async with async_session_maker() as session:
             batch: list[dict] = []
 
@@ -1046,9 +1065,11 @@ class EPGIngestManager:
                 backfill_end = self._ensure_aware(backfill_end) or datetime.now(timezone.utc)
                 channel_cutoff = now_utc - timedelta(days=archive_days)
 
+                fetch_attempts += 1
                 try:
                     epg_entries = await client.get_epg(stream_id)
                 except Exception as exc:
+                    fetch_failures += 1
                     await self._log(
                         f"Backfill failed for channel {stream_id}: {exc}",
                         level="warning",
@@ -1118,7 +1139,8 @@ class EPGIngestManager:
 
             await flush_batch()
 
-        return processed, inserted
+        all_failed = fetch_attempts > 0 and fetch_failures == fetch_attempts
+        return processed, inserted, all_failed
 
 
 epg_ingest_manager = EPGIngestManager()
