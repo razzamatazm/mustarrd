@@ -573,7 +573,7 @@ class DownloadManager:
                             )
                             await self._broadcast_log(download.id, "Recovered after restart: queued for post-processing.")
                         else:
-                            completed_path = self._move_to_completed(str(input_file), completed_folder, download_folder)
+                            completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
                             download.status = DownloadStatus.COMPLETED.value
                             download.progress = 100.0
@@ -631,7 +631,7 @@ class DownloadManager:
                             )
                             await self._broadcast_log(download.id, "Recovered after restart: queued for post-processing.")
                         else:
-                            completed_path = self._move_to_completed(str(input_file), completed_folder, download_folder)
+                            completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
                             download.status = DownloadStatus.COMPLETED.value
                             download.progress = 100.0
@@ -649,7 +649,7 @@ class DownloadManager:
                             processed_found = candidate
                             break
                     if processed_found:
-                        completed_path = self._move_to_completed(processed_found, completed_folder, download_folder)
+                        completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
                         download.output_path = completed_path
                         download.status = DownloadStatus.COMPLETED.value
                         download.progress = 100.0
@@ -799,7 +799,7 @@ class DownloadManager:
                 completed_folder = self._resolve_completed_folder(settings)
                 download_folder = self._resolve_download_folder(settings)
                 try:
-                    completed_path = self._move_to_completed(download.output_path, completed_folder, download_folder)
+                    completed_path = await self._move_to_completed_async(download.output_path, completed_folder, download_folder)
                 except OSError as move_err:
                     # Move failed (e.g. ENOSPC on the completed folder mount). The
                     # downloaded file is still intact in the download folder. Mark as
@@ -868,7 +868,7 @@ class DownloadManager:
                     if settings is None:
                         settings = await self._load_app_settings()
                     try:
-                        completed_path = self._move_to_completed(
+                        completed_path = await self._move_to_completed_async(
                             download.output_path,
                             self._resolve_completed_folder(settings),
                             self._resolve_download_folder(settings),
@@ -987,7 +987,7 @@ class DownloadManager:
                             processed_found = candidate
                             break
                     if processed_found:
-                        completed_path = self._move_to_completed(processed_found, completed_folder, download_folder)
+                        completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
                         moved_completed_path = completed_path
                         download.output_path = completed_path
                         download.status = DownloadStatus.COMPLETED.value
@@ -1004,7 +1004,7 @@ class DownloadManager:
                     raise Exception("Missing input file for post-processing.")
 
                 if not self._needs_post_processing(download, settings):
-                    completed_path = self._move_to_completed(original_path, completed_folder, download_folder)
+                    completed_path = await self._move_to_completed_async(original_path, completed_folder, download_folder)
                     moved_completed_path = completed_path
                     download.output_path = completed_path
                     download.status = DownloadStatus.COMPLETED.value
@@ -1028,7 +1028,7 @@ class DownloadManager:
                 )
 
                 final_path = self._select_final_path(original_path, final_path)
-                completed_path = self._move_to_completed(final_path, completed_folder, download_folder)
+                completed_path = await self._move_to_completed_async(final_path, completed_folder, download_folder)
                 completed_output_path = completed_path
                 moved_completed_path = completed_path
                 download.output_path = completed_path
@@ -1312,6 +1312,19 @@ class DownloadManager:
         if os.path.exists(original_path):
             return original_path
         raise Exception("No output file available to move to completed folder.")
+
+    async def _move_to_completed_async(
+        self, path: str, completed_folder: str, download_folder: Optional[str] = None
+    ) -> str:
+        """Run _move_to_completed off the event loop.
+
+        A multi-GB shutil.move across filesystems (e.g. Docker volume to NAS)
+        is a synchronous copy that would otherwise freeze every download and
+        WebSocket update until it finishes.
+        """
+        return await asyncio.to_thread(
+            self._move_to_completed, path, completed_folder, download_folder
+        )
 
     def _move_to_completed(self, path: str, completed_folder: str, download_folder: Optional[str] = None) -> str:
         if download_folder:
