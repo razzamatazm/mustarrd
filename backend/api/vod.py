@@ -1,9 +1,11 @@
+from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
 import logging
+import os
 
 from auth import require_admin_or_download_user, AuthContext
 from database import get_session
@@ -217,6 +219,8 @@ async def download_series(
     auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session)
 ):
+    # Build every episode first; nothing is persisted until the whole batch
+    # validates, so a mid-batch failure cannot leave a partial episode set.
     downloads = []
     for episode in data.episodes:
         try:
@@ -246,15 +250,36 @@ async def download_series(
             if "Account not found" in message:
                 raise HTTPException(status_code=404, detail="Account not found")
             raise HTTPException(status_code=400, detail="Unable to queue series download")
+        downloads.append(download)
 
-        await check_disk_space(session)
-        try:
-            download = await download_manager.queue_download(download)
-        except ValueError:
-            raise HTTPException(status_code=409, detail="A download for this file is already active.")
-        downloads.append(download.to_dict())
+    if not downloads:
+        return {"count": 0, "downloads": []}
+
+    await check_disk_space(session)
+
+    # One IN query for the whole batch instead of one duplicate check per episode.
+    paths = [d.output_path for d in downloads]
+    conflicts = set(await download_manager.find_active_output_conflicts(session, paths))
+    conflicts.update(path for path, n in Counter(paths).items() if n > 1)
+    if conflicts:
+        names = ", ".join(sorted(os.path.basename(str(path)) for path in conflicts))
+        raise HTTPException(
+            status_code=409,
+            detail=f"A download is already active for: {names}",
+        )
+
+    # All-or-nothing: a single commit covers the whole batch, and the episodes
+    # are only enqueued after that commit succeeds.
+    for download in downloads:
+        session.add(download)
+    await session.commit()
+
+    queued = []
+    for download in downloads:
+        await download_manager.enqueue_persisted(download)
+        queued.append(download.to_dict())
 
     return {
-        "count": len(downloads),
-        "downloads": downloads,
+        "count": len(queued),
+        "downloads": queued,
     }

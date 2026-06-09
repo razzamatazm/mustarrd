@@ -8,8 +8,10 @@ in vod.py, so both download_movie and download_series returned HTTP 500 instead 
 409. A user who double-clicked Download (or sent two parallel requests) got a 500
 error and two concurrent write tasks corrupting the same output file.
 
-After fix: both endpoints wrap queue_download in try/except ValueError and raise
-HTTPException(status_code=409).
+After fix: download_movie wraps queue_download in try/except ValueError and
+raises HTTPException(status_code=409). download_series now runs a batched
+output-path conflict check up front and rejects the whole request with 409
+before anything is queued.
 """
 import sys
 import unittest
@@ -38,6 +40,7 @@ def _make_session():
 
 def _fake_download(output_path="/downloads/Die Hard (1988).mp4"):
     d = MagicMock()
+    d.output_path = output_path
     d.to_dict.return_value = {"id": 1, "output_path": output_path, "status": "completed"}
     return d
 
@@ -82,13 +85,14 @@ class MovieDownloadDedupTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SeriesDownloadDedupTests(unittest.IsolatedAsyncioTestCase):
-    """download_series returns 409 when queue_download detects a conflict."""
+    """download_series returns 409 when the batch conflict check finds a duplicate."""
 
     async def test_duplicate_episode_returns_409(self):
         """Second download of the same episode returns 409, not 500.
 
-        Before fix: ValueError from queue_download propagated as HTTP 500.
-        After fix: ValueError is caught and re-raised as HTTP 409.
+        Originally: ValueError from queue_download propagated as HTTP 500.
+        Now: the batched output-path conflict check rejects the whole request
+        with HTTP 409 before anything is queued.
         """
         from api.vod import download_series, SeriesDownloadRequest, EpisodeItem
 
@@ -98,15 +102,21 @@ class SeriesDownloadDedupTests(unittest.IsolatedAsyncioTestCase):
             series_name="Breaking Bad",
             episodes=[EpisodeItem(id="e1", season=1, episode_num=1, title="Pilot")],
         )
+        fake = _fake_download(output_path="/downloads/S01E01.mp4")
+        session = _make_session()
+        session.add = MagicMock()
 
-        with patch("api.vod.build_episode_download", new=AsyncMock(return_value=_fake_download())), \
+        with patch("api.vod.build_episode_download", new=AsyncMock(return_value=fake)), \
              patch("api.vod.check_disk_space", new=AsyncMock()), \
-             patch("api.vod.download_manager.queue_download",
-                   new=AsyncMock(side_effect=ValueError("already active for this output file: S01E01.mp4"))):
+             patch("api.vod.download_manager.find_active_output_conflicts",
+                   new=AsyncMock(return_value=["/downloads/S01E01.mp4"])), \
+             patch("api.vod.download_manager.enqueue_persisted", new=AsyncMock()) as enqueue:
             with self.assertRaises(HTTPException) as ctx:
-                await download_series(data=data, auth=_make_auth(), session=_make_session())
+                await download_series(data=data, auth=_make_auth(), session=session)
 
         self.assertEqual(ctx.exception.status_code, 409)
+        session.add.assert_not_called()
+        enqueue.assert_not_called()
 
     async def test_first_episode_download_succeeds(self):
         """First episode download with no conflict proceeds normally."""
@@ -118,12 +128,16 @@ class SeriesDownloadDedupTests(unittest.IsolatedAsyncioTestCase):
             series_name="Breaking Bad",
             episodes=[EpisodeItem(id="e1", season=1, episode_num=1, title="Pilot")],
         )
-        fake = _fake_download()
+        fake = _fake_download(output_path="/downloads/S01E01.mp4")
+        session = _make_session()
+        session.add = MagicMock()
 
         with patch("api.vod.build_episode_download", new=AsyncMock(return_value=fake)), \
              patch("api.vod.check_disk_space", new=AsyncMock()), \
-             patch("api.vod.download_manager.queue_download", new=AsyncMock(return_value=fake)):
-            result = await download_series(data=data, auth=_make_auth(), session=_make_session())
+             patch("api.vod.download_manager.find_active_output_conflicts",
+                   new=AsyncMock(return_value=[])), \
+             patch("api.vod.download_manager.enqueue_persisted", new=AsyncMock(return_value=fake)):
+            result = await download_series(data=data, auth=_make_auth(), session=session)
 
         self.assertEqual(result["count"], 1)
 
