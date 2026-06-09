@@ -498,7 +498,11 @@ class EPGIngestManager:
             logger.exception("Failed to update connection status for account %s", account_id)
 
     def _build_channel_maps(self, channels: list[dict]) -> dict:
-        stream_by_xmltv_id: Dict[str, str] = {}
+        # Maps an XMLTV id to the list of stream ids that claim it. Two provider
+        # channels sharing one epg_channel_id (e.g. an HD/SD pair) both receive
+        # the programme data; a last-write-wins dict would silently leave one
+        # channel with zero EPG entries.
+        stream_by_xmltv_id: Dict[str, list] = {}
         stream_info: Dict[str, dict] = {}
 
         # Separate channels into two buckets so that name-only channels
@@ -520,7 +524,16 @@ class EPGIngestManager:
 
             xmltv_id = self._extract_xmltv_id(ch)
             if xmltv_id:
-                stream_by_xmltv_id[str(xmltv_id)] = stream_id
+                mapped = stream_by_xmltv_id.setdefault(str(xmltv_id), [])
+                if stream_id not in mapped:
+                    mapped.append(stream_id)
+                    if len(mapped) > 1:
+                        logger.warning(
+                            "Multiple channels share EPG channel id %r (stream ids: %s); "
+                            "programme data will be applied to all of them.",
+                            str(xmltv_id),
+                            ", ".join(mapped),
+                        )
                 if name:
                     has_id_names.append((self._normalize_name(name), stream_id))
             else:
@@ -541,6 +554,19 @@ class EPGIngestManager:
             "stream_info": stream_info,
         }
 
+    @staticmethod
+    def _as_stream_ids(value) -> list:
+        """Normalize a stream_by_xmltv_id value to a list of stream-id strings.
+
+        Values are lists since duplicate epg_channel_id support, but plain
+        strings are still accepted for older callers and fixtures.
+        """
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(v) for v in value]
+        return [str(value)]
+
     def _iter_programs(
         self,
         xmltv_bytes: bytes,
@@ -550,7 +576,10 @@ class EPGIngestManager:
         stream_by_xmltv_id = channel_maps["stream_by_xmltv_id"]
         stream_by_name = channel_maps["stream_by_name"]
         stream_info = channel_maps["stream_info"]
-        xmltv_to_stream: Dict[str, str] = dict(stream_by_xmltv_id)
+        xmltv_to_stream: Dict[str, list] = {
+            key: self._as_stream_ids(value)
+            for key, value in stream_by_xmltv_id.items()
+        }
 
         xmltv_bytes = _sanitize_html_entities(xmltv_bytes)
 
@@ -562,12 +591,12 @@ class EPGIngestManager:
                     display_name = self._extract_text(elem, "display-name")
                     if xmltv_id and xmltv_id not in xmltv_to_stream:
                         if xmltv_id in stream_info:
-                            xmltv_to_stream[xmltv_id] = xmltv_id
+                            xmltv_to_stream[xmltv_id] = [xmltv_id]
                         elif display_name:
                             name_key = self._normalize_name(display_name)
                             stream_id = stream_by_name.get(name_key)
                             if stream_id:
-                                xmltv_to_stream[xmltv_id] = stream_id
+                                xmltv_to_stream[xmltv_id] = [stream_id]
                     elem.clear()
                     continue
 
@@ -579,8 +608,11 @@ class EPGIngestManager:
                     elem.clear()
                     continue
 
-                stream_id = xmltv_to_stream.get(xmltv_id)
-                if not stream_id or stream_id not in stream_info:
+                stream_ids = [
+                    sid for sid in self._as_stream_ids(xmltv_to_stream.get(xmltv_id))
+                    if sid in stream_info
+                ]
+                if not stream_ids:
                     elem.clear()
                     continue
 
@@ -594,12 +626,6 @@ class EPGIngestManager:
 
                 start_utc = start_dt.astimezone(timezone.utc)
                 end_utc = end_dt.astimezone(timezone.utc)
-                archive_days = int(stream_info[stream_id].get("archive_days") or 0)
-                if archive_days > 0:
-                    channel_cutoff = now_utc - timedelta(days=archive_days)
-                    if end_utc < channel_cutoff:
-                        elem.clear()
-                        continue
 
                 duration_minutes = int((end_utc - start_utc).total_seconds() / 60)
                 if duration_minutes <= 0:
@@ -612,26 +638,32 @@ class EPGIngestManager:
 
                 start_ts = int(start_utc.timestamp())
                 stop_ts = int(end_utc.timestamp())
-                epg_id = f"{stream_id}:{start_ts}:{stop_ts}"
 
-                info = stream_info[stream_id]
-                yield {
-                    "channel_id": stream_id,
-                    "channel_name": info["name"],
-                    "xmltv_id": xmltv_id,
-                    "epg_id": epg_id,
-                    "title": title,
-                    "description": description,
-                    "category": category,
-                    "start_time": start_utc,
-                    "end_time": end_utc,
-                    "start_timestamp": start_ts,
-                    "stop_timestamp": stop_ts,
-                    "provider_start": start_raw,
-                    "provider_stop": stop_raw,
-                    "duration_minutes": duration_minutes,
-                    "has_archive": info["has_archive"],
-                }
+                for stream_id in stream_ids:
+                    info = stream_info[stream_id]
+                    archive_days = int(info.get("archive_days") or 0)
+                    if archive_days > 0:
+                        channel_cutoff = now_utc - timedelta(days=archive_days)
+                        if end_utc < channel_cutoff:
+                            continue
+
+                    yield {
+                        "channel_id": stream_id,
+                        "channel_name": info["name"],
+                        "xmltv_id": xmltv_id,
+                        "epg_id": f"{stream_id}:{start_ts}:{stop_ts}",
+                        "title": title,
+                        "description": description,
+                        "category": category,
+                        "start_time": start_utc,
+                        "end_time": end_utc,
+                        "start_timestamp": start_ts,
+                        "stop_timestamp": stop_ts,
+                        "provider_start": start_raw,
+                        "provider_stop": stop_raw,
+                        "duration_minutes": duration_minutes,
+                        "has_archive": info["has_archive"],
+                    }
 
                 elem.clear()
         except ET.ParseError as exc:
