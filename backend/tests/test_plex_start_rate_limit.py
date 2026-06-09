@@ -36,6 +36,7 @@ def _mock_request(host="127.0.0.1"):
     req.client = MagicMock()
     req.client.host = host
     req.session = {}
+    req.headers = {}
     return req
 
 

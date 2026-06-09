@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Downloaded file names are no longer scrambled by hidden characters injected by your IPTV provider
+
+**What you would notice:** Some IPTV providers inject invisible Unicode directional characters into program titles. These characters can cause the file name to appear reversed or garbled in your terminal, file manager, Plex library, or Jellyfin library. For example, a file genuinely named `My Show S01E01.ts` could display as `st.10E10S wohS yM`. After this fix, those hidden characters are stripped before the file is saved to disk, so names display and match correctly.
+
+**What changed:** The filename cleanup function was extended to strip nine additional invisible Unicode control characters that control text direction. Backend only, no user settings or configuration were changed.
+
+---
+
+### Fixed: Disabling Plex integration in Settings now actually prevents Plex users from logging in
+
+**What you would notice:** If you go to Settings and turn off the Plex integration, Plex users can no longer log in. Before this fix, flipping that setting had no effect: Plex users could still complete the login process even after an admin disabled Plex. Now the Plex login button is hidden from the login screen, and any attempt to start the Plex login flow is rejected with a permission error.
+
+**What changed:** Three places in the login code now check whether Plex is enabled before allowing the login process to proceed. Backend only, no user settings or configuration were changed.
+
+---
+
+### Fixed: The Plex login endpoint is now rate-limited to protect your Plex account
+
+**What you would notice:** No visible change during normal use. If someone repeatedly hits the Plex login endpoint very quickly (for example, an automated script against an internet-exposed Mustarrd instance), they now receive an error after 10 attempts within the rate window. Without this limit, a flood of requests could cause Plex.tv to block Mustarrd's shared client ID, making Plex login fail with "Plex PIN create failed" for all legitimate users until the window expires.
+
+**What changed:** The same rate limit that already protects password login and Plex PIN completion was extended to cover the start of the Plex login flow. Backend only, no user settings or configuration were changed.
+
+---
+
+### Fixed: Session verification now consistently checks user roles against the database
+
+**What you would notice:** No visible change during normal use. This closes a small security gap in how Mustarrd confirms your identity on each request.
+
+**What changed:** When you log in, your role (admin or download-only user) is stored in a session token. On each request, the server checks that token to confirm you are still allowed in. The admin path already verified your role against the database on every request. The download-only path was missing that same check: it confirmed your user ID but trusted the role stored in the cookie without verifying it in the database. Both paths now verify role against the database consistently. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Improved: Settings panels now explain what each section does
 
 **What you would notice:** Two settings panels that previously showed only a title with no explanation now include a short description. Settings > Accounts now reads "Connect your IPTV providers. Mustarrd reads your channel list and program guide from these accounts." Settings > Users now reads "Can browse channels, schedule recordings, and download programs. Cannot access Settings." Every other settings panel already had a description; these two were the only ones missing one.

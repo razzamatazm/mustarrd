@@ -1276,10 +1276,10 @@ export default function Settings() {
 
   const renderPlex = () => (
     <Stack gap="md">
-      <Text fw={600}>Plex Integration</Text>
+      <Text fw={600} size="lg">Plex Integration</Text>
+      <Text size="sm" c="dimmed">Connect a Plex account to enable Plex-based sign-in and automatic library scanning when recordings complete.</Text>
       <Group align="center">
         <Button
-          variant="light"
           onClick={() => {
             const popup = window.open('about:blank', '_blank')
             connectPlexStartMutation.mutate({ popupRef: popup })
