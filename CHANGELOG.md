@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Browse EPG shows an error immediately when your provider cannot be reached
+
+**What you would notice:** Opening Browse EPG while your IPTV provider was unreachable used to show an orange loading spinner that never stopped. There was no message and no way to know something was wrong without waiting several minutes. After this fix, the error appears within a second: a red alert saying "Could not reach your provider" with a direct link to Settings, Accounts so you can correct the issue without hunting through menus.
+
+**What changed:** The channels panel in Browse EPG now stops retrying a failed request immediately instead of waiting for three retries to time out. The error message and Settings link were already coded, just hidden behind the loading state. The VOD, series, and search panels already behaved this way; this brings the channels panel in line with them. Frontend only, no logic changes.
+
+---
+
 ### Improved: Cancelled downloads now show "Download Again" instead of "Retry"
 
 **What you would notice:** In the Downloads history, a recording you intentionally cancelled used to show a button labelled **Retry**, the same as a recording that failed due to an error. This made it hard to tell at a glance whether something went wrong. Cancelled downloads now show **Download Again** to make it clear the recording stopped because you stopped it, not because something broke. Failed recordings still show **Retry** as before.
@@ -19,6 +27,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 **What you would notice:** If you are running Mustarrd outside Docker and do not have ffmpeg installed, the warning in Settings > Post-Processing used to say to install ffmpeg manually but did not tell you what to do if you could not. It now adds: "To save recordings without converting, switch the format above to **Keep original (.ts)**." This gives you a working path forward without needing to install anything.
 
 **What changed:** One sentence was added to the ffmpeg unavailable warning in Settings > Post-Processing. No settings values or recording logic were changed.
+
+---
+
+### Fixed: Program guide now shows correct times for Australia, Newfoundland, Moscow, Korea, Singapore, and more
+
+**What you would notice:** If your IPTV provider labels time zones using abbreviations like ACST (Australia Central Standard), NST (Newfoundland), MSK (Moscow), KST (Korea), SGT (Singapore), AST (Atlantic Standard), ADT (Atlantic Daylight), ACDT (Australia Central Daylight), or NDT (Newfoundland Daylight), your program guide was silently treating all of them as UTC. Programs could appear at times that were several hours off, and scheduled recordings would grab the wrong content. After this fix, Mustarrd recognizes these abbreviations and applies the correct offset so guide times match what is actually airing.
+
+**What changed:** Nine timezone abbreviations were added to the list Mustarrd uses when reading guide timestamps. No user-visible setting or configuration was changed.
+
+---
+
+### Fixed: Show titles and descriptions in the program guide now update when your provider corrects them
+
+**What you would notice:** IPTV providers sometimes push placeholder titles like "TBA" or "Upcoming Show" while a program is being scheduled, then replace them with the real name before air time. Previously, once Mustarrd stored a title from the guide, it kept that title forever and ignored any correction on the next guide refresh. This meant you could end up with a recording named after a placeholder title even after the provider fixed it. After this fix, Mustarrd updates the stored title and description whenever the provider sends a newer version.
+
+**What changed:** The part of Mustarrd that imports guide data was updated so that a second import of the same program updates the title and description instead of silently keeping the first version. No user-visible setting or configuration was changed.
 
 ---
 
