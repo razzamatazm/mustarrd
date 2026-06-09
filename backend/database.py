@@ -102,6 +102,15 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "xtream_accounts", "last_connection_error"):
         await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN last_connection_error TEXT"))
 
+    if not await _column_exists(conn, "xtream_accounts", "catchup_channel_count"):
+        await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN catchup_channel_count INTEGER"))
+
+    if not await _column_exists(conn, "xtream_accounts", "catchup_max_archive_days"):
+        await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN catchup_max_archive_days INTEGER"))
+
+    if not await _column_exists(conn, "xtream_accounts", "vod_available"):
+        await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN vod_available BOOLEAN"))
+
 
 async def _migrate_legacy_account_passwords() -> None:
     from models import XtreamAccount

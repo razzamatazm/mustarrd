@@ -307,6 +307,27 @@ class EPGIngestManager:
                 f"Found {len(catchup_channels)} catchup-enabled channels.",
                 account=account
             )
+
+            max_archive_days = 0
+            for ch in catchup_channels:
+                days = epg_service.archive_days_for_channel(ch)
+                if days > max_archive_days:
+                    max_archive_days = days
+
+            vod_available = None
+            try:
+                vod_categories = await client.get_vod_categories()
+                vod_available = bool(vod_categories)
+            except Exception:
+                logger.debug("VOD category probe failed for account %s", account.id, exc_info=True)
+
+            await self._update_provider_capabilities(
+                account.id,
+                catchup_channel_count=len(catchup_channels),
+                catchup_max_archive_days=max_archive_days,
+                vod_available=vod_available,
+            )
+
             channel_maps = self._build_channel_maps(catchup_channels)
 
             raw_xmltv = await client.get_xmltv()
@@ -532,6 +553,33 @@ class EPGIngestManager:
                     await session.commit()
         except Exception:
             logger.exception("Failed to update connection status for account %s", account_id)
+
+    async def _update_provider_capabilities(
+        self,
+        account_id: int,
+        catchup_channel_count: int,
+        catchup_max_archive_days: int,
+        vod_available: bool | None,
+    ) -> None:
+        """Persist the provider capabilities summary derived during a refresh.
+
+        vod_available=None means the VOD probe failed; the previously stored
+        value is kept so a transient error does not flip the badge.
+        """
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(XtreamAccount).where(XtreamAccount.id == account_id)
+                )
+                account = result.scalar_one_or_none()
+                if account:
+                    account.catchup_channel_count = catchup_channel_count
+                    account.catchup_max_archive_days = catchup_max_archive_days
+                    if vod_available is not None:
+                        account.vod_available = vod_available
+                    await session.commit()
+        except Exception:
+            logger.exception("Failed to update provider capabilities for account %s", account_id)
 
     def _build_channel_maps(self, channels: list[dict]) -> dict:
         # Maps an XMLTV id to the list of stream ids that claim it. Two provider

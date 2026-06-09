@@ -29,6 +29,11 @@ class XtreamAccount(Base):
     last_connection_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_connection_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
+    # Provider capabilities summary, refreshed during EPG ingest (None = not yet known)
+    catchup_channel_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    catchup_max_archive_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vod_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -46,4 +51,7 @@ class XtreamAccount(Base):
             "last_connection_ok": self.last_connection_ok,
             "last_connection_checked_at": self.last_connection_checked_at.isoformat() + "Z" if self.last_connection_checked_at else None,
             "last_connection_error": self.last_connection_error,
+            "catchup_channel_count": self.catchup_channel_count,
+            "catchup_max_archive_days": self.catchup_max_archive_days,
+            "vod_available": self.vod_available,
         }
