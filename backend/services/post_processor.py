@@ -59,6 +59,8 @@ class PostProcessor:
 
     VAAPI_RENDER_DEVICE = Path("/dev/dri/renderD128")
     VAAPI_SYSFS_DRM_CLASS = Path("/sys/class/drm")
+    # Corrupt input can make ffprobe hang forever; cap how long we wait for it.
+    FFPROBE_TIMEOUT_SECONDS = 60.0
     VAAPI_DEFAULT_DRIVERS_PATH = (
         "/usr/local/lib/x86_64-linux-gnu/dri:/usr/local/lib/aarch64-linux-gnu/dri:"
         "/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri"
@@ -696,7 +698,21 @@ class PostProcessor:
         except FileNotFoundError:
             return self._primary_av_map_args()
 
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=self.FFPROBE_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            await self._terminate_process(process)
+            await self._notify_log(
+                log_callback,
+                f"ffprobe stream probe timed out after {self.FFPROBE_TIMEOUT_SECONDS:.0f}s; "
+                "falling back to primary streams."
+            )
+            return self._primary_av_map_args()
+        except asyncio.CancelledError:
+            await self._terminate_process(process)
+            raise
         if process.returncode != 0:
             stderr_text = (stderr or b"").decode(errors="ignore").strip()
             if stderr_text:
@@ -1527,7 +1543,21 @@ class PostProcessor:
             )
             return 0
 
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=self.FFPROBE_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            await self._terminate_process(process)
+            await self._notify_log(
+                log_callback,
+                f"ffprobe timed out after {self.FFPROBE_TIMEOUT_SECONDS:.0f}s; "
+                "duration unavailable."
+            )
+            return 0
+        except asyncio.CancelledError:
+            await self._terminate_process(process)
+            raise
         if process.returncode != 0:
             stderr_text = stderr.decode(errors="ignore").strip()
             if stderr_text:
