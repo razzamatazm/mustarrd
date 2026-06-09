@@ -4,6 +4,32 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-06-09
+
+### Improved: Scheduled Recordings history now has a status filter
+
+**What you would notice:** The Scheduled Recordings history tab showed all recordings mixed together with no way to narrow the list. The Downloads history tab already had a status filter, but Scheduled did not. A filter dropdown now appears at the top of the Scheduled history tab. You can select All, Completed, Failed, or Cancelled to see only the recordings you care about. If no recordings match the selected filter, a plain message explains why the list is empty.
+
+**What changed:** A status filter dropdown was added to the Scheduled Recordings history tab. No scheduling or backend logic was changed.
+
+---
+
+### Fixed: Scheduled recordings on Movies or Sports channels now get the correct filename
+
+**What you would notice:** When you scheduled a recording on a channel categorized as Movies or Sports and left the filename field blank, the downloaded file got the wrong name. A movie called "The Dark Knight" on a Movies channel would be named like `The Dark Knight - 2024-01-15.mkv` instead of `The Dark Knight (2008).mkv`, because Mustarrd lost track of the channel's category between when you scheduled the recording and when it actually ran. This fix ensures the channel category is saved when you create the schedule and used when the recording fires.
+
+**What changed:** The scheduled recording now saves the channel category (such as "Movies" or "Sports") when the schedule is created. When the scheduler runs the recording, it passes that saved category to the filename generator so the file is named correctly. No user-visible setting or config was changed. A regression test was added.
+
+---
+
+### Fixed: Program guide no longer goes empty for providers that use date-style timestamps
+
+**What you would notice:** If your IPTV provider sends program guide data using date-formatted timestamps like `2024-01-15 20:00:00 +0100` instead of the compact numeric format like `20240115200000 +0100`, your entire Browse page would be silently empty after every guide refresh. No error appeared in the logs or the UI. After this fix, both timestamp formats are handled correctly and the program guide populates as expected.
+
+**What changed:** The part of Mustarrd that reads incoming guide data now recognizes ISO-style date timestamps (with dashes, a space separator, or a `T` separator) and converts them to the format Mustarrd uses internally. The existing compact-format path is unchanged.
+
+---
+
 ## 2026-06-08
 
 ### Improved: Settings now shows when your program guide last synced, with a Refresh Now button
