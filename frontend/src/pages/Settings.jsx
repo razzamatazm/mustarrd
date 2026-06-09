@@ -1182,8 +1182,11 @@ export default function Settings() {
   )
 
   const renderUsers = () => (
-    <Stack gap="md">
-      <Text fw={600}>Download-Only Users</Text>
+    <Stack gap="lg">
+      <Stack gap={2}>
+        <Text fw={600} size="lg">Download-Only Users</Text>
+        <Text size="sm" c="dimmed">Can browse channels and download programs. Cannot access Settings or schedule recordings.</Text>
+      </Stack>
       <Alert color="blue" variant="light">
         <Group justify="space-between" align="center" wrap="nowrap">
           <Text size="sm">Plex Integration controls Plex-based sign-in and server/library sync.</Text>
