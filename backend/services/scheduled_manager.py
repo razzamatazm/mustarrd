@@ -298,12 +298,10 @@ class ScheduledManager:
 
             download_folder = settings.download_folder or app_settings.default_download_folder
             min_free_gb = settings.min_free_space_gb if settings.min_free_space_gb is not None else 25
-            try:
-                if self._get_free_space_gb(download_folder) < min_free_gb:
-                    # Retrying now would burn attempts on guaranteed disk-space
-                    # failures; wait for space to free up instead.
-                    return
-            except OSError:
+            free_gb = await self._get_free_space_gb(download_folder)
+            if free_gb is None or free_gb < min_free_gb:
+                # Folder unavailable or low on space: retrying now would burn
+                # attempts on guaranteed failures; wait instead.
                 return
 
             schedule_result = await session.execute(
