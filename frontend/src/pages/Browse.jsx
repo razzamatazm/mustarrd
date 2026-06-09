@@ -406,6 +406,7 @@ export default function Browse() {
     queryKey: ['channels', selectedAccountId],
     queryFn: () => channelsApi.getChannels(selectedAccountId, null, true),
     enabled: !!selectedAccountId,
+    retry: false,
   })
 
   // Fetch EPG for selected channel
