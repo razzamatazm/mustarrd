@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: First-run setup stays local-only behind a reverse proxy, and provider download links are checked more strictly
+
+**What you would notice:** Two security tighten-ups. First, if you run Mustarrd behind a reverse proxy in Docker (for example Unraid with Nginx Proxy Manager) and expose it to the internet, the initial "set admin password" screen was reachable by anyone on the internet before you finished setup — the app saw every proxied visitor as the proxy's local address and waved them through the "local network only" restriction. Now the app looks at the real visitor address reported by the proxy, so only visitors on your local/private network can complete first-run setup (unless you explicitly enable remote setup with `CATCHUP_ALLOW_REMOTE_SETUP`). Direct local access without a proxy works exactly as before. Second, when your IPTV provider supplies a direct download link for a movie or episode, Mustarrd only trusts it if it points back at your provider's server — that check now requires the port to match too, not just the server name, so a link to a different service on the same machine is no longer trusted.
+
+**What changed:** The initial-setup endpoint now treats the forwarded client address (`X-Forwarded-For` / `X-Real-IP`) as the effective client when a request arrives through a proxy, and only consults those headers when the direct connection itself comes from a local/private address so they cannot be spoofed from the internet. The VOD direct-source trust check now compares host and port (resolving the default ports 80/443) and rejects URLs with invalid ports. Backend only, no settings or configuration were changed.
+
+---
+
 ### Fixed: Downloads now survive brief provider hiccups, avoid pointless re-downloads, and show live progress for every stream type
 
 **What you would notice:** Four reliability improvements to downloading. First, a brief network glitch (the provider dropping the connection or timing out for a moment) no longer instantly fails your recording — Mustarrd now retries a few times with a short pause, picking up from where the transfer left off instead of starting over. Second, if Mustarrd restarts while a recording was finishing and the file on disk turns out to be complete already, it keeps the finished file instead of downloading the whole thing again — even with providers that don't support resuming. Third, if a recording is too big to fit on your disk (counting the minimum free space you configured in Settings), the download now fails immediately with a clear message instead of streaming for hours and dying when the disk fills up. Fourth, recordings from providers that don't report a file size used to sit frozen at 0% on the Downloads page until they finished; they now show the running download size as the transfer progresses.

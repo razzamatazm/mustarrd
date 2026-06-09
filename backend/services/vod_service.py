@@ -25,6 +25,25 @@ def _extract_year(text: Optional[str]) -> Optional[int]:
     return file_namer.extract_year(text)
 
 
+def _effective_port(parsed) -> Optional[int]:
+    """Resolve a parsed URL's port, applying scheme defaults (80/443).
+
+    Returns None for invalid ports or unknown schemes so callers fail closed.
+    """
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None:
+        return port
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "http":
+        return 80
+    if scheme == "https":
+        return 443
+    return None
+
+
 def _trusted_direct_source(direct_source: Optional[str], account_server_url: str) -> Optional[str]:
     if not direct_source:
         return None
@@ -38,6 +57,10 @@ def _trusted_direct_source(direct_source: Optional[str], account_server_url: str
     if not parsed_source.hostname or not parsed_account.hostname:
         return None
     if parsed_source.hostname != parsed_account.hostname:
+        return None
+    source_port = _effective_port(parsed_source)
+    account_port = _effective_port(parsed_account)
+    if source_port is None or account_port is None or source_port != account_port:
         return None
     return direct_source
 
