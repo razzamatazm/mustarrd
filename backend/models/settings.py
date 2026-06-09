@@ -52,6 +52,10 @@ class AppSettings(Base):
     show_future_programs: Mapped[bool] = mapped_column(Boolean, default=False)
     launch_on_startup: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Post-download ffprobe sanity check; flags suspect files as
+    # "Completed with warnings" without failing the recording.
+    integrity_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
     comskip_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     comskip_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     comskip_ini_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -86,6 +90,7 @@ class AppSettings(Base):
             "hw_accel": self.hw_accel,
             "delete_original_after_transcode": self.delete_original_after_transcode,
             "remux_only": self.remux_only,
+            "integrity_check_enabled": self.integrity_check_enabled,
             "comskip_enabled": self.comskip_enabled,
             "comskip_path": self.comskip_path,
             "comskip_ini_path": self.comskip_ini_path,

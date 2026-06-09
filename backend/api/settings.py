@@ -96,6 +96,7 @@ class SettingsUpdate(BaseModel):
     hw_accel: Optional[Literal["cpu", "videotoolbox", "nvenc", "amf", "vaapi"]] = None
     delete_original_after_transcode: Optional[bool] = None
     remux_only: Optional[bool] = None
+    integrity_check_enabled: Optional[bool] = None
     comskip_enabled: Optional[bool] = None
     comskip_path: Optional[str] = None
     comskip_ini_path: Optional[str] = None
@@ -121,6 +122,7 @@ NON_NULLABLE_FIELDS = {
     "hw_accel",
     "delete_original_after_transcode",
     "remux_only",
+    "integrity_check_enabled",
     "comskip_enabled",
     "epg_offset_minutes",
     "show_future_programs",

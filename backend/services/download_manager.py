@@ -834,10 +834,13 @@ class DownloadManager:
                 moved_completed_path = completed_path
 
                 await self._store_recorded_duration(download, completed_path)
+                integrity_warning = await self._integrity_check_warning(completed_path, settings)
                 download.status = DownloadStatus.COMPLETED.value
                 download.progress = 100.0
                 download.completed_at = datetime.utcnow()
-                download.error_message = None
+                download.error_message = (
+                    f"Completed with warnings: {integrity_warning}" if integrity_warning else None
+                )
                 await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                 await session.commit()
 
@@ -848,6 +851,12 @@ class DownloadManager:
                     download_id,
                     f"Download completed: {os.path.basename(completed_path)}"
                 )
+                if integrity_warning:
+                    await self._broadcast_log(
+                        download_id,
+                        f"Completed with warnings: {integrity_warning}",
+                        level="warning",
+                    )
                 await self._trigger_plex_refresh(completed_path)
 
             except asyncio.CancelledError:
@@ -993,10 +1002,13 @@ class DownloadManager:
                         moved_completed_path = completed_path
                         download.output_path = completed_path
                         await self._store_recorded_duration(download, completed_path)
+                        integrity_warning = await self._integrity_check_warning(completed_path, settings)
                         download.status = DownloadStatus.COMPLETED.value
                         download.progress = 100.0
                         download.completed_at = datetime.utcnow()
-                        download.error_message = None
+                        download.error_message = (
+                            f"Completed with warnings: {integrity_warning}" if integrity_warning else None
+                        )
                         await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                         await session.commit()
                         await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
@@ -1011,10 +1023,13 @@ class DownloadManager:
                     moved_completed_path = completed_path
                     download.output_path = completed_path
                     await self._store_recorded_duration(download, completed_path)
+                    integrity_warning = await self._integrity_check_warning(completed_path, settings)
                     download.status = DownloadStatus.COMPLETED.value
                     download.progress = 100.0
                     download.completed_at = datetime.utcnow()
-                    download.error_message = None
+                    download.error_message = (
+                        f"Completed with warnings: {integrity_warning}" if integrity_warning else None
+                    )
                     await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
                     await session.commit()
                     await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
@@ -1037,6 +1052,9 @@ class DownloadManager:
                 moved_completed_path = completed_path
                 download.output_path = completed_path
                 await self._store_recorded_duration(download, completed_path)
+                integrity_warning = await self._integrity_check_warning(completed_path, settings)
+                if integrity_warning:
+                    warnings.append(integrity_warning)
                 if warnings:
                     download.error_message = f"Completed with warnings: {'; '.join(warnings)}"
                     await self._broadcast_log(
@@ -1200,6 +1218,33 @@ class DownloadManager:
             return
         if duration and duration > 0:
             download.recorded_duration_seconds = int(round(duration))
+
+    async def _integrity_check_warning(
+        self,
+        file_path: str,
+        settings: Optional[AppSettings],
+    ) -> Optional[str]:
+        """Run the post-download ffprobe sanity check on the finished file.
+
+        Returns a short warning string when the file looks corrupt, else None.
+        The check never fails or deletes the recording: a suspect file is
+        surfaced as "Completed with warnings" so the user can inspect it.
+        Disabled via AppSettings.integrity_check_enabled (default on).
+        """
+        if settings is not None and settings.integrity_check_enabled is False:
+            return None
+        try:
+            if not file_path or not os.path.isfile(file_path):
+                return None
+            from services.post_processor import post_processor
+
+            result = await post_processor.probe_media_integrity(file_path)
+        except Exception:
+            return None
+        if result.get("checked") and not result.get("ok"):
+            reason = result.get("reason") or "ffprobe could not validate the file"
+            return f"file may be corrupt ({reason})"
+        return None
 
     async def _finalize_completed_after_interrupt(
         self,

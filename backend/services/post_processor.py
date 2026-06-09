@@ -1606,6 +1606,96 @@ class PostProcessor:
             await self._notify_log(log_callback, "ffprobe returned invalid duration.")
             return 0
 
+    async def probe_media_integrity(
+        self,
+        input_path: str,
+        log_callback: Optional[Callable[[str], None]] = None
+    ) -> Dict[str, object]:
+        """Cheap ffprobe sanity check on a finished recording.
+
+        Verifies the container parses, the file has at least one stream, and
+        the container reports a nonzero duration. Returns a dict:
+          checked: False when ffprobe is unavailable (no verdict possible)
+          ok:      True when the file looks playable
+          reason:  short human-readable failure reason when ok is False
+        """
+        result: Dict[str, object] = {"checked": False, "ok": True, "reason": None}
+        ffprobe = self._resolve_ffprobe_path()
+
+        if not ffprobe:
+            await self._notify_log(
+                log_callback,
+                "ffprobe not found; skipping recording integrity check."
+            )
+            return result
+
+        cmd = [
+            ffprobe,
+            "-v", "error",
+            "-print_format", "json",
+            "-show_entries", "format=duration:stream=codec_type",
+            str(input_path)
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+        except FileNotFoundError:
+            await self._notify_log(
+                log_callback,
+                f"ffprobe not found at {ffprobe}; skipping recording integrity check."
+            )
+            return result
+
+        result["checked"] = True
+        try:
+            stdout, _stderr = await asyncio.wait_for(
+                process.communicate(), timeout=self.FFPROBE_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            # The timeout exists because corrupt input can make ffprobe hang;
+            # a hang is itself a strong corruption signal.
+            await self._terminate_process(process)
+            result["ok"] = False
+            result["reason"] = (
+                f"ffprobe timed out after {self.FFPROBE_TIMEOUT_SECONDS:.0f}s "
+                "while reading the file"
+            )
+            return result
+        except asyncio.CancelledError:
+            await self._terminate_process(process)
+            raise
+
+        if process.returncode != 0:
+            result["ok"] = False
+            result["reason"] = "the container could not be parsed"
+            return result
+
+        try:
+            payload = json.loads(stdout.decode(errors="ignore") or "{}")
+        except ValueError:
+            result["ok"] = False
+            result["reason"] = "ffprobe returned unreadable output"
+            return result
+
+        streams = payload.get("streams") or []
+        if not streams:
+            result["ok"] = False
+            result["reason"] = "no audio/video streams were found"
+            return result
+
+        try:
+            duration = float((payload.get("format") or {}).get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        if duration <= 0:
+            result["ok"] = False
+            result["reason"] = "the file reports zero duration"
+        return result
+
 
 # Global instance
 post_processor = PostProcessor()
