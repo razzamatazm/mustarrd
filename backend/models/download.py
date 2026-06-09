@@ -43,6 +43,9 @@ class Download(Base):
     downloaded_bytes: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_vod: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Actual duration of the recorded file (ffprobe), as opposed to the EPG
+    # program duration in duration_minutes. Null when probing was unavailable.
+    recorded_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -69,6 +72,7 @@ class Download(Base):
             "downloaded_bytes": self.downloaded_bytes,
             "error_message": self.error_message,
             "is_vod": self.is_vod,
+            "recorded_duration_seconds": self.recorded_duration_seconds,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

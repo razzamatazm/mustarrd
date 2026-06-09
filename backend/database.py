@@ -111,6 +111,9 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "xtream_accounts", "vod_available"):
         await conn.execute(text("ALTER TABLE xtream_accounts ADD COLUMN vod_available BOOLEAN"))
 
+    if not await _column_exists(conn, "downloads", "recorded_duration_seconds"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN recorded_duration_seconds INTEGER"))
+
 
 async def _migrate_legacy_account_passwords() -> None:
     from models import XtreamAccount

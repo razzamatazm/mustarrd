@@ -83,6 +83,17 @@ function formatDuration(minutes) {
   return `${mins}m`
 }
 
+function formatRecordedDuration(seconds) {
+  if (!seconds || seconds <= 0) return null
+  const totalMinutes = Math.max(1, Math.round(seconds / 60))
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0) {
+    return `${hours}h ${String(mins).padStart(2, '0')}m`
+  }
+  return `${mins}m`
+}
+
 function getFileName(filePath) {
   if (!filePath || typeof filePath !== 'string') return 'file'
   const parts = filePath.split(/[\\/]/)
@@ -152,6 +163,7 @@ function DownloadCard({
   const comskipIndeterminate = Boolean(download.comskip_indeterminate)
   const transcodeIndeterminate = Boolean(download.transcode_indeterminate)
   const completedFileName = getFileName(download.output_path)
+  const recordedDuration = formatRecordedDuration(download.recorded_duration_seconds)
   const downloadHref = `/api/downloads/${download.id}/file?action=download`
   const playHref = `/downloads/${download.id}/play`
 
@@ -320,6 +332,11 @@ function DownloadCard({
         {download.status === 'completed' && download.file_size > 0 && (
           <Text size="xs" c="dimmed">
             Download size: {formatBytes(download.file_size)}
+          </Text>
+        )}
+        {download.status === 'completed' && recordedDuration && (
+          <Text size="xs" c="dimmed">
+            Recording duration: {recordedDuration}
           </Text>
         )}
         {download.status === 'completed' && (

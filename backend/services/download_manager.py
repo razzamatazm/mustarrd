@@ -833,6 +833,7 @@ class DownloadManager:
                 download.output_path = completed_path
                 moved_completed_path = completed_path
 
+                await self._store_recorded_duration(download, completed_path)
                 download.status = DownloadStatus.COMPLETED.value
                 download.progress = 100.0
                 download.completed_at = datetime.utcnow()
@@ -991,6 +992,7 @@ class DownloadManager:
                         completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
                         moved_completed_path = completed_path
                         download.output_path = completed_path
+                        await self._store_recorded_duration(download, completed_path)
                         download.status = DownloadStatus.COMPLETED.value
                         download.progress = 100.0
                         download.completed_at = datetime.utcnow()
@@ -1008,6 +1010,7 @@ class DownloadManager:
                     completed_path = await self._move_to_completed_async(original_path, completed_folder, download_folder)
                     moved_completed_path = completed_path
                     download.output_path = completed_path
+                    await self._store_recorded_duration(download, completed_path)
                     download.status = DownloadStatus.COMPLETED.value
                     download.progress = 100.0
                     download.completed_at = datetime.utcnow()
@@ -1033,6 +1036,7 @@ class DownloadManager:
                 completed_output_path = completed_path
                 moved_completed_path = completed_path
                 download.output_path = completed_path
+                await self._store_recorded_duration(download, completed_path)
                 if warnings:
                     download.error_message = f"Completed with warnings: {'; '.join(warnings)}"
                     await self._broadcast_log(
@@ -1177,6 +1181,25 @@ class DownloadManager:
                 return result.scalar_one_or_none()
         except Exception:
             return None
+
+    async def _store_recorded_duration(self, download: Download, file_path: str) -> None:
+        """Probe the finished recording with ffprobe and persist its real duration.
+
+        Stores the actual file duration (seconds) on the download row so the UI
+        can show how long the recording really is, independent of the EPG
+        program duration. Best-effort: a probe failure must never break
+        completion, so all errors are swallowed and the column stays NULL.
+        """
+        try:
+            if not file_path or not os.path.isfile(file_path):
+                return
+            from services.post_processor import post_processor
+
+            duration = await post_processor._get_duration(file_path)
+        except Exception:
+            return
+        if duration and duration > 0:
+            download.recorded_duration_seconds = int(round(duration))
 
     async def _finalize_completed_after_interrupt(
         self,
