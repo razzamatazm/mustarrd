@@ -408,6 +408,16 @@ After this fix, both cases are handled correctly. A recording canceled after con
 
 ---
 
+### Fixed: Scheduling a recording on a channel without catchup support now marks it as Failed right away
+
+**What you would notice:** If you scheduled a recording on a channel that does not support catchup (some channels in your provider's list have it disabled), Mustarrd used to queue the download anyway. The download would start, hit a provider error, and fail with no explanation. After this fix, Mustarrd detects at schedule time that the channel does not support catchup and marks the recording as Failed immediately with a plain-English message, so you know right away rather than waiting for a silent download failure.
+
+A second related fix: if Mustarrd could not reach your provider during a scheduled check, it would previously dispatch downloads with a default 30-day window regardless, causing failures for every pending recording. Schedules now stay in Scheduled state and retry on the next poll when the provider is temporarily unreachable.
+
+**What changed:** The scheduler now raises a specific error when a channel has no catchup support instead of falling back to a 30-day window. Schedules for no-catchup channels are marked Failed with a clear message. Provider connection errors leave the schedule in Scheduled state for automatic retry. Backend only, no frontend changes.
+
+---
+
 ## 2026-06-08
 
 ### Improved: Settings now shows when your program guide last synced, with a Refresh Now button
