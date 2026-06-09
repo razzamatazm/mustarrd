@@ -33,6 +33,18 @@ def _program_insert_stmt():
             "title": stmt.excluded.title,
             "description": stmt.excluded.description,
             "category": stmt.excluded.category,
+            # Repair rows missing the provider-local start/stop (e.g. created by
+            # API backfill entries without a "start" field, or rows predating the
+            # provider_start column). Without provider_start the timeshift URL
+            # builder falls back to UTC wall-clock time and downloads the wrong
+            # window. COALESCE keeps the existing value when the incoming row
+            # has none, so a sparse backfill cannot erase a good XMLTV value.
+            "provider_start": func.coalesce(
+                stmt.excluded.provider_start, EPGProgram.provider_start
+            ),
+            "provider_stop": func.coalesce(
+                stmt.excluded.provider_stop, EPGProgram.provider_stop
+            ),
         },
     )
 
