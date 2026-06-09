@@ -818,26 +818,27 @@ class DownloadManager:
                 await self._broadcast_log(download_id, "Download cancelled.", level="warning")
 
             except Exception as e:
+                if moved_completed_path is not None:
+                    # The file already reached the completed folder. A late
+                    # failure (e.g. the final DB commit) must never delete or
+                    # fail a recording that survived on disk. This also covers
+                    # a failed commit leaving the session pending rollback: the
+                    # finalize helper retries on a fresh session.
+                    await self._finalize_completed_after_interrupt(
+                        session, download_id, moved_completed_path
+                    )
+                    await self._broadcast_log(
+                        download_id,
+                        f"Download completed: {os.path.basename(moved_completed_path)} "
+                        f"(ignored post-completion error: {e})"
+                    )
+                    await self._trigger_plex_refresh(moved_completed_path)
+                    return
                 # Download failed
                 result = await session.execute(
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
-                if download and download.status == DownloadStatus.COMPLETED.value:
-                    # Exception fired after _move_to_completed updated output_path in
-                    # memory but before (or during) session.commit(). The file is
-                    # already in the completed folder; commit the completed state and
-                    # leave it untouched, mirroring the CancelledError guard above.
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                    await session.commit()
-                    await self._broadcast_progress(
-                        download_id, 100, DownloadStatus.COMPLETED.value
-                    )
-                    await self._broadcast_log(
-                        download_id,
-                        f"Download completed: {os.path.basename(download.output_path)}"
-                    )
-                    return
                 if download:
                     download.status = DownloadStatus.FAILED.value
                     if not download.completed_at:
