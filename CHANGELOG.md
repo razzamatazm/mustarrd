@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Downloaded file names are no longer scrambled by hidden characters injected by your IPTV provider
+
+**What you would notice:** Some IPTV providers inject invisible Unicode directional characters into program titles. These characters can cause the file name to appear reversed or garbled in your terminal, file manager, Plex library, or Jellyfin library. For example, a file genuinely named `My Show S01E01.ts` could display as `st.10E10S wohS yM`. After this fix, those hidden characters are stripped before the file is saved to disk, so names display and match correctly.
+
+**What changed:** The filename cleanup function was extended to strip nine additional invisible Unicode control characters that control text direction. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Fixed: Disabling Plex integration in Settings now actually prevents Plex users from logging in
 
 **What you would notice:** If you go to Settings and turn off the Plex integration, Plex users can no longer log in. Before this fix, flipping that setting had no effect: Plex users could still complete the login process even after an admin disabled Plex. Now the Plex login button is hidden from the login screen, and any attempt to start the Plex login flow is rejected with a permission error.
