@@ -299,7 +299,8 @@ class EPGIngestManager:
 
             raw_xmltv = await client.get_xmltv()
             xmltv_bytes = self._maybe_decompress(raw_xmltv) if raw_xmltv else b""
-            total_programs = xmltv_bytes.count(b"<programme") if xmltv_bytes else 0
+            _xmltv_no_cdata = re.sub(rb"<!\[CDATA\[.*?\]\]>", b"", xmltv_bytes, flags=re.DOTALL) if xmltv_bytes else b""
+            total_programs = _xmltv_no_cdata.count(b"<programme")
             self._status["total_programs"] = total_programs if total_programs > 0 else None
             if xmltv_bytes:
                 await self._log(

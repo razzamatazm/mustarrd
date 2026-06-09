@@ -123,6 +123,45 @@ class EPGForceWipeEmptyXmltvTests(unittest.IsolatedAsyncioTestCase):
             f"Got DELETE statements: {delete_tracker}",
         )
 
+    async def test_force_refresh_cdata_only_programme_text_does_not_delete_rows(self):
+        """No DELETE issued when <programme text appears only inside a CDATA section.
+
+        CDATA sections are opaque text to the XML parser. ET.iterparse correctly treats
+        their content as character data, not elements, so no programme events are yielded.
+        But the old code counted <programme via raw byte scan, which hit the CDATA
+        text, set total_programs > 0, and triggered force-delete. The guide was then wiped
+        and nothing was inserted.
+
+        After the fix, CDATA sections are stripped from the byte buffer before counting,
+        so total_programs stays 0 and existing rows are preserved.
+        """
+        manager = EPGIngestManager()
+        account = _make_account()
+        delete_tracker = []
+
+        cdata_only_xmltv = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b"<tv>"
+            b'<channel id="ch1"><display-name>Test</display-name></channel>'
+            b"<desc><![CDATA[<programme type=\"x\">fake</programme>]]></desc>"
+            b"</tv>"
+        )
+        client = _make_xtream_client(xmltv_bytes=cdata_only_xmltv)
+
+        with (
+            patch("services.epg_ingest_manager.async_session_maker", side_effect=_make_session_ctx(delete_tracker)),
+            patch("services.epg_ingest_manager.resolve_account_password", return_value="pass"),
+            patch("services.epg_ingest_manager.XtreamClient", return_value=client),
+        ):
+            await manager._refresh_account(account, force=True)
+
+        self.assertEqual(
+            delete_tracker,
+            [],
+            "No DELETE must be issued when <programme text appears only inside CDATA. "
+            f"Got DELETE statements: {delete_tracker}",
+        )
+
     async def test_force_refresh_nonempty_xmltv_does_delete_rows(self):
         """DELETE is issued when provider returns an XMLTV body with programme entries."""
         manager = EPGIngestManager()
