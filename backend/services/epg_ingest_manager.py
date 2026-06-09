@@ -10,7 +10,8 @@ from typing import Dict, Iterable, Optional
 from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as ET
-from sqlalchemy import delete, insert, select, func
+from sqlalchemy import delete, select, func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from config import settings as app_settings
 from database import async_session_maker
@@ -24,7 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def _program_insert_stmt():
-    return insert(EPGProgram).prefix_with("OR IGNORE")
+    stmt = sqlite_insert(EPGProgram)
+    return stmt.on_conflict_do_update(
+        index_elements=["account_id", "epg_id"],
+        set_={
+            "title": stmt.excluded.title,
+            "description": stmt.excluded.description,
+            "category": stmt.excluded.category,
+        },
+    )
 
 
 # Named entities valid in XML (no DTD required). Any other &name; in XMLTV
@@ -56,14 +65,20 @@ def _sanitize_html_entities(data: bytes) -> bytes:
 _NAMED_TZ_OFFSETS: Dict[str, int] = {
     "UTC": 0, "GMT": 0,
     "EST": -300, "EDT": -240,
+    "AST": -240, "ADT": -180,
+    "NST": -210, "NDT": -150,
     "CST": -360, "CDT": -300,
     "MST": -420, "MDT": -360,
     "PST": -480, "PDT": -420,
     "WET": 0, "WEST": 60, "BST": 60,
     "CET": 60, "CEST": 120,
     "EET": 120, "EEST": 180,
+    "MSK": 180,
     "IST": 330,
-    "HKT": 480, "JST": 540, "AEST": 600, "AEDT": 660,
+    "SGT": 480, "HKT": 480,
+    "JST": 540, "KST": 540,
+    "ACST": 570, "ACDT": 630,
+    "AEST": 600, "AEDT": 660,
     "NZST": 720, "NZDT": 780,
 }
 
