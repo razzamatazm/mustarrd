@@ -6,6 +6,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Scheduling the same program twice no longer creates duplicate recordings for providers without guide data
+
+**What you would notice:** Some IPTV providers do not include EPG IDs with their program data. Previously, if you accidentally scheduled the same program twice using such a provider, Mustarrd would create two scheduled recordings and attempt to download both at the same time, potentially corrupting the output file. Now, scheduling the same program twice returns "This program is already scheduled," matching the behavior you would see with a provider that includes full guide data.
+
+**What changed:** The schedule creation check was extended to cover programs that have neither an EPG ID nor a program ID. It now deduplicates on account, channel, and the program's start and stop times. Backend only, no frontend changes.
+
+---
+
+### Improved: Cancelled scheduled recordings now explain what happened and link to Browse EPG
+
+**What you would notice:** Before this change, a cancelled recording in Scheduled > History showed the show title, channel, CANCELLED badge, and air time with no explanation. If the recording was cancelled before downloading started and had no specific system message, the card gave no indication of what to do next. Now a note appears: "Cancelled before downloading. If this program is still in your provider's catchup window, you can find it in Browse EPG." The words "Browse EPG" are a clickable link that takes you directly there.
+
+**What changed:** The Scheduled > History page was updated to show a plain-language explanation and a Browse EPG link on cancelled cards that have no other details. Frontend only, no backend changes.
+
+---
+
+### Fixed: Corrupted or far-future timestamps from your IPTV provider no longer crash the server
+
+**What you would notice:** No visible change during normal use. Previously, if your IPTV provider sent a program timestamp so far in the future that it could not be represented as a valid date (for example, a year so large it overflows the server), Mustarrd would crash with a generic server error (HTTP 500) when you tried to queue a download or create a scheduled recording for that program. It now returns a clear "invalid input" error (HTTP 400) instead, and the rest of your downloads are unaffected.
+
+**What changed:** Two server-side functions that convert provider timestamps to dates were updated to handle impossible values instead of crashing. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Improved: Plex settings page now shows clear instructions when no Plex account is connected
 
 **What you would notice:** Settings > Plex Integration used to show empty dropdowns for Plex Server, Connection URI, and Libraries to Refresh even when you had never linked a Plex account. The form appeared broken with no explanation of what to do next. Now, when no account is connected, the form is hidden and replaced with a single message explaining that you need to click "Connect Plex Account" first. The Disconnect and Refresh Servers buttons are also hidden until an account is linked. Once you connect, the full form reappears as normal.
