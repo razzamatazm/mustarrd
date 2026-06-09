@@ -51,6 +51,7 @@ import {
 import { adminPlexApi, adminUsersApi, authApi, epgApi, settingsApi } from '../api'
 import AccountsSection from '../components/settings/AccountsSection'
 import LogsSection from '../components/settings/LogsSection'
+import FoldersStatus from '../components/settings/FoldersStatus'
 
 function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
@@ -755,6 +756,7 @@ export default function Settings() {
           styles={{ input: { textOverflow: 'ellipsis' } }}
           title={formData.completed_folder}
         />
+        <FoldersStatus />
       </Stack>
 
       <Divider variant="dashed" />
