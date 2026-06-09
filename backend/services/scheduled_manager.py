@@ -78,8 +78,15 @@ class ScheduledManager:
                         continue
                     catchup_expiry = now_utc - timedelta(days=archive_days)
                     program_end_utc = available_at - timedelta(minutes=int(schedule.post_padding_minutes or 0))
-                    if program_end_utc <= catchup_expiry:
-                        age = now_utc - program_end_utc
+                    # Timeshift URLs are keyed to program start; compare padded start
+                    # against the boundary, not program end.
+                    if schedule.start_timestamp:
+                        prog_start_utc = datetime.fromtimestamp(int(schedule.start_timestamp), tz=timezone.utc)
+                    else:
+                        prog_start_utc = program_end_utc - timedelta(minutes=int(schedule.duration_minutes or 0))
+                    padded_start_utc = prog_start_utc - timedelta(minutes=int(schedule.pre_padding_minutes or 0))
+                    if padded_start_utc <= catchup_expiry:
+                        age = now_utc - prog_start_utc
                         total_hours = int(age.total_seconds() / 3600)
                         age_str = f"about {age.days} days" if age.days >= 2 else f"about {total_hours} hours"
                         schedule.status = ScheduledStatus.FAILED.value
