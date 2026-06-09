@@ -173,47 +173,34 @@ async def create_schedule(
         ScheduledStatus.PROCESSING.value,
     ]
 
+    # Dedupe across ALL users: two schedules for the same program+channel
+    # resolve to the same output file, so the second one would fail at
+    # dispatch. Non-admins used to only be checked against their own
+    # schedules, letting them duplicate another user's schedule.
+    conditions = [
+        ScheduledRecording.account_id == data.account_id,
+        ScheduledRecording.channel_id == data.channel_id,
+        ScheduledRecording.start_timestamp == start_ts,
+        ScheduledRecording.stop_timestamp == stop_ts,
+        ScheduledRecording.status.in_(active_statuses),
+    ]
     if epg_id:
-        conditions = [
-            ScheduledRecording.account_id == data.account_id,
-            ScheduledRecording.channel_id == data.channel_id,
-            ScheduledRecording.epg_id == epg_id,
-            ScheduledRecording.start_timestamp == start_ts,
-            ScheduledRecording.stop_timestamp == stop_ts,
-            ScheduledRecording.status.in_(active_statuses),
-        ]
-        if not auth.is_admin:
-            conditions.append(ScheduledRecording.requested_by_user_id == auth.user_id)
-        existing = await session.execute(select(ScheduledRecording).where(*conditions))
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="This program is already scheduled")
+        conditions.append(ScheduledRecording.epg_id == epg_id)
     elif program_id is not None:
-        conditions = [
-            ScheduledRecording.account_id == data.account_id,
-            ScheduledRecording.channel_id == data.channel_id,
-            ScheduledRecording.program_id == str(program_id),
-            ScheduledRecording.start_timestamp == start_ts,
-            ScheduledRecording.stop_timestamp == stop_ts,
-            ScheduledRecording.status.in_(active_statuses),
-        ]
-        if not auth.is_admin:
-            conditions.append(ScheduledRecording.requested_by_user_id == auth.user_id)
-        existing = await session.execute(select(ScheduledRecording).where(*conditions))
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="This program is already scheduled")
-    else:
-        conditions = [
-            ScheduledRecording.account_id == data.account_id,
-            ScheduledRecording.channel_id == data.channel_id,
-            ScheduledRecording.start_timestamp == start_ts,
-            ScheduledRecording.stop_timestamp == stop_ts,
-            ScheduledRecording.status.in_(active_statuses),
-        ]
-        if not auth.is_admin:
-            conditions.append(ScheduledRecording.requested_by_user_id == auth.user_id)
-        existing = await session.execute(select(ScheduledRecording).where(*conditions))
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="This program is already scheduled")
+        conditions.append(ScheduledRecording.program_id == str(program_id))
+    # limit(1): legacy databases may already hold duplicate rows from before
+    # the cross-user dedupe existed.
+    existing_result = await session.execute(
+        select(ScheduledRecording).where(*conditions).limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        if existing.requested_by_user_id != auth.user_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This program is already scheduled by another user",
+            )
+        raise HTTPException(status_code=409, detail="This program is already scheduled")
 
     custom_filename = _sanitize_filename(data.custom_filename)
 
