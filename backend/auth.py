@@ -129,7 +129,7 @@ async def get_auth_context(
 
     if role == "download_only" and user_id:
         result = await session.execute(
-            select(User).where(User.id == int(user_id))
+            select(User).where(User.id == int(user_id), User.role == "download_only")
         )
         user = result.scalar_one_or_none()
         if user and user.status == "active":
