@@ -20,6 +20,10 @@ class ScheduledManager:
         self._running = False
         self._poll_interval = 30
         self._last_loop_error_at: datetime | None = None
+        # Per-tick cache of provider channel lists, keyed by account_id.
+        # Holds either the fetched list or the exception the fetch raised, so
+        # each account's provider is called at most once per tick.
+        self._tick_channel_lists: dict = {}
 
     async def process_queue(self):
         self._running = True
@@ -36,6 +40,7 @@ class ScheduledManager:
 
     async def _queue_ready_recordings(self):
         now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        self._tick_channel_lists = {}
         async with async_session_maker() as session:
             result = await session.execute(
                 select(ScheduledRecording).where(
@@ -181,9 +186,20 @@ class ScheduledManager:
     async def _get_catchup_window_days(self, session, schedule) -> int:
         # NoCatchupSupportError propagates; other exceptions propagate so caller
         # can hold the schedule in SCHEDULED state rather than dispatching blindly.
-        days = await epg_service.get_channel_archive_days(
-            session, schedule.account_id, schedule.channel_id
-        )
+        # The channel list is fetched at most once per account per tick (results
+        # and failures are both cached) so a batch of due schedules does not
+        # hammer the provider with one get_live_streams() call each.
+        account_id = schedule.account_id
+        channels = self._tick_channel_lists.get(account_id)
+        if channels is None:
+            try:
+                channels = await epg_service.get_account_live_streams(session, account_id)
+            except Exception as exc:
+                channels = exc
+            self._tick_channel_lists[account_id] = channels
+        if isinstance(channels, Exception):
+            raise channels
+        days = epg_service.archive_days_from_channels(channels, schedule.channel_id)
         return days if days > 0 else 7
 
     def _get_free_space_gb(self, path: str) -> float:

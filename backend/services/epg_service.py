@@ -66,18 +66,21 @@ class EPGService:
             duration = max(1, duration // 24)
         return min(duration, 365)
 
-    async def get_channel_archive_days(
+    async def get_account_live_streams(
         self,
         session: AsyncSession,
         account_id: int,
-        channel_id: str,
-    ) -> int:
+    ) -> list:
+        """Fetch the provider's full live channel list for an account (one API call)."""
         client = await self._get_client(session, account_id)
         try:
-            channels = await client.get_live_streams()
+            return await client.get_live_streams()
         finally:
             await client.close()
 
+    @classmethod
+    def archive_days_from_channels(cls, channels: list, channel_id: str) -> int:
+        """Resolve a channel's catchup window from an already-fetched channel list."""
         channel = next((ch for ch in channels if str(ch.get("stream_id")) == str(channel_id)), None)
         if not channel:
             raise NoCatchupSupportError(
@@ -87,7 +90,16 @@ class EPGService:
             raise NoCatchupSupportError(
                 f"Channel {channel.get('name', channel_id)!r} does not support catchup recording."
             )
-        return self.archive_days_for_channel(channel)
+        return cls.archive_days_for_channel(channel)
+
+    async def get_channel_archive_days(
+        self,
+        session: AsyncSession,
+        account_id: int,
+        channel_id: str,
+    ) -> int:
+        channels = await self.get_account_live_streams(session, account_id)
+        return self.archive_days_from_channels(channels, channel_id)
 
     async def get_categories(self, session: AsyncSession, account_id: int) -> list:
         """Get channel categories for an account."""
