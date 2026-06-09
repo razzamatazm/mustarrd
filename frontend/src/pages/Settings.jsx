@@ -853,7 +853,7 @@ export default function Settings() {
               value: f.value,
               label: f.label,
               disabled:
-                ['remux_mkv', 'remux_mp4', 'remux_mkv_comskip', 'transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && !ffmpegReady
+                ['remux_mkv', 'remux_mp4', 'remux_mkv_comskip', 'transcode_mkv', 'transcode_mp4', 'transcode_comskip', 'transcode_mp4_comskip'].includes(f.value) && ffmpegReady === false
                   ? true
                   : false,
             }))}
@@ -861,7 +861,7 @@ export default function Settings() {
             onChange={handleFormatChange}
           />
 
-          {!ffmpegReady && currentFormat !== 'keep_original' && (
+          {ffmpegReady === false && currentFormat !== 'keep_original' && (
             <Alert color="yellow" variant="light">
               <Text size="sm">
                 ffmpeg is unavailable. The Docker image includes ffmpeg; install or fix it manually if running locally.
@@ -869,7 +869,7 @@ export default function Settings() {
             </Alert>
           )}
 
-          {!comskipReady && isComskipFormat && (
+          {comskipReady === false && isComskipFormat && (
             <Alert color="yellow" variant="light">
               <Text size="sm">
                 Comskip binary not found in the default PATH. Enter the path to your comskip binary below, or see{' '}
@@ -914,11 +914,13 @@ export default function Settings() {
             </SettingRow>
           )}
 
-          {isComskipFormat && (
+          {(isComskipFormat || comskipReady) && (
             <Stack gap="xs">
-              <Text size="xs" c="dimmed">
-                Commercials are detected and removed, then the result is saved as {currentFormat === 'transcode_mp4_comskip' ? 'MP4' : 'MKV'}.
-              </Text>
+              {isComskipFormat && (
+                <Text size="xs" c="dimmed">
+                  Commercials are detected and removed, then the result is saved as {currentFormat === 'transcode_mp4_comskip' ? 'MP4' : 'MKV'}.
+                </Text>
+              )}
               <TextInput
                 label="Comskip Binary Path (optional)"
                 description="Custom path to the comskip binary"
