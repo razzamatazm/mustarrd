@@ -16,10 +16,11 @@ import {
   Alert,
   NumberInput,
   Box,
+  Tooltip,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconPlus,
   IconDotsVertical,
@@ -33,7 +34,7 @@ import {
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 
-import { accountsApi, channelsApi, epgApi, settingsApi } from '../../api'
+import { accountsApi, epgApi, settingsApi } from '../../api'
 
 function timeAgo(dateStr) {
   if (!dateStr) return null
@@ -50,6 +51,16 @@ function timeAgo(dateStr) {
 function getGuideOffsetLabel(account) {
   const offset = Number(account?.guide_offset_hours || 0)
   return offset ? `Guide offset: ${offset >= 0 ? '+' : ''}${offset}h` : 'Guide offset: 0h'
+}
+
+function getCatchupLabel(account) {
+  const count = Number(account.catchup_channel_count)
+  if (count <= 0) return 'Catchup: not available'
+  const maxDays = Number(account.catchup_max_archive_days || 0)
+  const channels = `${count.toLocaleString()} channel${count === 1 ? '' : 's'}`
+  return maxDays > 0
+    ? `Catchup: ${channels} · up to ${maxDays} day${maxDays === 1 ? '' : 's'}`
+    : `Catchup: ${channels}`
 }
 
 function AccountForm({ account, onSubmit, onCancel, isLoading }) {
@@ -130,8 +141,12 @@ function AccountForm({ account, onSubmit, onCancel, isLoading }) {
   )
 }
 
-function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTest, catchupSummary, defaultPending }) {
+function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTest, defaultPending }) {
   const isExpired = account.expiration_date && dayjs(account.expiration_date).isBefore(dayjs())
+  const daysUntilExpiry = account.expiration_date
+    ? dayjs(account.expiration_date).diff(dayjs(), 'day')
+    : null
+  const isExpiringSoon = Boolean(account.expiration_date) && !isExpired && daysUntilExpiry <= 7
 
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder>
@@ -185,15 +200,16 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
       </Text>
 
       <Group mt="md" gap="xs">
-        {catchupSummary?.loading && account.last_connection_ok !== false ? (
+        {account.catchup_channel_count != null && (
           <Badge variant="outline" size="sm" color="blue">
-            Catchup: loading...
+            {getCatchupLabel(account)}
           </Badge>
-        ) : catchupSummary?.maxDays > 0 ? (
-          <Badge variant="outline" size="sm" color="blue">
-            Catchup: up to {catchupSummary.maxDays} days
+        )}
+        {account.vod_available != null && (
+          <Badge variant="outline" size="sm" color={account.vod_available ? 'teal' : 'gray'}>
+            {account.vod_available ? 'VOD ✓' : 'VOD ✗'}
           </Badge>
-        ) : null}
+        )}
         {Number(account?.guide_offset_hours || 0) !== 0 && (
           <Badge variant="light" size="sm" color="grape">
             {getGuideOffsetLabel(account)}
@@ -203,6 +219,15 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
           <Badge variant="outline" size="sm">
             {account.active_connections || 0}/{account.max_connections} connections
           </Badge>
+        )}
+        {isExpiringSoon && (
+          <Tooltip label={`Subscription expires ${dayjs(account.expiration_date).format('MMM D, YYYY')}`}>
+            <Badge variant="filled" size="sm" color="yellow">
+              {daysUntilExpiry === 0
+                ? 'Expires today'
+                : `Expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? '' : 's'}`}
+            </Badge>
+          </Tooltip>
         )}
         {account.expiration_date && (
           <Badge variant="outline" size="sm" color={isExpired ? 'red' : 'yellow'}>
@@ -287,36 +312,6 @@ export default function AccountsSection({ showTitle = true }) {
     queryFn: epgApi.status,
     refetchInterval: 5000,
   })
-
-  const catchupQueries = useQueries({
-    queries: (accounts || []).map((account) => ({
-      queryKey: ['account-catchup-summary', account.id],
-      queryFn: async () => {
-        const channels = await channelsApi.getChannels(account.id, null, false)
-        let maxDays = 0
-        for (const channel of channels || []) {
-          const raw = Number(channel?.tv_archive_duration)
-          const days = Number.isFinite(raw) ? Math.max(0, Math.min(365, Math.trunc(raw))) : 0
-          if (days > maxDays) maxDays = days
-        }
-        return { maxDays }
-      },
-      enabled: Boolean(accounts?.length),
-      staleTime: 5 * 60 * 1000,
-      refetchOnWindowFocus: false,
-    })),
-  })
-
-  const catchupSummaryByAccount = {}
-  if (accounts?.length) {
-    accounts.forEach((account, index) => {
-      const query = catchupQueries[index]
-      catchupSummaryByAccount[account.id] = {
-        loading: Boolean(query?.isLoading),
-        maxDays: query?.data?.maxDays || 0,
-      }
-    })
-  }
 
   const createMutation = useMutation({
     mutationFn: accountsApi.create,
@@ -562,7 +557,6 @@ export default function AccountsSection({ showTitle = true }) {
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTest={handleTest}
-              catchupSummary={catchupSummaryByAccount[account.id]}
               defaultPending={setDefaultAccountMutation.isPending}
             />
           ))}

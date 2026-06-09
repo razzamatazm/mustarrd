@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Added: Account cards warn before your subscription expires and show what each provider supports
+
+**What you would notice:** On the Accounts page, each account card now shows a yellow "Expires in N days" warning badge during the last week of your subscription (hover over it to see the exact date), so a renewal doesn't sneak up on you. Each card also shows a compact summary of what the provider actually offers: how many channels have catchup, the longest archive window seen (for example "Catchup: 1,234 channels · up to 7 days"), and whether the provider has a VOD (movies/series) library. These summaries come from data Mustarrd already collects during its regular guide refresh, so the Accounts page no longer asks your provider for the full channel list every time you open it — the page loads faster and puts less load on your provider. The summaries appear after the first guide refresh following this update.
+
+**What changed:** The EPG ingest now records a per-account capabilities summary (catchup-enabled channel count, maximum archive days, VOD availability via one category lookup per refresh) on the account row, and the accounts API returns those fields. The frontend reads them from the accounts payload instead of fetching every channel from the provider on each page load, and shows an "expires soon" badge when the cached subscription expiry date is 7 days away or less.
+
+---
+
 ### Fixed: The app no longer freezes during big file moves, guide refreshes, or when a network drive misbehaves — and large providers load reliably
 
 **What you would notice:** Several situations that used to make the whole app momentarily unresponsive — frozen download progress, stalled WebSocket updates, pages not loading — are gone. Moving a finished multi-gigabyte recording into a completed folder on another drive (for example a NAS) no longer freezes everything for the duration of the copy. Refreshing the guide from a provider with a large compressed guide file no longer stalls the app while it unpacks. A slow or hung network drive no longer hangs the scheduler or downloads while free space is checked — the check now gives up after 10 seconds. Two more fixes for network-drive and big-provider setups: if your download folder sits on a drive that is not mounted, scheduled recordings now wait for it to come back (with a clear "folder is missing or unreachable" status) instead of silently recording onto the wrong disk and filling it up; and on providers with very large channel lists, loading channels and the program guide no longer times out after 30 seconds — those requests now get the same 90-second budget that movie/series lists already had. Browsing the guide and catchup lists is also faster, because each page load now asks the provider for its channel list once instead of twice.
