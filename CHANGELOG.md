@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Scheduled recordings and season downloads are now safer when several things happen at once
+
+**What you would notice:** A handful of rare but annoying scheduling problems are gone. A database hiccup at the moment a scheduled recording fires can no longer leave a stray download running behind a schedule that fires again later, so you will not see the same program downloading twice. When many scheduled recordings come due at the same time, Mustarrd now asks your provider for its channel list just once per account instead of once per recording, and it keeps a running estimate of how much disk each recording will need, so a burst of recordings can no longer blow through your minimum free space setting. Downloading a whole season is now all-or-nothing: if one episode clashes with a download that is already running, you get a single clear message naming the conflicting episode and nothing is queued, instead of a half-queued season. And if someone else in your household already scheduled a program, trying to schedule it again now tells you immediately that it is already scheduled by another user instead of accepting it and quietly failing later.
+
+**What changed:** Schedule dispatch now commits the download row and the schedule update in one transaction and only enqueues the download after that commit succeeds. The scheduler caches each account's provider channel list for the duration of a polling tick, and subtracts the estimated size of recordings it just dispatched from the free-space check for the rest of the tick. The series download endpoint builds the whole batch first, runs one batched duplicate check, and commits all episodes in a single transaction. Schedule duplicate detection now considers every user's active schedules, not just your own, and returns a clear 409 message. Backend only, no frontend changes.
+
+---
+
 ### Fixed: Commercial skip and transcoding no longer get skipped after a restart when the download and completed folders are the same
 
 **What you would notice:** If you point the download folder and the completed folder at the same directory, restarting Mustarrd while a recording was waiting for (or in the middle of) commercial detection or transcoding used to mark that recording as completed without ever processing it — you would end up with the raw recording, commercials and all. After this fix, the recording is picked up again after the restart and goes through commercial skip and transcoding as configured. Saving Settings with both folders set to the same path now also logs a warning so the setup is easy to spot in the Logs page.
