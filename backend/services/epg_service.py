@@ -10,6 +10,10 @@ from services.xtream_client import XtreamClient
 from config import settings as app_settings
 
 
+class NoCatchupSupportError(Exception):
+    pass
+
+
 class EPGService:
     def __init__(self):
         self._cache: dict = {}  # Simple in-memory cache
@@ -68,9 +72,13 @@ class EPGService:
 
         channel = next((ch for ch in channels if str(ch.get("stream_id")) == str(channel_id)), None)
         if not channel:
-            return 0
+            raise NoCatchupSupportError(
+                f"Channel {channel_id!r} was not found in the provider's channel list."
+            )
         if int(channel.get("tv_archive", 0) or 0) != 1:
-            return 0
+            raise NoCatchupSupportError(
+                f"Channel {channel.get('name', channel_id)!r} does not support catchup recording."
+            )
         return self.archive_days_for_channel(channel)
 
     async def get_categories(self, session: AsyncSession, account_id: int) -> list:
@@ -126,7 +134,10 @@ class EPGService:
         if use_cache and not prefer_live and self._is_cache_valid(cache_key):
             return self._cache[cache_key]["data"]
 
-        archive_days = await self.get_channel_archive_days(session, account_id, channel_id)
+        try:
+            archive_days = await self.get_channel_archive_days(session, account_id, channel_id)
+        except NoCatchupSupportError:
+            return []
         if archive_days <= 0:
             return []
         if days_back is None:

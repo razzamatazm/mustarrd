@@ -110,8 +110,8 @@ class StaleScheduleDispatchTests(unittest.IsolatedAsyncioTestCase):
 
     _queue_ready_recordings marks a schedule as FAILED only when
     available_at is older than the channel's actual catchup window
-    (fetched from the provider). Falls back to 30 days if the provider
-    is unreachable.
+    (fetched from the provider). Leaves the schedule in SCHEDULED state
+    when the provider is unreachable so it retries next poll.
     """
 
     async def _run_queue(self, schedule, archive_days: int = 1) -> list:

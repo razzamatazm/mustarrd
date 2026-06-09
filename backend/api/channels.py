@@ -7,7 +7,7 @@ import logging
 from auth import require_admin_or_download_user, AuthContext
 from database import get_session
 from models import XtreamAccount
-from services.epg_service import epg_service
+from services.epg_service import epg_service, NoCatchupSupportError
 from services.account_credentials import resolve_account_password_with_migration
 from services.xtream_client import XtreamClient
 
@@ -121,6 +121,8 @@ async def get_channel_epg(
             days_back=actual_days,
         )
         return epg_data
+    except NoCatchupSupportError:
+        return []
     except Exception:
         logger.exception(
             "Failed to load channel EPG account_id=%s channel_id=%s",
@@ -156,6 +158,8 @@ async def get_catchup_programs(
             session, account_id, channel_id, actual_days
         )
         return programs
+    except NoCatchupSupportError:
+        return []
     except Exception:
         logger.exception(
             "Failed to load catchup programs account_id=%s channel_id=%s",

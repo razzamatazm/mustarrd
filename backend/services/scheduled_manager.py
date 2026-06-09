@@ -7,7 +7,7 @@ from database import async_session_maker
 from models import ScheduledRecording, ScheduledStatus, AppSettings
 from services.download_builder import build_download_from_program
 from services.download_manager import download_manager
-from services.epg_service import epg_service
+from services.epg_service import epg_service, NoCatchupSupportError
 from config import settings as app_settings
 import os
 import shutil
@@ -63,7 +63,19 @@ class ScheduledManager:
                 if not available_at:
                     continue
                 if available_at <= now_utc:
-                    archive_days = await self._get_catchup_window_days(session, schedule)
+                    try:
+                        archive_days = await self._get_catchup_window_days(session, schedule)
+                    except NoCatchupSupportError as exc:
+                        schedule.status = ScheduledStatus.FAILED.value
+                        schedule.status_message = str(exc)
+                        schedule.updated_at = datetime.utcnow()
+                        continue
+                    except Exception:
+                        logger.warning(
+                            "Could not check catchup window for schedule %s; will retry next poll",
+                            schedule.id,
+                        )
+                        continue
                     catchup_expiry = now_utc - timedelta(days=archive_days)
                     program_end_utc = available_at - timedelta(minutes=int(schedule.post_padding_minutes or 0))
                     if program_end_utc <= catchup_expiry:
@@ -150,13 +162,12 @@ class ScheduledManager:
             await session.commit()
 
     async def _get_catchup_window_days(self, session, schedule) -> int:
-        try:
-            days = await epg_service.get_channel_archive_days(
-                session, schedule.account_id, schedule.channel_id
-            )
-            return max(1, days) if days > 0 else 30
-        except Exception:
-            return 30
+        # NoCatchupSupportError propagates; other exceptions propagate so caller
+        # can hold the schedule in SCHEDULED state rather than dispatching blindly.
+        days = await epg_service.get_channel_archive_days(
+            session, schedule.account_id, schedule.channel_id
+        )
+        return days if days > 0 else 7
 
     def _get_free_space_gb(self, path: str) -> float:
         if not os.path.exists(path):
