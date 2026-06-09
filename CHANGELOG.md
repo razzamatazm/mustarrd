@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Your recording is kept safe when your completed folder runs out of space during the file move
+
+**What you would notice:** On Unraid or NAS setups where your downloads folder and your completed folder are on separate drives or shares, a full completed-folder drive could cause Mustarrd to delete the original recording after it failed to copy it across. You would end up with no file and no explanation. After this fix, if the completed folder is full, Mustarrd leaves your recording in the downloads folder untouched and marks the download Failed with the message "Not enough space in the completed recordings folder. Your recording is safe in the downloads folder."
+
+**What changed:** The download manager was updated to detect disk-full errors during the file move and preserve the source recording instead of deleting it. Backend only, no user settings or configuration were changed.
+
+---
+
+### Fixed: Channels no longer silently vanish from the program guide when your provider uses different text encodings for the same channel name
+
+**What you would notice:** Some IPTV providers send channel names with invisible characters (zero-width spaces, byte-order marks) or use slightly different Unicode representations of the same name at different times. Previously, Mustarrd's channel-matching logic treated these as different channels, so all guide data for those channels was silently dropped. Your guide would appear empty for certain channels even though your provider was sending data. After this fix, invisible characters are stripped and encoding differences are normalized before matching, so the guide loads correctly for all channels regardless of how the provider encodes the name.
+
+**What changed:** The channel name normalization step in the guide import was updated to strip invisible Unicode characters and apply standard Unicode normalization before comparing names. No user settings or configuration were changed.
+
+---
+
 ### Fixed: Completed recording no longer deleted when a database glitch occurs right after the file is saved
 
 **What you would notice:** On Unraid or NAS setups where the database file sits on a network share, a recording could disappear from your completed folder at the exact moment the share went briefly offline or the disk filled up. The download would finish and the file would move to your completed folder, but a split-second database error caused Mustarrd to delete its own completed recording. You would see the download marked as Failed with no file to show for it, even though the recording finished successfully. After this fix, if a database error fires after the file is already in your completed folder, Mustarrd leaves the file alone and marks the download Completed.
