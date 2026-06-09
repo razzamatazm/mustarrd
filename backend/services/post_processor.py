@@ -1233,6 +1233,7 @@ class PostProcessor:
         concat_file = input_file.with_suffix(".concat.txt")
         temp_files = []
         selected_map_args = await self._select_best_av_map_args(input_path, log_callback)
+        concat_succeeded = False
 
         try:
             await self._notify_log(
@@ -1386,6 +1387,8 @@ class PostProcessor:
                         await self._notify_log(log_callback, f"ffmpeg log saved: {log_path}")
                     raise Exception(f"ffmpeg concat failed: {stderr.decode(errors='ignore')}")
 
+            concat_succeeded = True
+
         finally:
             # Cleanup temp files
             for temp_path in temp_files:
@@ -1393,6 +1396,8 @@ class PostProcessor:
                     os.remove(temp_path)
             if concat_file.exists():
                 os.remove(concat_file)
+            if same_path_output and not concat_succeeded and work_output_path.exists():
+                work_output_path.unlink()
 
         self._cleanup_comskip_outputs(input_path, edl_path)
 
