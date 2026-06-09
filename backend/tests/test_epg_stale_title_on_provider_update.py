@@ -1,9 +1,8 @@
 """
-Regression test for EPG title/description silently staying stale after a
-provider corrects its guide data.
+Regression test: EPG titles and descriptions frozen forever when provider corrects metadata.
 
-Bug (MEDIUM): EPGProgram rows are inserted with INSERT OR IGNORE against a
-unique index on (account_id, epg_id), where
+Bug (MEDIUM): EPGProgram rows are inserted with INSERT OR IGNORE against a unique
+index on (account_id, epg_id), where
     epg_id = f"{stream_id}:{start_timestamp}:{stop_timestamp}"
 
 When a provider corrects a program title or description (same channel, same
@@ -24,68 +23,93 @@ Root cause: epg_ingest_manager.py line 244
 There is no UPDATE or ON CONFLICT DO UPDATE path. Once a row is in the DB,
 its title and description are frozen until the row expires.
 
-Fix required: change the insert to ON CONFLICT DO UPDATE SET title=...,
+Fix required: change the insert to use ON CONFLICT DO UPDATE SET title=...,
 description=..., category=... (leaving start_time, end_time, channel_id
 unchanged since those form the identity key).
 """
-import sqlite3
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-def _make_db():
-    """Return an in-memory SQLite connection with the minimal EPGProgram schema."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("""
-        CREATE TABLE epg_programs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            account_id INTEGER NOT NULL,
-            epg_id TEXT NOT NULL,
-            channel_id TEXT NOT NULL,
-            title TEXT,
-            description TEXT,
-            start_time REAL,
-            end_time REAL,
-            UNIQUE(account_id, epg_id)
+import models  # import all models so Base.metadata includes every table
+from database import Base
+from models import EPGProgram
+
+
+def _program_row(epg_id, title, description="", account_id=1):
+    """Return a minimal EPGProgram dict for bulk insert, mirroring the
+    batch dicts built in epg_ingest_manager.refresh_epg_for_account()."""
+    start = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 1, 13, 0, 0, tzinfo=timezone.utc)
+    return {
+        "account_id": account_id,
+        "epg_id": epg_id,
+        "channel_id": "101",
+        "channel_name": "Test Channel",
+        "title": title,
+        "description": description,
+        "category": None,
+        "start_time": start,
+        "end_time": end,
+        "start_timestamp": int(start.timestamp()),
+        "stop_timestamp": int(end.timestamp()),
+        "duration_minutes": 60,
+        "has_archive": True,
+        "provider_start": None,
+        "provider_stop": None,
+        "xmltv_id": None,
+    }
+
+
+def _insert_stmt():
+    """Build the same statement as epg_ingest_manager.py line 244.
+
+    NOTE: when that line is changed (e.g. to ON CONFLICT DO UPDATE SET
+    title=...), update this helper to match so the tests reflect the
+    production semantics.
+    """
+    return insert(EPGProgram).prefix_with("OR IGNORE")
+
+
+class StaleTitleOnProviderUpdateTests(unittest.IsolatedAsyncioTestCase):
+    """INSERT OR IGNORE silently discards provider-corrected titles and descriptions."""
+
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.session_maker = async_sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
         )
-    """)
-    conn.commit()
-    return conn
 
+    async def asyncTearDown(self):
+        await self.engine.dispose()
 
-def _insert_or_ignore(conn, account_id, epg_id, title, description=""):
-    conn.execute(
-        "INSERT OR IGNORE INTO epg_programs "
-        "(account_id, epg_id, channel_id, title, description, start_time, end_time) "
-        "VALUES (?, ?, 'ch1', ?, ?, 0.0, 3600.0)",
-        (account_id, epg_id, title, description),
-    )
-    conn.commit()
+    async def _insert(self, rows):
+        async with self.session_maker() as session:
+            async with session.begin():
+                await session.execute(_insert_stmt(), rows)
 
+    async def _fetch(self, account_id, epg_id):
+        async with self.session_maker() as session:
+            result = await session.execute(
+                select(EPGProgram).where(
+                    EPGProgram.account_id == account_id,
+                    EPGProgram.epg_id == epg_id,
+                )
+            )
+            return result.scalar_one_or_none()
 
-def _fetch_title(conn, account_id, epg_id):
-    row = conn.execute(
-        "SELECT title FROM epg_programs WHERE account_id=? AND epg_id=?",
-        (account_id, epg_id),
-    ).fetchone()
-    return row[0] if row else None
-
-
-class StaleTitleOnProviderUpdateTests(unittest.TestCase):
-    """INSERT OR IGNORE silently discards provider-corrected titles."""
-
-    def setUp(self):
-        self.conn = _make_db()
-
-    def tearDown(self):
-        self.conn.close()
-
-    def test_corrected_title_visible_after_provider_update(self):
+    async def test_corrected_title_visible_after_provider_update(self):
         """After a provider corrects a program title, the next EPG refresh must
         store the updated title in the guide.
 
@@ -96,61 +120,63 @@ class StaleTitleOnProviderUpdateTests(unittest.TestCase):
 
         Expected behavior: second ingest with the corrected title overwrites the
         stale value; the guide reflects what the provider currently says.
+
+        This test FAILS while the bug is present and passes after the fix.
         """
         epg_id = "101:1717228800:1717232400"
-        _insert_or_ignore(self.conn, 1, epg_id, "Placeholder Title")
-        _insert_or_ignore(self.conn, 1, epg_id, "Live: World Cup Final")
+        await self._insert([_program_row(epg_id, "Placeholder Title")])
+        await self._insert([_program_row(epg_id, "Live: World Cup Final")])
 
-        title = _fetch_title(self.conn, 1, epg_id)
+        prog = await self._fetch(1, epg_id)
+        self.assertIsNotNone(prog, "Row must exist after first insert.")
         self.assertEqual(
-            title,
+            prog.title,
             "Live: World Cup Final",
-            f"Expected updated title 'Live: World Cup Final', got '{title}'. "
+            f"Expected updated title 'Live: World Cup Final', got '{prog.title}'. "
             "INSERT OR IGNORE silently discards provider-corrected titles. "
             "Once a row is inserted, its title is frozen until the row expires. "
-            "Fix: use ON CONFLICT DO UPDATE SET title=excluded.title, "
-            "description=excluded.description.",
+            "Fix: change epg_ingest_manager.py line 244 to ON CONFLICT DO UPDATE "
+            "SET title=excluded.title, description=excluded.description.",
         )
 
-    def test_corrected_description_visible_after_provider_update(self):
+    async def test_corrected_description_visible_after_provider_update(self):
         """After a provider corrects a program description, it must be stored.
 
         Bug: same INSERT OR IGNORE path silently discards description updates.
         """
         epg_id = "101:1717228800:1717232400"
-        _insert_or_ignore(self.conn, 1, epg_id, "Movie Night", "TBA")
-        _insert_or_ignore(self.conn, 1, epg_id, "Movie Night", "A classic thriller from 1978.")
+        await self._insert([_program_row(epg_id, "Movie Night", "TBA")])
+        await self._insert([_program_row(epg_id, "Movie Night", "A classic thriller from 1978.")])
 
-        row = self.conn.execute(
-            "SELECT description FROM epg_programs WHERE account_id=1 AND epg_id=?",
-            (epg_id,),
-        ).fetchone()
-        description = row[0] if row else None
+        prog = await self._fetch(1, epg_id)
         self.assertEqual(
-            description,
+            prog.description,
             "A classic thriller from 1978.",
-            f"Expected updated description, got '{description}'. "
+            f"Expected updated description, got '{prog.description}'. "
             "INSERT OR IGNORE silently discards provider description updates.",
         )
 
-    def test_first_insert_still_creates_row(self):
+    async def test_first_insert_still_creates_row(self):
         """Sanity: a new epg_id must still be inserted (regression guard)."""
         epg_id = "101:1717315200:1717318800"
-        _insert_or_ignore(self.conn, 1, epg_id, "News at Ten")
-        title = _fetch_title(self.conn, 1, epg_id)
-        self.assertEqual(title, "News at Ten", "New row was not inserted.")
+        await self._insert([_program_row(epg_id, "News at Ten")])
+        prog = await self._fetch(1, epg_id)
+        self.assertIsNotNone(prog, "New row must exist after first insert.")
+        self.assertEqual(prog.title, "News at Ten")
 
-    def test_different_account_can_have_same_epg_id(self):
+    async def test_different_account_can_have_same_epg_id(self):
         """Two accounts can have rows with the same epg_id (regression guard).
-        Unique constraint is (account_id, epg_id), not just epg_id.
+        The unique constraint is (account_id, epg_id), not just epg_id.
         """
         epg_id = "101:1717228800:1717232400"
-        _insert_or_ignore(self.conn, 1, epg_id, "Account 1 Title")
-        _insert_or_ignore(self.conn, 2, epg_id, "Account 2 Title")
-        title_1 = _fetch_title(self.conn, 1, epg_id)
-        title_2 = _fetch_title(self.conn, 2, epg_id)
-        self.assertEqual(title_1, "Account 1 Title")
-        self.assertEqual(title_2, "Account 2 Title")
+        await self._insert([_program_row(epg_id, "Account 1 Title", account_id=1)])
+        await self._insert([_program_row(epg_id, "Account 2 Title", account_id=2)])
+        prog1 = await self._fetch(1, epg_id)
+        prog2 = await self._fetch(2, epg_id)
+        self.assertIsNotNone(prog1)
+        self.assertIsNotNone(prog2)
+        self.assertEqual(prog1.title, "Account 1 Title")
+        self.assertEqual(prog2.title, "Account 2 Title")
 
 
 if __name__ == "__main__":
