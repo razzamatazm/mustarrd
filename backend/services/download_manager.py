@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import aiofiles
+import errno
 import glob as glob_module
 import logging
 import os
@@ -702,7 +703,37 @@ class DownloadManager:
 
                 completed_folder = self._resolve_completed_folder(settings)
                 download_folder = self._resolve_download_folder(settings)
-                completed_path = self._move_to_completed(download.output_path, completed_folder, download_folder)
+                try:
+                    completed_path = self._move_to_completed(download.output_path, completed_folder, download_folder)
+                except OSError as move_err:
+                    # Move failed (e.g. ENOSPC on the completed folder mount). The
+                    # downloaded file is still intact in the download folder. Mark as
+                    # FAILED without deleting the source.
+                    if move_err.errno == errno.ENOSPC:
+                        msg = (
+                            "Not enough space in the completed recordings folder. "
+                            "Your recording is safe in the downloads folder. "
+                            "Free up space on that drive."
+                        )
+                    else:
+                        msg = _friendly_error(move_err)
+                    download.status = DownloadStatus.FAILED.value
+                    if not download.completed_at:
+                        download.completed_at = datetime.utcnow()
+                    download.error_message = msg
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
+                    try:
+                        await session.commit()
+                    except Exception:
+                        pass
+                    await self._broadcast_progress(
+                        download_id,
+                        download.progress,
+                        DownloadStatus.FAILED.value,
+                        error=msg,
+                    )
+                    await self._broadcast_log(download_id, f"Download failed: {msg}", level="error")
+                    return
                 download.output_path = completed_path
 
                 download.status = DownloadStatus.COMPLETED.value
@@ -1049,7 +1080,15 @@ class DownloadManager:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if os.path.abspath(path) == os.path.abspath(dest):
             return path
-        shutil.move(path, dest)
+        try:
+            shutil.move(path, dest)
+        except OSError:
+            try:
+                if os.path.exists(dest):
+                    os.unlink(dest)
+            except OSError:
+                pass
+            raise
         return dest
 
     def _cleanup_working_files(self, original_path: str, completed_path: str, keep_logs: bool, delete_original: bool = True) -> None:
