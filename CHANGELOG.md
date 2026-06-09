@@ -6,6 +6,38 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Show titles containing & no longer leave your program guide empty
+
+**What you would notice:** If your IPTV provider lists programs with titles like "R&B Music," "News & Events," or "AT&T Special," Mustarrd would crash while importing the guide and leave your Browse page empty. The error happened because a bare `&` is not valid in the XML format providers use for guide data. After this fix, Mustarrd escapes those characters before parsing so the guide loads correctly. Standard XML codes like `&amp;` and `&#160;` are left unchanged.
+
+**What changed:** Guide data is now scanned for bare `&` characters before the XML parser sees it. Any that are not already part of a valid entity are replaced with the safe `&amp;` equivalent. No user-visible setting or configuration was changed.
+
+---
+
+### Fixed: Program guide times are now correct for providers in India, Newfoundland, Iran, and Myanmar
+
+**What you would notice:** If your IPTV provider is based in a region that uses a half-hour or unusual time zone offset, such as India (+5:30), Newfoundland (-3:30), Iran (+3:30), or Myanmar (+6:30), your program guide may have been showing show times that were off by 30 minutes to over six hours. Scheduled recordings would fire at the wrong time or miss the program entirely. After this fix, Mustarrd correctly reads these time zone offsets from the guide data and stores program times accurately.
+
+**What changed:** The part of Mustarrd that reads incoming guide timestamps now recognizes short time zone formats like `+5:30` and `+530` (with a single-digit hour) and normalizes them before parsing. Previously, these were silently treated as UTC. No user-visible setting or configuration was changed.
+
+---
+
+### Fixed: Mustarrd no longer crashes with a confusing error when the disk fills up while it is off
+
+**What you would notice:** If your disk filled up while Mustarrd was shut down, restarting it would cause pending downloads to immediately fail with a cryptic operating system error about no space left on device. The error was hard to read and did not explain what to do. After this fix, Mustarrd checks available disk space before re-queuing downloads at startup. If there is not enough space, it marks the downloads as failed with a plain message that says the disk is full, so you know what to fix.
+
+**What changed:** The startup recovery process that re-queues interrupted downloads now runs the same free-space check that already exists for new downloads. If space is below the configured minimum, the download is marked failed with a readable message instead of being queued to crash. No user-visible setting or configuration was changed.
+
+---
+
+### Improved: Upcoming recording cards no longer show the duration twice
+
+**What you would notice:** Cards on the Downloads > Upcoming tab and the Scheduled Recordings page showed the program duration twice in a row: once on the "Airs" line and again after "Download starts." The second appearance could be read as "the download itself will take 1 hour," which was confusing. After this change, the duration only appears on the "Airs" line. If you have pre- or post-padding configured, the padded total appears after "Download starts" with a clear "with padding" label so you know what the number means.
+
+**What changed:** A small display adjustment was made to the Upcoming recording cards. No download or scheduling logic was changed.
+
+---
+
 ### Fixed: IPTV providers with HTML entities in guide data no longer wipe the program guide
 
 **What you would notice:** Some IPTV providers build their program guide data from web pages and include HTML shortcuts like `&nbsp;` (a special space) or `&eacute;` (the letter e with an accent) in show descriptions. These are valid in HTML but not in the XML format Mustarrd uses to read guide data. When Mustarrd tried to import a guide containing these characters, the XML parser would crash mid-import. If you had "Force Refresh" selected, the old guide was deleted first, and then the crash left you with a completely empty Browse page and no error message. Every automatic guide refresh after that repeated the wipe. After this fix, those HTML characters are converted to a safe form before parsing. The guide loads correctly, descriptions are preserved, and no data is lost.
