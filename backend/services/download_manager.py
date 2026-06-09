@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
 TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
 
+# Default minimum free space to preserve when the AppSettings row has no value;
+# matches the default used by services.disk_space.check_disk_space.
+MIN_FREE_SPACE_FALLBACK_GB = 25
+
 
 def _is_transient_network_error(e: BaseException) -> bool:
     """True for network-level errors worth retrying (disconnects, timeouts).
@@ -1346,6 +1350,56 @@ class DownloadManager:
         except Exception:
             pass
 
+    async def _preflight_disk_space(
+        self,
+        session: AsyncSession,
+        output_path: str,
+        total_size: int,
+        already_have: int,
+        download_id: int,
+    ) -> None:
+        """Fail fast when the remaining bytes (per Content-Length) cannot fit.
+
+        Only runs when the provider reported a Content-Length. The remaining
+        bytes must fit in the free space of the download folder while keeping
+        the configured minimum free space (AppSettings.min_free_space_gb).
+        """
+        if total_size <= 0:
+            return
+        remaining = total_size - already_have
+        if remaining <= 0:
+            return
+        folder = os.path.dirname(output_path) or "."
+        try:
+            free_bytes = shutil.disk_usage(folder).free
+        except OSError:
+            # Cannot stat the folder; let the download proceed and fail
+            # naturally (e.g. ENOSPC) if space truly runs out.
+            return
+        min_free_bytes = 0
+        try:
+            result = await session.execute(select(AppSettings))
+            row = result.scalar_one_or_none()
+            if row is None:
+                # No settings row yet: same default as services.disk_space.
+                min_free_bytes = int(MIN_FREE_SPACE_FALLBACK_GB * (1024 ** 3))
+            elif isinstance(row, AppSettings):
+                value = row.min_free_space_gb
+                min_free_gb = MIN_FREE_SPACE_FALLBACK_GB if value is None else value
+                min_free_bytes = int(float(min_free_gb) * (1024 ** 3))
+            # Anything else (e.g. a test double that is not an AppSettings row)
+            # keeps min_free_bytes at 0: the Content-Length check still applies.
+        except Exception:
+            min_free_bytes = 0
+        if free_bytes < remaining + min_free_bytes:
+            raise Exception(
+                f"Not enough disk space for this recording: "
+                f"{remaining / (1024 ** 3):.2f} GB still to download, "
+                f"only {free_bytes / (1024 ** 3):.2f} GB free "
+                f"({min_free_bytes / (1024 ** 3):.0f} GB minimum free space must be kept). "
+                f"Free up space and retry."
+            )
+
     async def _stream_response_to_file(
         self,
         response,
@@ -1371,6 +1425,10 @@ class DownloadManager:
                 download_id,
                 f"HTTP {response.status}. Size unknown; streaming download."
             )
+
+        await self._preflight_disk_space(
+            session, output_path, total_size, downloaded_start, download_id
+        )
 
         downloaded = downloaded_start
         last_progress_update = 0
