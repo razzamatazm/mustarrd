@@ -618,6 +618,12 @@ class DownloadManager:
 
     async def _execute_download(self, download_id: int):
         """Execute a single download."""
+        # These survive into the except handlers: once the full payload has
+        # been written to disk (and possibly moved to the completed folder),
+        # cancel/error handling must never destroy a complete recording.
+        transfer_complete = False
+        moved_completed_path: Optional[str] = None
+        settings = None
         async with async_session_maker() as session:
             download = None
             try:
@@ -680,6 +686,7 @@ class DownloadManager:
                         "Provider returned an empty response. "
                         "The catchup window for this program may have expired."
                     )
+                transfer_complete = True
                 await self._broadcast_log(download_id, "Download transfer complete.")
 
                 settings_result = await session.execute(select(AppSettings))
@@ -736,6 +743,7 @@ class DownloadManager:
                     await self._broadcast_log(download_id, f"Download failed: {msg}", level="error")
                     return
                 download.output_path = completed_path
+                moved_completed_path = completed_path
 
                 download.status = DownloadStatus.COMPLETED.value
                 download.progress = 100.0
@@ -759,21 +767,43 @@ class DownloadManager:
                         select(Download).where(Download.id == download_id)
                     )
                     download = result.scalar_one_or_none()
+                completed_path = moved_completed_path
+                if (
+                    completed_path is None
+                    and transfer_complete
+                    and download is not None
+                    and download.output_path
+                    and os.path.exists(download.output_path)
+                ):
+                    # The final byte was already written before the cancel
+                    # arrived: the recording is complete. Move it to the
+                    # completed folder instead of deleting it.
+                    if settings is None:
+                        settings = await self._load_app_settings()
+                    try:
+                        completed_path = self._move_to_completed(
+                            download.output_path,
+                            self._resolve_completed_folder(settings),
+                            self._resolve_download_folder(settings),
+                        )
+                    except OSError:
+                        # Move failed; keep the recording where it is.
+                        completed_path = download.output_path
+                if download is not None and completed_path is not None:
+                    # Cancel arrived after the download already finished (and
+                    # possibly after the move). Treat the recording as complete
+                    # and leave the file untouched.
+                    self._cancelled.discard(download_id)
+                    await self._finalize_completed_after_interrupt(
+                        session, download_id, completed_path
+                    )
+                    await self._broadcast_log(
+                        download_id,
+                        f"Download completed: {os.path.basename(completed_path)}"
+                    )
+                    await self._trigger_plex_refresh(completed_path)
+                    return
                 if download:
-                    if download.status == DownloadStatus.COMPLETED.value:
-                        # Cancel arrived after the file was already moved to the
-                        # completed folder. Commit the completed state and leave
-                        # the file untouched.
-                        await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                        await session.commit()
-                        await self._broadcast_progress(
-                            download_id, 100, DownloadStatus.COMPLETED.value
-                        )
-                        await self._broadcast_log(
-                            download_id,
-                            f"Download completed: {os.path.basename(download.output_path)}"
-                        )
-                        return
                     download.status = DownloadStatus.CANCELLED.value
                     await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                     await session.commit()
@@ -1013,12 +1043,74 @@ class DownloadManager:
                     select(Download).where(Download.id == download_id)
                 )
                 dl = result.scalar_one_or_none()
-                if dl and dl.output_path:
+                # Never delete a recording that was already finalized: a stale
+                # cancel flag must not destroy a COMPLETED file.
+                if dl and dl.output_path and dl.status != DownloadStatus.COMPLETED.value:
                     path = Path(dl.output_path)
                     if path.is_file():
                         path.unlink()
         except Exception:
             pass
+
+    async def _load_app_settings(self) -> Optional[AppSettings]:
+        """Load AppSettings on a fresh session; returns None when unavailable."""
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(select(AppSettings))
+                return result.scalar_one_or_none()
+        except Exception:
+            return None
+
+    async def _finalize_completed_after_interrupt(
+        self,
+        session: AsyncSession,
+        download_id: int,
+        completed_path: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Persist COMPLETED for a recording whose file already survived on disk.
+
+        Called from cancel/error handlers once the full recording has been
+        written (and usually moved to the completed folder). The file must
+        never be lost just because the caller's session is unusable (e.g. a
+        failed commit left it pending rollback), so this retries once on a
+        fresh session and never raises a DB error back to the caller.
+        """
+        values = {
+            "status": DownloadStatus.COMPLETED.value,
+            "output_path": completed_path,
+            "progress": 100.0,
+            "completed_at": datetime.utcnow(),
+            "error_message": error_message,
+        }
+        try:
+            await session.execute(
+                update(Download).where(Download.id == download_id).values(**values)
+            )
+            await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
+            await session.commit()
+        except Exception:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            try:
+                async with async_session_maker() as fresh_session:
+                    await fresh_session.execute(
+                        update(Download).where(Download.id == download_id).values(**values)
+                    )
+                    await self._sync_schedule_status(
+                        fresh_session, download_id, DownloadStatus.COMPLETED.value
+                    )
+                    await fresh_session.commit()
+            except Exception:
+                logger.exception(
+                    "Could not persist COMPLETED state for download %s; "
+                    "file preserved at %s",
+                    download_id,
+                    completed_path,
+                )
+        await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
 
     async def _resolve_download_owner(self, download_id: int) -> int | None:
         if download_id in self._download_owners:
