@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: Downloads history now shows how long ago a recording aired
+
+**What you would notice:** Download cards in the History, Active, and Upcoming tabs used to show air dates as fixed dates like "Jun 8, 2026 7:30 PM." They now show relative dates the same way the Scheduled Recordings page already did: "Yesterday at 7:30 PM" for recent items, and a short weekday form like "Tue, Nov 14, 2023 at 10:13 PM" for older ones. This matches what you already see on the Scheduled Recordings page and makes it easier to see at a glance how recent a recording is.
+
+**What changed:** A one-line display adjustment was made to Download cards. No download, scheduling, or storage logic was changed.
+
+---
+
 ### Fixed: Show titles containing & no longer leave your program guide empty
 
 **What you would notice:** If your IPTV provider lists programs with titles like "R&B Music," "News & Events," or "AT&T Special," Mustarrd would crash while importing the guide and leave your Browse page empty. The error happened because a bare `&` is not valid in the XML format providers use for guide data. After this fix, Mustarrd escapes those characters before parsing so the guide loads correctly. Standard XML codes like `&amp;` and `&#160;` are left unchanged.
