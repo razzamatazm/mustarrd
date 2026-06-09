@@ -862,6 +862,10 @@ class DownloadManager:
 
     async def _execute_post_process(self, download_id: int):
         """Execute post-processing for a downloaded file."""
+        # Set once the output file has been moved to the completed folder so
+        # cancel/error handling never marks a surviving recording CANCELLED or
+        # FAILED (which would expose it to later cleanup/retry deletion).
+        moved_completed_path: Optional[str] = None
         async with async_session_maker() as session:
             working_input_path: Optional[str] = None
             completed_output_path: Optional[str] = None
@@ -897,6 +901,7 @@ class DownloadManager:
                             break
                     if processed_found:
                         completed_path = self._move_to_completed(processed_found, completed_folder, download_folder)
+                        moved_completed_path = completed_path
                         download.output_path = completed_path
                         download.status = DownloadStatus.COMPLETED.value
                         download.progress = 100.0
@@ -913,6 +918,7 @@ class DownloadManager:
 
                 if not self._needs_post_processing(download, settings):
                     completed_path = self._move_to_completed(original_path, completed_folder, download_folder)
+                    moved_completed_path = completed_path
                     download.output_path = completed_path
                     download.status = DownloadStatus.COMPLETED.value
                     download.progress = 100.0
@@ -937,6 +943,7 @@ class DownloadManager:
                 final_path = self._select_final_path(original_path, final_path)
                 completed_path = self._move_to_completed(final_path, completed_folder, download_folder)
                 completed_output_path = completed_path
+                moved_completed_path = completed_path
                 download.output_path = completed_path
                 if warnings:
                     download.error_message = f"Completed with warnings: {'; '.join(warnings)}"
@@ -970,19 +977,20 @@ class DownloadManager:
                 await self._trigger_plex_refresh(completed_path)
 
             except asyncio.CancelledError:
+                if moved_completed_path is not None:
+                    # File was already moved to the completed folder before the
+                    # cancel arrived. Persist COMPLETED so the recording is not
+                    # left as PROCESSING/CANCELLED with an orphaned file.
+                    self._cancelled.discard(download_id)
+                    await self._finalize_completed_after_interrupt(
+                        session, download_id, moved_completed_path
+                    )
+                    return
                 result = await session.execute(
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
-                if download and download.status == DownloadStatus.COMPLETED.value:
-                    # File was already moved to the completed folder before the cancel
-                    # arrived. The in-memory COMPLETED state was never committed because
-                    # the session shares the same identity map. Commit it now so the
-                    # recording is not left as PROCESSING with an orphaned file.
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                    await session.commit()
-                    await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
-                elif download and download.status in [
+                if download and download.status in [
                     DownloadStatus.PENDING.value,
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.PROCESSING.value,
@@ -1005,6 +1013,26 @@ class DownloadManager:
                     await self._broadcast_log(download_id, "Post-processing cancelled.", level="warning")
 
             except Exception as e:
+                if moved_completed_path is not None and os.path.exists(moved_completed_path):
+                    # Post-processing crashed after the file was already moved
+                    # to the completed folder. The artifact survived, so record
+                    # the download as COMPLETED instead of FAILED (a FAILED row
+                    # pointing at the completed file would let retry/cleanup
+                    # overwrite or delete a good recording).
+                    await self._finalize_completed_after_interrupt(
+                        session,
+                        download_id,
+                        moved_completed_path,
+                        error_message=f"Completed with warnings: {_friendly_error(e)}",
+                    )
+                    await self._broadcast_log(
+                        download_id,
+                        f"Post-processing error after the file was finalized ({e}); "
+                        f"recording kept: {os.path.basename(moved_completed_path)}",
+                        level="warning",
+                    )
+                    await self._trigger_plex_refresh(moved_completed_path)
+                    return
                 result = await session.execute(
                     select(Download).where(Download.id == download_id)
                 )
