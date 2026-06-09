@@ -141,6 +141,7 @@ export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [newUserName, setNewUserName] = useState('')
   const [newUserDisplayName, setNewUserDisplayName] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
@@ -312,6 +313,7 @@ export default function Settings() {
     onSuccess: async () => {
       setCurrentPassword('')
       setNewPassword('')
+      setConfirmPassword('')
       queryClient.setQueryData(['auth', 'status'], (previous) => {
         if (!previous) return previous
         return {
@@ -533,6 +535,14 @@ export default function Settings() {
       notifications.show({
         title: 'Password too short',
         message: 'New password must be at least 8 characters.',
+        color: 'yellow',
+      })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      notifications.show({
+        title: 'Passwords do not match',
+        message: 'New password and confirmation must be the same.',
         color: 'yellow',
       })
       return
@@ -1095,7 +1105,7 @@ export default function Settings() {
         <Text fw={600} size="lg">Security</Text>
         <Text size="sm" c="dimmed">
           {isAdmin
-            ? 'Change the admin password used to access Settings'
+            ? 'Change your admin account password'
             : 'Change your local download user password'}
         </Text>
       </Stack>
@@ -1122,6 +1132,13 @@ export default function Settings() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
+          />
+          <PasswordInput
+            label={isAdmin ? 'Confirm New Admin Password' : 'Confirm New Password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            error={confirmPassword && confirmPassword !== newPassword ? 'Passwords do not match' : null}
           />
           <Group justify="flex-end">
             <Button
