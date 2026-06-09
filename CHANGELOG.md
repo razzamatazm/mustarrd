@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Temporary files are now cleaned up when post-processing fails or is cancelled
+
+**What you would notice:** Cancelling a recording during commercial detection or transcoding, or having post-processing fail partway through, no longer leaves junk behind in your download folder. Previously, half-written video files, Comskip working files (`.edl`, `.txt`, `.logo` and similar), and intermediate `_comskip_input` files could silently pile up and eat disk space. Cancelling now also actually stops the background FFmpeg helpers instead of leaving them running and writing to disk. In addition: empty Show/Season folders are removed from the download folder after a series episode moves to your completed folder; post-processing now checks free disk space before starting a transcode and fails with a clear error instead of dying mid-write and leaving a partial file; and a corrupt recording can no longer freeze post-processing forever while probing the file.
+
+**What changed:** The post-processing pipeline cleans up its working files (Comskip sidecars, segment temp files, and partial transcode outputs) on every exit path — success, failure, and cancellation — while always keeping the raw recording in the download folder on failure. FFmpeg subprocesses used for Comskip input preparation and segment extraction are terminated when a job is cancelled. The file probe (ffprobe) now has a 60-second timeout with a clean fallback. A disk-space preflight (using the existing minimum free space setting) runs before any transcode or commercial removal starts. After moving a series episode to the completed folder, now-empty Show/Season directories are removed up to — but never including — the configured download folder. Backend only, no user settings or configuration were changed.
+
+---
+
 ### Fixed: Guide (EPG) refresh is more resilient — no more wiped guides, missing channels, or wrong-time downloads
 
 **What you would notice:** Several guide problems that could appear after an EPG refresh are gone:
