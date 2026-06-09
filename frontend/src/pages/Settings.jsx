@@ -1279,7 +1279,6 @@ export default function Settings() {
       <Text fw={600}>Plex Integration</Text>
       <Group align="center">
         <Button
-          variant="light"
           onClick={() => {
             const popup = window.open('about:blank', '_blank')
             connectPlexStartMutation.mutate({ popupRef: popup })
