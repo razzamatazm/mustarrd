@@ -595,6 +595,9 @@ class DownloadManager:
                                     f"Disk space below minimum at startup "
                                     f"({free_gb:.1f} GB free, {min_free_gb} GB required)."
                                 )
+                                if not dl.completed_at:
+                                    dl.completed_at = datetime.utcnow()
+                                await self._sync_schedule_status(session, dl.id, DownloadStatus.FAILED.value)
                                 await self._broadcast_log(
                                     dl_id,
                                     dl.error_message,

@@ -64,6 +64,7 @@ def _pending_download(dl_id=1, output_path="/tmp/dl/show.ts"):
     dl.file_size = 0
     dl.downloaded_bytes = 0
     dl.error_message = None
+    dl.completed_at = None
     return dl
 
 
@@ -84,11 +85,13 @@ class RecoverLowDiskTests(unittest.IsolatedAsyncioTestCase):
         disk_result = MagicMock()
         disk_result.free = 5 * 1024 ** 3  # 5 GB, below 25 GB threshold
 
+        sync_mock = AsyncMock()
         with (
             patch("services.download_manager.async_session_maker",
                   _make_recovery_session([dl], min_free_gb=25)),
             patch.object(manager, "_broadcast_log", AsyncMock()),
             patch.object(manager, "_broadcast_progress", AsyncMock()),
+            patch.object(manager, "_sync_schedule_status", sync_mock),
             patch.object(manager, "_resolve_completed_folder", return_value="/tmp/completed"),
             patch.object(manager, "_resolve_download_folder", return_value="/tmp/dl"),
             patch("services.download_manager.shutil.disk_usage", return_value=disk_result),
@@ -107,6 +110,11 @@ class RecoverLowDiskTests(unittest.IsolatedAsyncioTestCase):
             dl.error_message.lower(),
             "Error message must mention disk space so the operator knows why it failed.",
         )
+        self.assertIsNotNone(
+            dl.completed_at,
+            "completed_at must be set so schedule row stays in sync.",
+        )
+        sync_mock.assert_called_once()
         self.assertEqual(
             count,
             0,
