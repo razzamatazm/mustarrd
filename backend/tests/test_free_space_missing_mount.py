@@ -170,6 +170,7 @@ class SchedulerMissingFolderTests(unittest.IsolatedAsyncioTestCase):
         download.id = 77
         fake_dm = MagicMock()
         fake_dm.queue_download = AsyncMock(return_value=download)
+        fake_dm.enqueue_persisted = AsyncMock()
 
         async def archive_days(sess, sched):
             return 7
