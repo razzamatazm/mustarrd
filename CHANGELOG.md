@@ -6,6 +6,24 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Improved: ComSkip configuration fields now appear in Settings whenever ComSkip is installed
+
+**What you would notice:** On a fresh Docker install with ComSkip available, the binary path and INI path fields in Settings > Post-Processing were invisible unless you had already switched to a ComSkip recording format. This was a catch-22: you could not see or adjust the ComSkip paths without first picking a format that required them. After this fix, those fields appear whenever Mustarrd detects the ComSkip binary, regardless of which format you have selected.
+
+A second issue was also fixed: the Recording Format dropdown could appear fully grayed out for a moment when you first opened Settings while the app was still checking whether ffmpeg was installed. All format options are now accessible immediately on page load, with individual options disabled only when the relevant tool is confirmed absent.
+
+**What changed:** Two small display fixes were made to Settings > Post-Processing. No settings values, recordings, or configuration files were changed.
+
+---
+
+### Improved: Failed and cancelled recordings now consistently show "Aired:" in history
+
+**What you would notice:** Failed and cancelled recordings in the Scheduled Recordings history showed "Airs: Yesterday at 7:30 PM" (present tense), as if the recording was still upcoming, while completed recordings already showed "Aired:" correctly. After this fix all terminal recording cards, whether completed, failed, or cancelled, show "Aired:" consistently.
+
+**What changed:** A small display fix was made to the Scheduled Recordings history cards. No recording or scheduling logic was changed.
+
+---
+
 ### Fixed: Canceling a download during or just after conversion no longer leaves orphaned files or wrong status
 
 **What you would notice:** Two separate cancellation bugs were fixed in this release.
