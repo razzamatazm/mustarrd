@@ -75,7 +75,9 @@ class BackfillNullEntryTests(unittest.TestCase):
         raised = None
         try:
             for entry in epg_entries:
-                # Verbatim logic from _backfill_from_api lines 881-888.
+                # Verbatim logic from _backfill_from_api lines 929-937.
+                if not isinstance(entry, dict):
+                    continue
                 start_ts = self.manager._parse_timestamp(entry.get("start_timestamp"))
                 stop_ts = self.manager._parse_timestamp(entry.get("stop_timestamp"))
                 if start_ts is None:
@@ -89,22 +91,11 @@ class BackfillNullEntryTests(unittest.TestCase):
             raised = type(exc)
         return processed, raised
 
-    def test_null_entry_currently_raises_attribute_error(self):
-        """
-        A null entry in epg_listings currently causes AttributeError.
-
-        This test documents the BUG. It passes while the bug is present
-        and will fail once a type guard is added.
-        """
-        epg_entries = [None]
-        _, raised = self._process_entries(epg_entries)
-        self.assertEqual(
-            raised,
-            AttributeError,
-            "Expected AttributeError from None.get() to confirm bug is present. "
-            "If this test now passes (no AttributeError), the bug has been fixed "
-            "and this test should be replaced by test_null_entry_is_skipped.",
-        )
+    def test_null_entry_is_skipped(self):
+        """A lone null entry must be silently skipped without raising."""
+        processed, raised = self._process_entries([None])
+        self.assertIsNone(raised)
+        self.assertEqual(processed, 0)
 
     def test_null_entry_before_valid_entry_aborts_loop(self):
         """

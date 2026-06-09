@@ -927,6 +927,8 @@ class EPGIngestManager:
                     continue
 
                 for entry in epg_entries:
+                    if not isinstance(entry, dict):
+                        continue
                     start_ts = self._parse_timestamp(entry.get("start_timestamp"))
                     stop_ts = self._parse_timestamp(entry.get("stop_timestamp"))
                     if start_ts is None:
