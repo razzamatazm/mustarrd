@@ -924,6 +924,7 @@ export default function Browse() {
                               getProgramPreviousDownload(program, selectedChannel?.stream_id)
                             }
                             guideOffsetHours={selectedGuideOffsetHours}
+                            archiveDays={selectedChannelArchiveDays}
                           />
                         ) : (
                           <Text c="dimmed" ta="center" py="xl">
@@ -1046,6 +1047,7 @@ export default function Browse() {
                             getProgramPreviousDownload(program, selectedChannel?.stream_id)
                           }
                           guideOffsetHours={selectedGuideOffsetHours}
+                          archiveDays={selectedChannelArchiveDays}
                         />
                       ) : (
                         <Text c="dimmed" ta="center" py="xl">

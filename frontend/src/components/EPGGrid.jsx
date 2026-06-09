@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect } from 'react'
-import { Stack, Text, Group, Badge, ScrollArea, Box, Divider } from '@mantine/core'
+import { Stack, Text, Group, Badge, ScrollArea, Box, Divider, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconClock, IconDownload, IconCalendar } from '@tabler/icons-react'
 import {
@@ -25,6 +25,7 @@ function ProgramBlock({
   isCurrent,
   isDownloadable,
   isSchedulable,
+  isExpired,
   elementId,
   previousDownload,
   guideOffsetHours,
@@ -37,7 +38,7 @@ function ProgramBlock({
 
   const backgroundColor = isCurrent
     ? 'var(--mantine-color-green-light)'
-    : isPast && program.has_archive
+    : isPast && program.has_archive && !isExpired
     ? 'rgba(245, 159, 0, 0.1)'
     : isPast
     ? 'var(--mantine-color-dark-5)'
@@ -63,7 +64,7 @@ function ProgramBlock({
           : isSchedulable
           ? '3px solid var(--mantine-color-teal-6)'
           : '3px solid transparent',
-        opacity: isPast && !program.has_archive ? 0.5 : 1,
+        opacity: isPast && (!program.has_archive || isExpired) ? 0.5 : 1,
         transition: 'box-shadow 0.15s, background-color 0.15s',
       }}
       onClick={() => isClickable && onClick(program, { action: isDownloadable ? 'download' : 'schedule' })}
@@ -112,6 +113,13 @@ function ProgramBlock({
           <Badge size="xs" variant="light" color={isCurrent ? 'green' : isPast ? 'gray' : 'yellow'}>
             {program.duration_minutes}m
           </Badge>
+          {isExpired && (
+            <Tooltip label="No longer available — outside this channel's catchup window" withArrow>
+              <Badge size="xs" variant="light" color="gray">
+                Expired
+              </Badge>
+            </Tooltip>
+          )}
           {previousMeta && (
             <Badge size="xs" variant="light" color={previousMeta.color}>
               {previousMeta.label}
@@ -129,7 +137,7 @@ function ProgramBlock({
   )
 }
 
-function DaySection({ date, programs, onProgramClick, getProgramPreviousDownload, guideOffsetHours }) {
+function DaySection({ date, programs, onProgramClick, getProgramPreviousDownload, guideOffsetHours, archiveCutoff }) {
   const now = getNowUtc()
   const displayNow = now.add(getGuideOffsetHours(guideOffsetHours), 'hour')
   const isToday = date.isSame(displayNow, 'day')
@@ -170,7 +178,10 @@ function DaySection({ date, programs, onProgramClick, getProgramPreviousDownload
           const end = getProgramInstant(program, 'end')
           const isPast = Boolean(end?.isBefore(now))
           const isCurrent = Boolean(start?.isBefore(now) && end?.isAfter(now))
-          const isDownloadable = isPast && program.has_archive
+          const isExpired = Boolean(
+            isPast && program.has_archive && archiveCutoff && end?.isBefore(archiveCutoff)
+          )
+          const isDownloadable = isPast && program.has_archive && !isExpired
           const isSchedulable = !isPast
           const elementId = `epg-program-${program.epg_id || program.id || idx}`
           const previousDownload = getProgramPreviousDownload
@@ -186,6 +197,7 @@ function DaySection({ date, programs, onProgramClick, getProgramPreviousDownload
               isCurrent={isCurrent}
               isDownloadable={isDownloadable}
               isSchedulable={isSchedulable}
+              isExpired={isExpired}
               elementId={elementId}
               previousDownload={previousDownload}
               guideOffsetHours={guideOffsetHours}
@@ -203,11 +215,20 @@ export default function EPGGrid({
   showFuture = false,
   getProgramPreviousDownload = null,
   guideOffsetHours = 0,
+  archiveDays = null,
 }) {
   const scrollAreaRef = useRef(null)
   const didAutoScrollRef = useRef(false)
   const normalizedGuideOffsetHours = getGuideOffsetHours(guideOffsetHours)
   const now = useMemo(() => getNowUtc(), [epgData, showFuture])
+
+  // Programs that ended before this instant are outside the provider's
+  // catchup window and would 404 if queued for download.
+  const archiveCutoff = useMemo(() => {
+    const parsed = Number(archiveDays)
+    if (!Number.isFinite(parsed) || parsed <= 0) return null
+    return now.subtract(parsed, 'day')
+  }, [archiveDays, now])
 
   const visiblePrograms = useMemo(() => {
     if (!epgData) return epgData
@@ -296,9 +317,11 @@ export default function EPGGrid({
     )
   }
 
-  const downloadableCount = visiblePrograms.filter(
-    (p) => p.has_archive && getProgramInstant(p, 'end')?.isBefore(now)
-  ).length
+  const downloadableCount = visiblePrograms.filter((p) => {
+    const end = getProgramInstant(p, 'end')
+    if (!p.has_archive || !end?.isBefore(now)) return false
+    return !(archiveCutoff && end.isBefore(archiveCutoff))
+  }).length
   const schedulableCount = visiblePrograms.filter(
     (p) => getProgramInstant(p, 'end')?.isAfter(now)
   ).length
@@ -329,6 +352,7 @@ export default function EPGGrid({
                 onProgramClick={onProgramClick}
                 getProgramPreviousDownload={getProgramPreviousDownload}
                 guideOffsetHours={normalizedGuideOffsetHours}
+                archiveCutoff={archiveCutoff}
               />
             </Box>
           ))}
