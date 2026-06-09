@@ -51,6 +51,7 @@ class AppSettings(Base):
     epg_offset_minutes: Mapped[int] = mapped_column(Integer, default=0)
     show_future_programs: Mapped[bool] = mapped_column(Boolean, default=False)
     launch_on_startup: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_retry_failed_downloads: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Post-download ffprobe sanity check; flags suspect files as
     # "Completed with warnings" without failing the recording.
@@ -98,6 +99,7 @@ class AppSettings(Base):
             "epg_offset_minutes": self.epg_offset_minutes,
             "show_future_programs": self.show_future_programs,
             "launch_on_startup": self.launch_on_startup,
+            "auto_retry_failed_downloads": self.auto_retry_failed_downloads,
             "onboarding_dismissed": self.onboarding_dismissed,
             "onboarding_processing_confirmed": self.onboarding_processing_confirmed,
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,

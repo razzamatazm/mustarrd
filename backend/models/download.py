@@ -47,6 +47,10 @@ class Download(Base):
     # program duration in duration_minutes. Null when probing was unavailable.
     recorded_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Automatic retry bookkeeping (auto_retry_failed_downloads setting)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -73,6 +77,8 @@ class Download(Base):
             "error_message": self.error_message,
             "is_vod": self.is_vod,
             "recorded_duration_seconds": self.recorded_duration_seconds,
+            "retry_count": self.retry_count,
+            "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

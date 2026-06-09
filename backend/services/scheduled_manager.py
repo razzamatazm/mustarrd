@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from database import async_session_maker
-from models import ScheduledRecording, ScheduledStatus, AppSettings
+from models import ScheduledRecording, ScheduledStatus, AppSettings, Download, DownloadStatus
 from services.download_builder import build_download_from_program
 from services.download_manager import download_manager
 from services.epg_service import epg_service, NoCatchupSupportError
@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 # errs on the side of pausing instead of filling the disk.
 ESTIMATED_RECORDING_GB_PER_HOUR = 3.0
 
+# Automatic retry of FAILED catchup downloads (gated by the
+# auto_retry_failed_downloads app setting, default off). Each download gets a
+# bounded number of automatic attempts, spaced out so a struggling provider is
+# not hammered, and only while the program is still inside the channel's
+# archive (catchup) window.
+AUTO_RETRY_MAX_ATTEMPTS = 3
+AUTO_RETRY_MIN_INTERVAL_MINUTES = 10
+
 
 class ScheduledManager:
     def __init__(self):
@@ -29,6 +37,12 @@ class ScheduledManager:
         # Holds either the fetched list or the exception the fetch raised, so
         # each account's provider is called at most once per tick.
         self._tick_channel_lists: dict = {}
+        # Download ids the auto-retry sweep determined can never become
+        # eligible again (program aged out of the archive window, channel has
+        # no catchup support, no usable program end). Kept in memory so the
+        # sweep does not re-query the provider for them every tick; a restart
+        # re-evaluates once.
+        self._auto_retry_ineligible: set = set()
 
     async def process_queue(self):
         self._running = True
@@ -41,6 +55,13 @@ class ScheduledManager:
             except Exception as e:
                 if self._should_log_loop_error():
                     logger.exception("Error in schedule processor")
+            try:
+                await self._auto_retry_failed_downloads()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                if self._should_log_loop_error():
+                    logger.exception("Error in auto-retry sweep")
             await asyncio.sleep(self._poll_interval)
 
     async def _queue_ready_recordings(self):
@@ -206,13 +227,15 @@ class ScheduledManager:
 
             await session.commit()
 
-    async def _get_catchup_window_days(self, session, schedule) -> int:
-        # NoCatchupSupportError propagates; other exceptions propagate so caller
-        # can hold the schedule in SCHEDULED state rather than dispatching blindly.
-        # The channel list is fetched at most once per account per tick (results
-        # and failures are both cached) so a batch of due schedules does not
-        # hammer the provider with one get_live_streams() call each.
-        account_id = schedule.account_id
+    async def _get_archive_days_raw(self, session, account_id: int, channel_id: str) -> int:
+        """Channel's archive window in days; 0 when the provider reports none.
+
+        NoCatchupSupportError propagates; other exceptions propagate so callers
+        can decide how to handle an unreachable provider. The channel list is
+        fetched at most once per account per tick (results and failures are
+        both cached) so a batch of due schedules or retry candidates does not
+        hammer the provider with one get_live_streams() call each.
+        """
         channels = self._tick_channel_lists.get(account_id)
         if channels is None:
             try:
@@ -222,8 +245,132 @@ class ScheduledManager:
             self._tick_channel_lists[account_id] = channels
         if isinstance(channels, Exception):
             raise channels
-        days = epg_service.archive_days_from_channels(channels, schedule.channel_id)
+        return epg_service.archive_days_from_channels(channels, channel_id)
+
+    async def _get_catchup_window_days(self, session, schedule) -> int:
+        days = await self._get_archive_days_raw(session, schedule.account_id, schedule.channel_id)
         return days if days > 0 else 7
+
+    def _download_program_end_utc(self, download) -> datetime | None:
+        if download.stop_timestamp:
+            try:
+                return datetime.fromtimestamp(int(download.stop_timestamp), tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                return None
+        if download.program_end:
+            end = download.program_end
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            return end
+        return None
+
+    async def _auto_retry_failed_downloads(self):
+        """Re-queue FAILED catchup downloads still inside the archive window.
+
+        Gated by the auto_retry_failed_downloads setting (default off). Each
+        download gets at most AUTO_RETRY_MAX_ATTEMPTS automatic retries spaced
+        at least AUTO_RETRY_MIN_INTERVAL_MINUTES apart, and only while
+        now < program end + the channel's archive window. Unknown or
+        unreachable archive windows are treated conservatively: no retry.
+        Downloads whose linked schedule was cancelled or completed are left
+        alone so user-set terminal states are never revived (#330).
+        """
+        now_utc = datetime.now(timezone.utc)
+        to_retry: list[int] = []
+        async with async_session_maker() as session:
+            settings_result = await session.execute(select(AppSettings))
+            settings = settings_result.scalar_one_or_none()
+            if not settings or not getattr(settings, "auto_retry_failed_downloads", False):
+                return
+
+            result = await session.execute(
+                select(Download).where(
+                    Download.status == DownloadStatus.FAILED.value,
+                    Download.is_vod.isnot(True),
+                )
+            )
+            failed = [
+                d for d in result.scalars().all()
+                if int(d.retry_count or 0) < AUTO_RETRY_MAX_ATTEMPTS
+            ]
+            if not failed:
+                return
+
+            download_folder = settings.download_folder or app_settings.default_download_folder
+            min_free_gb = settings.min_free_space_gb if settings.min_free_space_gb is not None else 25
+            try:
+                if self._get_free_space_gb(download_folder) < min_free_gb:
+                    # Retrying now would burn attempts on guaranteed disk-space
+                    # failures; wait for space to free up instead.
+                    return
+            except OSError:
+                return
+
+            schedule_result = await session.execute(
+                select(ScheduledRecording).where(
+                    ScheduledRecording.download_id.in_([d.id for d in failed])
+                )
+            )
+            schedules_by_download = {s.download_id: s for s in schedule_result.scalars().all()}
+
+            for download in failed:
+                if download.id in self._auto_retry_ineligible:
+                    continue
+
+                schedule = schedules_by_download.get(download.id)
+                if schedule and schedule.status in (
+                    ScheduledStatus.CANCELLED.value,
+                    ScheduledStatus.COMPLETED.value,
+                ):
+                    continue
+
+                last_attempt = download.last_retry_at or download.completed_at
+                if last_attempt is not None:
+                    if last_attempt.tzinfo is None:
+                        last_attempt = last_attempt.replace(tzinfo=timezone.utc)
+                    if now_utc - last_attempt < timedelta(minutes=AUTO_RETRY_MIN_INTERVAL_MINUTES):
+                        continue
+
+                program_end = self._download_program_end_utc(download)
+                if program_end is None:
+                    self._auto_retry_ineligible.add(download.id)
+                    continue
+
+                try:
+                    archive_days = await self._get_archive_days_raw(
+                        session, download.account_id, download.channel_id
+                    )
+                except NoCatchupSupportError:
+                    self._auto_retry_ineligible.add(download.id)
+                    continue
+                except Exception:
+                    # Provider unreachable: unknown window, do not retry
+                    # blindly; re-check on a later tick.
+                    continue
+                if archive_days <= 0:
+                    # Provider reports no archive window: treat conservatively.
+                    self._auto_retry_ineligible.add(download.id)
+                    continue
+                if now_utc >= program_end + timedelta(days=archive_days):
+                    # The window only moves forward; this program is gone.
+                    self._auto_retry_ineligible.add(download.id)
+                    continue
+
+                download.retry_count = int(download.retry_count or 0) + 1
+                download.last_retry_at = datetime.utcnow()
+                to_retry.append(download.id)
+
+            if not to_retry:
+                return
+            await session.commit()
+
+        for download_id in to_retry:
+            requeued = await download_manager.retry_download(download_id)
+            logger.info(
+                "Auto-retry %s for failed download %s",
+                "queued" if requeued else "skipped (status changed)",
+                download_id,
+            )
 
     def _estimate_recording_gb(self, schedule) -> float:
         """Expected on-disk size of a recording, including padding."""

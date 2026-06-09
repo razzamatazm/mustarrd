@@ -119,6 +119,17 @@ async def _apply_lightweight_migrations(conn) -> None:
             text("ALTER TABLE app_settings ADD COLUMN integrity_check_enabled BOOLEAN DEFAULT 1")
         )
 
+    if not await _column_exists(conn, "app_settings", "auto_retry_failed_downloads"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN auto_retry_failed_downloads BOOLEAN DEFAULT 0")
+        )
+
+    if not await _column_exists(conn, "downloads", "retry_count"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0"))
+
+    if not await _column_exists(conn, "downloads", "last_retry_at"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN last_retry_at DATETIME"))
+
 
 async def _migrate_legacy_account_passwords() -> None:
     from models import XtreamAccount
