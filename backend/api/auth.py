@@ -158,6 +158,7 @@ async def auth_status(
     plex_server = plex_result.scalar_one_or_none()
     plex_login_available = bool(
         plex_server
+        and plex_server.enabled
         and plex_server.auto_allow_all_server_users
         and (plex_server.connection_uri or plex_server.base_url)
         and (plex_server.access_token_encrypted or plex_server.token_encrypted)
@@ -372,7 +373,7 @@ async def login_download_user_legacy(
 async def plex_login_start(session: AsyncSession = Depends(get_session)):
     plex_result = await session.execute(select(PlexServer).limit(1))
     plex_server = plex_result.scalar_one_or_none()
-    if not plex_server or not plex_server.auto_allow_all_server_users or not (plex_server.connection_uri or plex_server.base_url):
+    if not plex_server or not plex_server.enabled or not plex_server.auto_allow_all_server_users or not (plex_server.connection_uri or plex_server.base_url):
         raise HTTPException(status_code=403, detail="Plex login is not configured")
     if not (plex_server.access_token_encrypted or plex_server.token_encrypted):
         raise HTTPException(status_code=403, detail="Plex login is not configured")
@@ -403,7 +404,7 @@ async def plex_login_complete(
 
     plex_result = await session.execute(select(PlexServer).limit(1))
     plex_server = plex_result.scalar_one_or_none()
-    if not plex_server:
+    if not plex_server or not plex_server.enabled:
         raise HTTPException(status_code=403, detail="Plex login is not configured")
 
     encrypted_token = plex_server.access_token_encrypted or plex_server.token_encrypted
