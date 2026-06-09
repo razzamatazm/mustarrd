@@ -1747,7 +1747,10 @@ class DownloadManager:
                     raise Exception(f"HTTP {response.status}: {response.reason}")
 
                 content_type = response.headers.get("Content-Type", "")
-                if not needs_restart and content_type.lower().startswith("text/"):
+                _ct_lower = content_type.lower()
+                if not needs_restart and (
+                    _ct_lower.startswith("text/") or _ct_lower.startswith("application/json")
+                ):
                     raise Exception(
                         f"Provider returned an error page (Content-Type: {content_type}). "
                         "The catchup window may have expired or be unavailable."
@@ -1847,7 +1850,8 @@ class DownloadManager:
                 if response.status not in (200, 206):
                     raise Exception(f"HTTP {response.status}: {response.reason}")
                 restart_ct = response.headers.get("Content-Type", "")
-                if restart_ct.lower().startswith("text/"):
+                _rct_lower = restart_ct.lower()
+                if _rct_lower.startswith("text/") or _rct_lower.startswith("application/json"):
                     raise Exception(
                         f"Provider returned an error page (Content-Type: {restart_ct}). "
                         "The catchup window may have expired or be unavailable."
