@@ -310,7 +310,12 @@ class EPGIngestManager:
             channel_maps = self._build_channel_maps(catchup_channels)
 
             raw_xmltv = await client.get_xmltv()
-            xmltv_bytes = self._maybe_decompress(raw_xmltv) if raw_xmltv else b""
+            # Decompressing a large guide (tens of MB of gzip) is CPU-bound;
+            # run it off the event loop so downloads and WebSockets keep moving.
+            xmltv_bytes = (
+                await asyncio.to_thread(self._maybe_decompress, raw_xmltv)
+                if raw_xmltv else b""
+            )
             _xmltv_no_cdata = re.sub(rb"<!\[CDATA\[.*?\]\]>", b"", xmltv_bytes, flags=re.DOTALL) if xmltv_bytes else b""
             total_programs = _xmltv_no_cdata.count(b"<programme")
             self._status["total_programs"] = total_programs if total_programs > 0 else None
