@@ -19,7 +19,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from services.epg_ingest_manager import EPGIngestManager, _sanitize_html_entities
+from services.epg_ingest_manager import EPGIngestManager, _sanitize_html_entities, _BARE_AMP_RE
 
 
 _XMLTV_HTML_ENTITIES = (
@@ -81,6 +81,36 @@ class SanitizeHtmlEntitiesTests(unittest.TestCase):
     def test_untouched_when_no_html_entities(self):
         data = b"<desc>Normal &amp; text</desc>"
         self.assertEqual(_sanitize_html_entities(data), data)
+
+    def test_bare_amp_escaped(self):
+        self.assertEqual(_sanitize_html_entities(b"R&B Music"), b"R&amp;B Music")
+
+    def test_bare_amp_in_title(self):
+        self.assertEqual(
+            _sanitize_html_entities(b"Rock & Roll"),
+            b"Rock &amp; Roll",
+        )
+
+    def test_bare_amp_at_start(self):
+        self.assertEqual(_sanitize_html_entities(b"& the band"), b"&amp; the band")
+
+    def test_bare_amp_at_end(self):
+        self.assertEqual(_sanitize_html_entities(b"News &"), b"News &amp;")
+
+    def test_amp_entity_preserved_after_bare_amp_fix(self):
+        # &amp; must survive both passes unchanged.
+        self.assertEqual(_sanitize_html_entities(b"A &amp; B"), b"A &amp; B")
+
+    def test_numeric_decimal_entity_not_double_escaped(self):
+        self.assertEqual(_sanitize_html_entities(b"&#160;"), b"&#160;")
+
+    def test_numeric_hex_entity_not_double_escaped(self):
+        self.assertEqual(_sanitize_html_entities(b"&#x00A0;"), b"&#x00A0;")
+
+    def test_mixed_bare_amp_and_named_entity(self):
+        # "&" bare + "&nbsp;" named entity both handled in one call.
+        result = _sanitize_html_entities(b"R&B &nbsp; Show")
+        self.assertEqual(result, b"R&amp;B &amp;nbsp; Show")
 
 
 class IterProgramsHtmlEntityTests(unittest.TestCase):
@@ -162,6 +192,64 @@ class IterProgramsHtmlEntityTests(unittest.TestCase):
         programs = list(manager._iter_programs(clean, maps, _NOW_UTC))
         self.assertEqual(len(programs), 1)
         self.assertEqual(programs[0]["title"], "Normal Show")
+
+    def test_bare_amp_in_title_no_parse_error(self):
+        """
+        Bare & in a title (e.g. R&B Music, AT&T Special) must not raise ParseError.
+
+        Before fix: expat raised ParseError on bare & not followed by entity name;
+        with force=True the guide was wiped before parsing started, leaving it empty.
+        After fix: _sanitize_html_entities escapes bare & to &amp; before iterparse.
+        """
+        xmltv = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b"<tv>"
+            b'<channel id="c1"><display-name>Music</display-name></channel>'
+            b'<programme start="20261201200000 +0000" stop="20261201210000 +0000" channel="c1">'
+            b"<title>R&amp;B Music</title>"
+            b"</programme>"
+            b'<programme start="20261201210000 +0000" stop="20261201220000 +0000" channel="c1">'
+            b"<title>Rock &amp; Roll Hour</title>"
+            b"<desc>AT&amp;T Special event tonight</desc>"
+            b"</programme>"
+            b"</tv>"
+        )
+        # The XMLTV above already has proper &amp; (valid XML). Now test the raw form
+        # that providers actually emit, with literal bare &.
+        xmltv_raw = xmltv.replace(b"&amp;", b"&")
+        maps = {
+            "stream_by_xmltv_id": {"c1": "c1"},
+            "stream_by_name": {},
+            "stream_info": {"c1": {"name": "Music", "has_archive": True, "archive_days": 30}},
+        }
+        manager = EPGIngestManager()
+        import xml.etree.ElementTree as RealET
+        try:
+            programs = list(manager._iter_programs(xmltv_raw, maps, _NOW_UTC))
+        except RealET.ParseError as exc:
+            self.fail(f"_iter_programs raised ParseError for bare & in title/desc: {exc}")
+        self.assertEqual(len(programs), 2, "Both programmes must be yielded despite bare & characters.")
+
+    def test_bare_amp_title_value_correct(self):
+        """Title with bare & is ingested with the & intact (stored as literal &)."""
+        xmltv = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b"<tv>"
+            b'<channel id="c1"><display-name>News</display-name></channel>'
+            b'<programme start="20261201200000 +0000" stop="20261201210000 +0000" channel="c1">'
+            b"<title>News & Events</title>"
+            b"</programme>"
+            b"</tv>"
+        )
+        maps = {
+            "stream_by_xmltv_id": {"c1": "c1"},
+            "stream_by_name": {},
+            "stream_info": {"c1": {"name": "News", "has_archive": True, "archive_days": 30}},
+        }
+        manager = EPGIngestManager()
+        programs = list(manager._iter_programs(xmltv, maps, _NOW_UTC))
+        self.assertEqual(len(programs), 1)
+        self.assertEqual(programs[0]["title"], "News & Events")
 
 
 if __name__ == "__main__":

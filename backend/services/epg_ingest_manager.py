@@ -27,16 +27,20 @@ logger = logging.getLogger(__name__)
 # raise ParseError. Replace them with &amp;name; before parsing.
 _XML_ENTITY_NAMES = frozenset([b"amp", b"lt", b"gt", b"apos", b"quot"])
 _HTML_ENTITY_RE = re.compile(rb"&([a-zA-Z][a-zA-Z0-9]*);")
+# Matches & not followed by a valid entity reference (named, decimal, or hex).
+# Entity names contain only alphanumeric chars and #; spaces are not allowed.
+_BARE_AMP_RE = re.compile(rb"&(?![a-zA-Z#][a-zA-Z0-9]{0,10};)")
 
 
 def _sanitize_html_entities(data: bytes) -> bytes:
-    """Escape non-XML named entities so expat does not choke on them."""
+    """Escape non-XML named entities and bare & so expat does not choke on them."""
     def _replace(m: "re.Match[bytes]") -> bytes:
         name = m.group(1)
         if name in _XML_ENTITY_NAMES:
             return m.group(0)
         return b"&amp;" + name + b";"
-    return _HTML_ENTITY_RE.sub(_replace, data)
+    data = _HTML_ENTITY_RE.sub(_replace, data)
+    return _BARE_AMP_RE.sub(b"&amp;", data)
 
 
 # Common XMLTV timezone abbreviations mapped to their UTC offset in minutes.
