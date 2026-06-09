@@ -689,6 +689,11 @@ class EPGIngestManager:
                 if upper in _NAMED_TZ_OFFSETS:
                     tz = timezone(timedelta(minutes=_NAMED_TZ_OFFSETS[upper]))
                     return dt.replace(tzinfo=tz)
+                # Normalize single-digit-hour offsets: +5:30 → +05:30, +530 → +0530
+                if len(tz_part) == 5 and tz_part[0] in "+-" and tz_part[2] == ":":
+                    tz_part = tz_part[0] + "0" + tz_part[1] + tz_part[3:]
+                elif len(tz_part) == 4 and tz_part[0] in "+-" and tz_part[1:].isdigit():
+                    tz_part = tz_part[0] + "0" + tz_part[1:]
                 if len(tz_part) == 6 and tz_part[3] == ":":
                     tz_part = tz_part.replace(":", "")
                 offset = datetime.strptime(tz_part, "%z").tzinfo
