@@ -390,6 +390,7 @@ class DownloadManager:
 
                 if download_id in self._cancelled:
                     self._cancelled.discard(download_id)
+                    await self._delete_cancelled_post_file(download_id)
                     continue
 
                 self._cleanup_completed_post_tasks()
@@ -891,7 +892,15 @@ class DownloadManager:
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
-                if download and download.status in [
+                if download and download.status == DownloadStatus.COMPLETED.value:
+                    # File was already moved to the completed folder before the cancel
+                    # arrived. The in-memory COMPLETED state was never committed because
+                    # the session shares the same identity map. Commit it now so the
+                    # recording is not left as PROCESSING with an orphaned file.
+                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
+                    await session.commit()
+                    await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
+                elif download and download.status in [
                     DownloadStatus.PENDING.value,
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.PROCESSING.value,
@@ -924,6 +933,21 @@ class DownloadManager:
                     error=str(e)
                 )
                 await self._broadcast_log(download_id, f"Post-processing failed: {e}", level="error")
+
+    async def _delete_cancelled_post_file(self, download_id: int) -> None:
+        """Delete the source file for a post-processing job cancelled before it started."""
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(Download).where(Download.id == download_id)
+                )
+                dl = result.scalar_one_or_none()
+                if dl and dl.output_path:
+                    path = Path(dl.output_path)
+                    if path.is_file():
+                        path.unlink()
+        except Exception:
+            pass
 
     async def _resolve_download_owner(self, download_id: int) -> int | None:
         if download_id in self._download_owners:
