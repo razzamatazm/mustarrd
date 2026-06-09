@@ -94,7 +94,9 @@ def _client_key(request: Request) -> str:
     if _is_local_or_private_client(host):
         xff = request.headers.get("X-Forwarded-For")
         if xff:
-            real_ip = xff.split(",")[0].strip()
+            # Use the right-most entry: that is the IP the trusted proxy (NPM)
+            # appended. The left-most entry is client-controlled and spoofable.
+            real_ip = xff.split(",")[-1].strip()
             if real_ip:
                 return real_ip
     return host or "unknown"

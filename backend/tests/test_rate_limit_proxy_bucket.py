@@ -177,32 +177,35 @@ class RateLimitProxyBucketTests(unittest.TestCase):
             "by their real IP, not get a fresh bucket per forged header value.",
         )
 
-    def test_multi_hop_xff_uses_leftmost_ip(self):
-        """Multi-hop X-Forwarded-For (client, proxy1, proxy2) must use the
-        left-most IP as the real client address.
+    def test_multi_hop_xff_uses_rightmost_ip(self):
+        """Multi-hop X-Forwarded-For must bucket by the right-most (proxy-appended) IP.
 
-        Real XFF headers often look like "10.0.0.10, 172.18.0.1" when traffic
-        passes through more than one proxy. A fix that grabs the whole string,
-        the last entry, or splits incorrectly will bucket clients by the wrong
-        IP. This test catches those mistakes.
+        Behind NPM the header looks like "<client-sent>, <npm-appended-client-ip>".
+        NPM appends the IP that connected to it, so the right-most entry is the
+        trustworthy one. The left-most is client-controlled and spoofable.
 
-        Alice and Bob have different real IPs but the same intermediate proxy
-        hop in the header. Alice fills her bucket; Bob must not be blocked.
+        Alice and Bob both connect via the proxy. They share the same client-sent
+        (left-most) entry but have different proxy-appended (right-most) entries.
+        Alice fills her bucket; Bob must not be blocked.
+
+        With left-most keying: both share the same bucket, Bob blocked. Test FAILS.
+        With right-most keying: independent buckets, Bob not blocked. Test passes.
         """
         PROXY_IP = "172.18.0.2"
+        SHARED_SPOOFED = "192.0.2.1"  # same client-sent left-most for both
 
-        # Alice's XFF: real client is 10.0.0.10, intermediate hop is 172.18.0.1.
+        # Alice: proxy appends her real IP 10.0.0.10 as right-most.
         for _ in range(20):
             req = _make_request(
-                client_host=PROXY_IP, forwarded_for="10.0.0.10, 172.18.0.1"
+                client_host=PROXY_IP, forwarded_for=f"{SHARED_SPOOFED}, 10.0.0.10"
             )
             _enforce_rate_limit("login", req)
 
-        # Bob's XFF: real client is 10.0.0.11, same intermediate hop.
-        # If the fix grabs the whole string, or the rightmost entry (172.18.0.1),
-        # Bob will share Alice's bucket and be blocked after zero attempts.
+        # Bob: proxy appends his real IP 10.0.0.11 as right-most.
+        # Left-most is the same SHARED_SPOOFED; a left-most-keying fix buckets Bob
+        # with Alice and blocks him after zero attempts.
         bob_req = _make_request(
-            client_host=PROXY_IP, forwarded_for="10.0.0.11, 172.18.0.1"
+            client_host=PROXY_IP, forwarded_for=f"{SHARED_SPOOFED}, 10.0.0.11"
         )
         try:
             _enforce_rate_limit("login", bob_req)
@@ -210,10 +213,52 @@ class RateLimitProxyBucketTests(unittest.TestCase):
             if exc.status_code == 429:
                 self.fail(
                     "Bob was rate-limited in the multi-hop XFF case. "
-                    "The fix must strip and use the left-most entry from "
-                    "X-Forwarded-For, not the whole string or the rightmost hop."
+                    "The fix must use the right-most (proxy-appended) entry from "
+                    "X-Forwarded-For, not the left-most (client-controlled) entry."
                 )
             raise
+
+    def test_through_proxy_spoofed_xff_left_entry_still_rate_limited(self):
+        """Attacker varying the left-most XFF through a private proxy must still
+        be rate-limited by their real (proxy-appended right-most) IP.
+
+        An attacker behind NPM can forge any X-Forwarded-For value. NPM then
+        appends the attacker's actual connecting IP as the right-most entry. If
+        the fix keys on the left-most entry, the attacker mints a fresh bucket
+        per request by varying that value, bypassing the limiter entirely.
+
+        Fix: key on right-most (proxy-appended) entry. The attacker's real IP is
+        always the right-most entry regardless of what they forge to the left.
+
+        This test FAILS with a left-most-keying fix and passes with right-most.
+        """
+        PROXY_IP = "172.18.0.2"       # private peer: NPM Docker bridge
+        ATTACKER_REAL_IP = "10.0.0.99"  # appended by NPM (right-most, not spoofable)
+
+        # Attacker makes 20 requests varying the left-most entry each time.
+        # With right-most keying: all 20 land in the ATTACKER_REAL_IP bucket.
+        # With left-most keying: each gets a fresh bucket, limit never reached.
+        for i in range(20):
+            req = _make_request(
+                client_host=PROXY_IP,
+                forwarded_for=f"10.0.0.{i + 1}, {ATTACKER_REAL_IP}",
+            )
+            _enforce_rate_limit("login", req)
+
+        # 21st request with another forged left entry must be blocked.
+        spoof_req = _make_request(
+            client_host=PROXY_IP,
+            forwarded_for=f"10.0.0.21, {ATTACKER_REAL_IP}",
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            _enforce_rate_limit("login", spoof_req)
+        self.assertEqual(
+            ctx.exception.status_code,
+            429,
+            "Attacker varying left-most XFF through proxy must be rate-limited "
+            "by their proxy-appended real IP (right-most entry), not the forged "
+            "left-most value.",
+        )
 
 
 if __name__ == "__main__":
