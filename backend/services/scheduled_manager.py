@@ -14,6 +14,12 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
+# Rough size estimate used to project disk usage of recordings dispatched in
+# the same tick, before any of them has written bytes to disk. A typical HD
+# IPTV TS stream runs about 4-7 Mbps (~2-3 GB/hour); over-estimating slightly
+# errs on the side of pausing instead of filling the disk.
+ESTIMATED_RECORDING_GB_PER_HOUR = 3.0
+
 
 class ScheduledManager:
     def __init__(self):
@@ -111,12 +117,18 @@ class ScheduledManager:
                 return
 
             free_gb = self._get_free_space_gb(download_folder)
+            # Free space is read once per tick, but recordings dispatched in
+            # this tick have not written any bytes yet. Track their expected
+            # size so a batch of N due schedules cannot collectively dispatch
+            # past the minimum free space threshold.
+            projected_used_gb = 0.0
 
             for schedule in ready:
-                if free_gb < min_free_gb:
+                available_gb = free_gb - projected_used_gb
+                if available_gb < min_free_gb:
                     schedule.status = ScheduledStatus.PAUSED_LOW_SPACE.value
                     schedule.status_message = (
-                        f"Waiting for free space ({free_gb:.1f} GB free, "
+                        f"Waiting for free space ({available_gb:.1f} GB free, "
                         f"{min_free_gb} GB required)."
                     )
                     schedule.updated_at = datetime.utcnow()
@@ -174,6 +186,7 @@ class ScheduledManager:
                     schedule.updated_at = datetime.utcnow()
                     await session.commit()
                     await download_manager.enqueue_persisted(download)
+                    projected_used_gb += self._estimate_recording_gb(schedule)
                 except Exception as exc:
                     await session.rollback()
                     schedule.status = ScheduledStatus.FAILED.value
@@ -201,6 +214,13 @@ class ScheduledManager:
             raise channels
         days = epg_service.archive_days_from_channels(channels, schedule.channel_id)
         return days if days > 0 else 7
+
+    def _estimate_recording_gb(self, schedule) -> float:
+        """Expected on-disk size of a recording, including padding."""
+        minutes = int(schedule.duration_minutes or 0)
+        minutes += int(schedule.pre_padding_minutes or 0)
+        minutes += int(schedule.post_padding_minutes or 0)
+        return max(minutes, 0) / 60.0 * ESTIMATED_RECORDING_GB_PER_HOUR
 
     def _get_free_space_gb(self, path: str) -> float:
         if not os.path.exists(path):
