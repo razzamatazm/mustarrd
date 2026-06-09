@@ -22,6 +22,29 @@ from services.plex_service import plex_service
 
 logger = logging.getLogger(__name__)
 
+# Bounded retry for transient network errors mid-download. A single provider
+# hiccup (connection reset, read timeout) should not permanently fail the
+# download; each retry resumes from the bytes already on disk via HTTP Range.
+TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
+TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
+
+
+def _is_transient_network_error(e: BaseException) -> bool:
+    """True for network-level errors worth retrying (disconnects, timeouts).
+
+    HTTP status errors are raised by _download_file_once as plain
+    ``Exception("HTTP ...")`` and disk errors (e.g. ENOSPC) are plain
+    ``OSError``, so neither matches here: they fail fast.
+    """
+    if isinstance(e, asyncio.TimeoutError):
+        return True
+    if isinstance(e, aiohttp.ClientResponseError):
+        # HTTP-level error (4xx/5xx); not a transient transport failure.
+        return False
+    if isinstance(e, aiohttp.ClientError):
+        return True
+    return False
+
 
 def _friendly_error(e: Exception) -> str:
     """Translate a download exception into a short, user-readable string."""
@@ -1406,6 +1429,48 @@ class DownloadManager:
         return downloaded
 
     async def _download_file(
+        self,
+        url: str,
+        output_path: str,
+        download_id: int,
+        session: AsyncSession,
+        offset: int = 0,
+    ):
+        """Download with bounded retries on transient network errors.
+
+        A connection reset or read timeout mid-transfer used to fail the
+        download permanently. Each retry recomputes the resume offset from the
+        bytes already on disk; _download_file_once then resumes via HTTP Range
+        when the provider supports it, or restarts from byte 0 otherwise.
+        Non-network errors (HTTP status errors, disk errors) propagate
+        immediately.
+        """
+        attempt = 0
+        current_offset = offset
+        while True:
+            try:
+                return await self._download_file_once(
+                    url, output_path, download_id, session, offset=current_offset
+                )
+            except Exception as e:
+                if not _is_transient_network_error(e) or attempt >= TRANSIENT_RETRY_LIMIT:
+                    raise
+                attempt += 1
+                try:
+                    current_offset = os.path.getsize(output_path)
+                except OSError:
+                    current_offset = 0
+                delay = TRANSIENT_RETRY_BACKOFF_SECONDS * attempt
+                await self._broadcast_log(
+                    download_id,
+                    f"Network error during download: {type(e).__name__}: {e}. "
+                    f"Retrying in {delay:.0f}s from byte {current_offset:,} "
+                    f"(attempt {attempt}/{TRANSIENT_RETRY_LIMIT}).",
+                    level="warning",
+                )
+                await asyncio.sleep(delay)
+
+    async def _download_file_once(
         self,
         url: str,
         output_path: str,
