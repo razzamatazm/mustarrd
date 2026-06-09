@@ -22,6 +22,11 @@ from services.log_stream import backend_log_stream
 
 logger = logging.getLogger(__name__)
 
+
+def _program_insert_stmt():
+    return insert(EPGProgram).prefix_with("OR IGNORE")
+
+
 # Named entities valid in XML (no DTD required). Any other &name; in XMLTV
 # descriptions comes from HTML-origin feeds and will cause ET.iterparse to
 # raise ParseError. Replace them with &amp;name; before parsing.
@@ -263,7 +268,7 @@ class EPGIngestManager:
         inserted = 0
         password = resolve_account_password(account)
         client = XtreamClient(account.server_url, account.username, password)
-        insert_stmt = insert(EPGProgram).prefix_with("OR IGNORE")
+        insert_stmt = _program_insert_stmt()
         try:
             channels = await client.get_live_streams()
             catchup_channels = [

@@ -17,15 +17,15 @@ or a typo corrected by the provider after initial ingest). Re-downloading or
 re-scheduling based on the stale guide entry records the wrong content with
 the wrong filename.
 
-Root cause: epg_ingest_manager.py line 244
-    insert_stmt = insert(EPGProgram).prefix_with("OR IGNORE")
+Root cause: epg_ingest_manager._program_insert_stmt()
+    returns insert(EPGProgram).prefix_with("OR IGNORE")
 
 There is no UPDATE or ON CONFLICT DO UPDATE path. Once a row is in the DB,
 its title and description are frozen until the row expires.
 
-Fix required: change the insert to use ON CONFLICT DO UPDATE SET title=...,
-description=..., category=... (leaving start_time, end_time, channel_id
-unchanged since those form the identity key).
+Fix required: change _program_insert_stmt() to use ON CONFLICT DO UPDATE SET
+title=..., description=..., category=... (leaving start_time, end_time,
+channel_id unchanged since those form the identity key).
 """
 import sys
 import unittest
@@ -37,12 +37,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import models  # import all models so Base.metadata includes every table
 from database import Base
 from models import EPGProgram
+from services.epg_ingest_manager import _program_insert_stmt
 
 
 def _program_row(epg_id, title, description="", account_id=1):
@@ -70,16 +70,6 @@ def _program_row(epg_id, title, description="", account_id=1):
     }
 
 
-def _insert_stmt():
-    """Build the same statement as epg_ingest_manager.py line 244.
-
-    NOTE: when that line is changed (e.g. to ON CONFLICT DO UPDATE SET
-    title=...), update this helper to match so the tests reflect the
-    production semantics.
-    """
-    return insert(EPGProgram).prefix_with("OR IGNORE")
-
-
 class StaleTitleOnProviderUpdateTests(unittest.IsolatedAsyncioTestCase):
     """INSERT OR IGNORE silently discards provider-corrected titles and descriptions."""
 
@@ -97,7 +87,7 @@ class StaleTitleOnProviderUpdateTests(unittest.IsolatedAsyncioTestCase):
     async def _insert(self, rows):
         async with self.session_maker() as session:
             async with session.begin():
-                await session.execute(_insert_stmt(), rows)
+                await session.execute(_program_insert_stmt(), rows)
 
     async def _fetch(self, account_id, epg_id):
         async with self.session_maker() as session:
@@ -135,7 +125,7 @@ class StaleTitleOnProviderUpdateTests(unittest.IsolatedAsyncioTestCase):
             f"Expected updated title 'Live: World Cup Final', got '{prog.title}'. "
             "INSERT OR IGNORE silently discards provider-corrected titles. "
             "Once a row is inserted, its title is frozen until the row expires. "
-            "Fix: change epg_ingest_manager.py line 244 to ON CONFLICT DO UPDATE "
+            "Fix: change _program_insert_stmt() in epg_ingest_manager.py to ON CONFLICT DO UPDATE "
             "SET title=excluded.title, description=excluded.description.",
         )
 
