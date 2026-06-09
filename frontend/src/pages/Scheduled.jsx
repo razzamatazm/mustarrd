@@ -100,11 +100,13 @@ function ScheduleCard({
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const activeStatuses = ['scheduled', 'queued', 'downloading', 'processing', 'paused_low_space']
+  const terminalStatuses = ['completed', 'failed', 'cancelled']
   const isActive = activeStatuses.includes(schedule.status)
+  const isTerminal = terminalStatuses.includes(schedule.status)
   const canDelete = !isActive
   const startHasPassed = schedule.start_timestamp
     ? schedule.start_timestamp < Date.now() / 1000
-    : false
+    : isTerminal
 
   const startTime = formatAirDateTime(schedule, 'start', guideOffsetHours)
   const endTime = formatChannelDateTime(schedule, 'end', guideOffsetHours, 'h:mm A')
