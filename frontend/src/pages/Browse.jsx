@@ -1043,26 +1043,14 @@ export default function Browse() {
                         </Text>
                       )}
                     </Stack>
-                  ) : channelsIsError ? (
-                    <Stack align="center" justify="center" style={{ flex: 1, minHeight: 0 }}>
-                      <IconAlertCircle size={48} color="var(--mantine-color-red-5)" opacity={0.6} />
-                      <Text c="dimmed" ta="center">
-                        {authStatus?.is_admin ? (
-                          <>
-                            Could not reach your provider.{' '}
-                            <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
-                              Check Settings → Accounts.
-                            </Link>
-                          </>
-                        ) : (
-                          'Could not reach the provider. Contact your administrator.'
-                        )}
-                      </Text>
-                    </Stack>
                   ) : (
                     <Stack align="center" justify="center" style={{ flex: 1, minHeight: 0 }}>
                       <IconVideo size={48} opacity={0.3} />
-                      <Text c="dimmed">Select a channel to view its EPG</Text>
+                      <Text c="dimmed" ta="center">
+                        {channelsIsError
+                          ? 'Channel guide will appear here once your provider is connected.'
+                          : 'Select a channel to view its program guide.'}
+                      </Text>
                     </Stack>
                   )}
                 </Stack>
