@@ -6,6 +6,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Recordings no longer download the wrong hour when your provider uses timezone abbreviations in the program guide
+
+**What you would notice:** If your IPTV provider includes timezone names like EST, PST, or CET in their program guide data, Mustarrd was silently falling back to UTC when building the download URL. A show listed at 8:30 PM EST would download content starting at 8:30 PM UTC instead, which is five hours off. After this fix, Mustarrd correctly strips the timezone abbreviation before parsing the timestamp, so the right hour of content is fetched.
+
+**What changed:** The download URL builder was updated to strip trailing 2-to-5-letter timezone abbreviations before parsing provider timestamps. The code already handled numeric offsets like `+0200`; this extends it to cover letter abbreviations. Backend only, no frontend changes.
+
+---
+
+### Improved: Browse EPG no longer shows two errors when your provider is offline
+
+**What you would notice:** When your IPTV provider is unreachable, the Browse EPG page was showing the same error message in both the channel list on the left and the program guide panel on the right. The right panel now shows a neutral placeholder instead: a video icon and the message "Channel guide will appear here once your provider is connected." The actionable error with a link to Settings stays in the channel list, which is where the problem actually is.
+
+**What changed:** The right panel of Browse EPG was updated to show a neutral placeholder instead of repeating the error when no channel is selected or the provider is offline. Frontend only, no backend changes.
+
+---
+
 ### Improved: Plex Integration settings panel now matches the layout of all other settings sections
 
 **What you would notice:** The Plex Integration section in Settings previously had no subtitle and its Connect Plex Account button appeared in a muted brownish color instead of the orange used everywhere else. It now shows a short description below the heading and the button is filled orange, matching every other primary action button in the app.
