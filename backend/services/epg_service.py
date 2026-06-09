@@ -53,10 +53,18 @@ class EPGService:
     def archive_days_for_channel(channel: dict) -> int:
         value = channel.get("tv_archive_duration")
         try:
-            days = int(value)
+            duration = int(value)
         except (TypeError, ValueError):
             return 0
-        return max(0, min(days, 365))
+        if duration <= 0:
+            return 0
+        if duration > 30:
+            # Most providers report tv_archive_duration in days, but some send
+            # hours (e.g. 168 for a 7-day archive). No provider offers more
+            # than a 30-day archive, while hour-based providers send >= 24,
+            # so anything above 30 is treated as hours.
+            duration = max(1, duration // 24)
+        return min(duration, 365)
 
     async def get_channel_archive_days(
         self,

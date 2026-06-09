@@ -40,8 +40,9 @@ class ArchiveDaysForChannelTests(unittest.TestCase):
     def test_negative_duration_clamped_to_zero(self):
         self.assertEqual(EPGService.archive_days_for_channel({"tv_archive_duration": -5}), 0)
 
-    def test_over_365_clamped(self):
-        self.assertEqual(EPGService.archive_days_for_channel({"tv_archive_duration": 999}), 365)
+    def test_over_365_days_after_hours_conversion_clamped(self):
+        # 10000 is read as hours (416 days) and then clamped to 365.
+        self.assertEqual(EPGService.archive_days_for_channel({"tv_archive_duration": 10000}), 365)
 
 
 class IterProgramsArchiveUnknownTests(unittest.TestCase):
