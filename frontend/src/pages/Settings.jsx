@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useContext } from 'react'
-import { UNSAFE_NavigationContext, useNavigate, useSearchParams } from 'react-router-dom'
+import { UNSAFE_NavigationContext, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   Title,
   Card,
@@ -1022,6 +1022,7 @@ export default function Settings() {
 
   const renderGuide = () => {
     const lastSync = epgStatus?.last_completed_at
+    const lastError = epgStatus?.last_error
     let lastSyncLabel = 'Guide not yet synced'
     if (lastSync) {
       const d = new Date(lastSync)
@@ -1040,11 +1041,19 @@ export default function Settings() {
           <Text size="sm" c="dimmed">Program guide sync status and manual refresh</Text>
         </Stack>
         <SettingRow
-          label="Last synced"
+          label={lastError ? 'Last sync attempt' : 'Last synced'}
           description="When Mustarrd last updated the program guide from your provider"
         >
           <Text size="sm" c={lastSync ? undefined : 'dimmed'}>{lastSyncLabel}</Text>
         </SettingRow>
+        {lastError && (
+          <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
+            Guide sync failed. Check your provider connection in{' '}
+            <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+              Accounts
+            </Link>.
+          </Alert>
+        )}
         <SettingRow
           label="Refresh guide now"
           description="Fetch the latest program guide data from your provider in the background"
