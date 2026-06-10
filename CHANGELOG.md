@@ -14,6 +14,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Transcoded recordings are no longer lost when the completed folder drive is full
+
+**What you would notice:** On Unraid (or any setup where your completed recordings folder is on a different drive or NAS array than your download folder), if that destination drive ran out of space while Mustarrd was moving a freshly-transcoded .mkv or .mp4 into it, the file could vanish completely. The original .ts was already deleted by the transcode step, and the error handler then deleted the .mkv too, leaving you with nothing and a FAILED status. After this fix, the .mkv or .mp4 stays safely in the download folder when the move fails, so you can free up space and move it yourself.
+
+**What changed:** The post-processing step now tracks the transcoded output file path separately from the original recording. If the drive-full error fires during the move, cleanup code uses the transcoded path as the "keep this" marker instead of the now-deleted original .ts path. The same protection applies when commercial removal is on (which also deletes the source .ts before returning). A new regression test confirms the .mkv survives a simulated out-of-space move. Backend only.
+
+---
+
 ### Improved: Downloads page now shows a countdown to when a scheduled recording will start
 
 **What you would notice:** On the Downloads page, each card in the Upcoming tab now shows how long until the recording begins, next to the scheduled start time. For example, you might see "Download starts: Today at 9:30 PM (in 20h 1m)". Previously you had to do the math yourself. If you have pre or post-recording padding set, the countdown and the padding note appear together: "(in 20h 1m, 1h 45m with padding)". The countdown disappears automatically once the recording is underway.

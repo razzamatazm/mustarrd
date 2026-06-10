@@ -12,7 +12,7 @@ Mustarrd connects to your IPTV provider and lets you download past programs. Thi
 - **Browse past programs:** scroll back through your provider's program guide (EPG) and see what's available to download
 - **Starred channels:** star your favorite channels so they always appear at the top of the list
 - **Program preview:** preview a live channel or catchup program in your browser before queuing a download
-- **Commercial skip:** ComSkip integration removes commercials before saving
+- **Commercial skip:** ComSkip integration removes commercials before saving. Detection method, break length limits, show-protection margins, and thread count are all configurable from the Settings page, no config file editing needed
 - **Flexible output formats:** save recordings as-is (.ts), remux to MKV or MP4, or re-encode with FFmpeg for smaller files
 - **GPU-accelerated encoding:** if your server has an Intel, AMD, or NVIDIA GPU, re-encoding uses it automatically; the Settings page shows GPU status in plain language
 - **Download from On Demand:** If your provider provides on demand listings, you can grab those too!
