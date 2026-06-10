@@ -1110,19 +1110,20 @@ class DownloadManager:
                     download.status = DownloadStatus.CANCELLED.value
                     await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
                     await session.commit()
-                    # Remove Comskip artifacts and partial transcode outputs left
-                    # by the cancelled run. The original recording is kept.
-                    if working_input_path:
-                        self._cleanup_working_files(
-                            working_input_path,
-                            completed_output_path or post_processed_path or working_input_path,
-                            keep_logs=False,
-                            delete_original=False,
-                        )
                     await self._broadcast_progress(
                         download_id, download.progress, DownloadStatus.CANCELLED.value
                     )
                     await self._broadcast_log(download_id, "Post-processing cancelled.", level="warning")
+                # Always clean up working files regardless of DB status: cancel_download
+                # writes CANCELLED to DB before the asyncio CancelledError fires, so the
+                # status guard above would be False and cleanup would be skipped.
+                if working_input_path:
+                    self._cleanup_working_files(
+                        working_input_path,
+                        completed_output_path or post_processed_path or working_input_path,
+                        keep_logs=False,
+                        delete_original=False,
+                    )
 
             except Exception as e:
                 if moved_completed_path is not None and os.path.exists(moved_completed_path):

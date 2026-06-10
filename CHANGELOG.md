@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-10
 
+### Fixed: Cancelling a recording during commercial removal no longer leaves comskip files on disk
+
+**What you would notice:** After cancelling a recording while Mustarrd was running commercial detection or removal, files like `ShowName.edl`, `ShowName.txt`, `ShowName.log`, and `ShowName.csv` would be left behind in your download folder forever. These are working files Comskip creates and they would slowly accumulate after every cancel. They are now cleaned up automatically when you cancel, the same way they are on a normal failure.
+
+**What changed:** Backend only. When a post-processing job is cancelled, Mustarrd now always cleans up Comskip working files regardless of what the database says about the download's status. Previously, a race condition meant the cancel request would update the database before the cleanup code ran, causing the cleanup to be silently skipped.
+
+---
+
 ### Added: Tune Comskip commercial detection from the Settings page
 
 **What you would notice:** Settings now has a dedicated **Comskip** section (between Post-Processing and File Naming). You can choose which signals Comskip uses to find commercials (black frames, logo detection, scene change, resolution change, aspect ratio change, silence), set commercial break and single-commercial length limits, protect the start and end of recordings from being cut, and pick how many CPU threads Comskip uses. Every field has a tooltip explaining what it does, there is a Reset to Defaults button, and the page warns you inline if a minimum is set higher than its maximum. When Comskip is turned off, the section stays visible but greyed out with a note pointing to Post-Processing. Previously these values could only be changed by editing `comskip.ini` by hand.

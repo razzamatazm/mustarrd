@@ -182,6 +182,62 @@ class PostProcessFailureCancelCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(txt.exists(), ".txt must be cleaned up after cancel.")
         self.assertFalse(partial_mkv.exists(), "Partial .mkv must be cleaned up after cancel.")
 
+    async def test_cancel_after_cancel_download_cleans_sidecars(self):
+        """Regression: cancel_download pre-writes CANCELLED to DB before the asyncio
+        CancelledError fires. The status guard in the CancelledError handler would see
+        CANCELLED and skip cleanup, orphaning EDL and comskip sidecar files."""
+        download_id, ts_path = await self._seed_db()
+        ts_file = Path(ts_path)
+        edl = ts_file.with_suffix(".edl")
+        txt = ts_file.with_suffix(".txt")
+        log = ts_file.with_suffix(".log")
+        partial_mkv = ts_file.with_suffix(".mkv")
+
+        session_factory = self.session_factory
+
+        async def fake_detect(*args, **kwargs):
+            edl.write_text("60.0 120.0 0\n")
+            txt.write_text("comskip output")
+            log.write_text("comskip log")
+            return str(edl)
+
+        async def fake_remove(*args, **kwargs):
+            partial_mkv.write_bytes(b"\x00" * 512)
+            # Simulate what cancel_download does: write CANCELLED to DB before
+            # the CancelledError reaches _execute_post_process.
+            async with session_factory() as session:
+                result = await session.execute(
+                    select(Download).where(Download.id == download_id)
+                )
+                dl = result.scalar_one_or_none()
+                if dl:
+                    dl.status = DownloadStatus.CANCELLED.value
+                    await session.commit()
+            raise asyncio.CancelledError()
+
+        mock_pp = MagicMock()
+        mock_pp.comskip_available = True
+        mock_pp.ffmpeg_available = True
+        mock_pp.get_ffmpeg_path.return_value = "/usr/bin/ffmpeg"
+        mock_pp.detect_commercials = AsyncMock(side_effect=fake_detect)
+        mock_pp.remove_commercials = AsyncMock(side_effect=fake_remove)
+        mock_pp.transcode = AsyncMock()
+
+        p = self._run_with_patches(mock_pp)
+        with p[0], p[1], p[2], p[3]:
+            try:
+                await self.manager._execute_post_process(download_id)
+            except asyncio.CancelledError:
+                pass
+
+        dl = await self._get_download(download_id)
+        self.assertEqual(dl.status, DownloadStatus.CANCELLED.value)
+        self.assertTrue(ts_file.exists(), "Raw recording must stay in the download folder.")
+        self.assertFalse(edl.exists(), ".edl must be cleaned up even when DB already shows CANCELLED.")
+        self.assertFalse(txt.exists(), ".txt must be cleaned up even when DB already shows CANCELLED.")
+        self.assertFalse(partial_mkv.exists(), "Partial .mkv must be cleaned up.")
+        self.assertFalse(log.exists(), ".log must be cleaned up on cancel (keep_logs=False).")
+
 
 if __name__ == "__main__":
     unittest.main()
