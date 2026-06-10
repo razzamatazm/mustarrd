@@ -163,16 +163,31 @@ async def _carry_over_legacy_comskip_ini(conn) -> None:
     install, so only a value that differs from that default was actually
     chosen by the user and must keep overriding the generated INI.
     """
+    import os
+
     from config import ensure_config_files
 
-    default_ini = str(ensure_config_files() / "comskip.ini")
-    await conn.execute(
-        text(
-            "UPDATE app_settings SET comskip_custom_ini_path = comskip_ini_path "
-            "WHERE comskip_ini_path IS NOT NULL AND comskip_ini_path != :default_ini"
-        ),
-        {"default_ini": default_ini},
-    )
+    default_ini = os.path.realpath(str(ensure_config_files() / "comskip.ini"))
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT id, comskip_ini_path FROM app_settings "
+                "WHERE comskip_ini_path IS NOT NULL"
+            )
+        )
+    ).fetchall()
+    for row_id, ini_path in rows:
+        # Compare resolved paths so a symlinked config dir or an alternate
+        # spelling of the default is not mistaken for a user choice.
+        if os.path.realpath(os.path.expanduser(ini_path)) == default_ini:
+            continue
+        await conn.execute(
+            text(
+                "UPDATE app_settings SET comskip_custom_ini_path = :ini_path "
+                "WHERE id = :row_id"
+            ),
+            {"ini_path": ini_path, "row_id": row_id},
+        )
 
 
 async def _migrate_legacy_account_passwords() -> None:

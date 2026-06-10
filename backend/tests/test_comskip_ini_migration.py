@@ -64,6 +64,17 @@ class LegacyComskipIniCarryOverTests(unittest.IsolatedAsyncioTestCase):
         settings = await self._fetch()
         self.assertIsNone(settings.comskip_custom_ini_path)
 
+    async def test_alternate_spelling_of_default_not_copied(self):
+        """Path comparison must be normalization-tolerant, not raw string equality."""
+        async with self.session_factory() as session:
+            session.add(AppSettings(comskip_ini_path="/cfg/../cfg/comskip.ini"))
+            await session.commit()
+
+        await self._run_carry_over()
+
+        settings = await self._fetch()
+        self.assertIsNone(settings.comskip_custom_ini_path)
+
     async def test_null_path_not_copied(self):
         async with self.session_factory() as session:
             session.add(AppSettings(comskip_ini_path=None))
