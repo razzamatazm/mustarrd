@@ -14,6 +14,30 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Improved: Scheduled Recordings page also shows a countdown to when each recording will start
+
+**What you would notice:** On the Scheduled Recordings page, each upcoming recording card now shows how long until the download begins, for example "in 2h 30m" or "in 1d 4h". If you have pre or post-recording padding set, the total duration with padding appears alongside the countdown. This countdown was already shown on the Downloads page Upcoming tab and is now on the Scheduled Recordings page too.
+
+**What changed:** Frontend only. No server or configuration changes.
+
+---
+
+### Fixed: Resuming a download no longer writes a corrupt file when the partial file was deleted
+
+**What you would notice:** On Unraid, if a NAS drive briefly disconnects while a recording is in progress and then Mustarrd restarts, the partial file may be gone by the time Mustarrd tries to resume. Previously, Mustarrd would send a "continue from offset" request to the provider, get the end of the stream, and write it to a new empty file, resulting in a recording missing its first portion and showing as Completed even though it was broken. After this fix, Mustarrd checks that the file on disk actually matches the expected size before resuming. If it does not match (file gone, file truncated, or any mismatch), Mustarrd starts a clean download from the beginning instead.
+
+**What changed:** Before entering append mode, the download manager compares the file size on disk against the expected offset. Any mismatch triggers a fresh download from byte 0. Three regression tests cover the missing file, truncated file, and normal resume cases. Backend only.
+
+---
+
+### Improved: GPU status badge now correctly warns when ffmpeg is not installed
+
+**What you would notice:** On the Settings page, in the Post-Processing section, if your server has a compatible GPU but ffmpeg is not installed inside the Mustarrd container, the GPU status badge now shows a yellow "GPU DETECTED, FFMPEG REQUIRED" warning instead of a misleading green "GPU ENCODING READY". GPU encoding cannot work without ffmpeg, so the old green badge gave users false confidence. The badge turns green again as soon as ffmpeg is present.
+
+**What changed:** Frontend only. No server or configuration changes.
+
+---
+
 ### Improved: Downloads page now shows a countdown to when a scheduled recording will start
 
 **What you would notice:** On the Downloads page, each card in the Upcoming tab now shows how long until the recording begins, next to the scheduled start time. For example, you might see "Download starts: Today at 9:30 PM (in 20h 1m)". Previously you had to do the math yourself. If you have pre or post-recording padding set, the countdown and the padding note appear together: "(in 20h 1m, 1h 45m with padding)". The countdown disappears automatically once the recording is underway.
