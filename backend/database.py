@@ -130,6 +130,50 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "downloads", "last_retry_at"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN last_retry_at DATETIME"))
 
+    comskip_tunable_columns = (
+        ("comskip_detect_method", "INTEGER DEFAULT 107"),
+        ("comskip_max_commercialbreak", "INTEGER DEFAULT 600"),
+        ("comskip_min_commercialbreak", "INTEGER DEFAULT 25"),
+        ("comskip_max_commercial_size", "INTEGER DEFAULT 125"),
+        ("comskip_min_commercial_size", "INTEGER DEFAULT 4"),
+        ("comskip_always_keep_first_seconds", "INTEGER DEFAULT 0"),
+        ("comskip_always_keep_last_seconds", "INTEGER DEFAULT 60"),
+        ("comskip_remove_before", "INTEGER DEFAULT 0"),
+        ("comskip_remove_after", "INTEGER DEFAULT 0"),
+        ("comskip_thread_count", "INTEGER DEFAULT 1"),
+    )
+    for column_name, column_spec in comskip_tunable_columns:
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_spec}")
+            )
+
+    if not await _column_exists(conn, "app_settings", "comskip_custom_ini_path"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN comskip_custom_ini_path VARCHAR(1000)")
+        )
+        if await _column_exists(conn, "app_settings", "comskip_ini_path"):
+            await _carry_over_legacy_comskip_ini(conn)
+
+
+async def _carry_over_legacy_comskip_ini(conn) -> None:
+    """Preserve a pre-editor custom comskip INI choice.
+
+    comskip_ini_path was auto-filled with the config-dir default for every
+    install, so only a value that differs from that default was actually
+    chosen by the user and must keep overriding the generated INI.
+    """
+    from config import ensure_config_files
+
+    default_ini = str(ensure_config_files() / "comskip.ini")
+    await conn.execute(
+        text(
+            "UPDATE app_settings SET comskip_custom_ini_path = comskip_ini_path "
+            "WHERE comskip_ini_path IS NOT NULL AND comskip_ini_path != :default_ini"
+        ),
+        {"default_ini": default_ini},
+    )
+
 
 async def _migrate_legacy_account_passwords() -> None:
     from models import XtreamAccount

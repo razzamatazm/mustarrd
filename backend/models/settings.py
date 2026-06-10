@@ -60,6 +60,20 @@ class AppSettings(Base):
     comskip_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     comskip_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     comskip_ini_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    # User-supplied INI override; when set it bypasses the INI generated from
+    # the comskip_* tunables below (see services/comskip_ini.py).
+    comskip_custom_ini_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    comskip_detect_method: Mapped[int] = mapped_column(Integer, default=107)
+    comskip_max_commercialbreak: Mapped[int] = mapped_column(Integer, default=600)
+    comskip_min_commercialbreak: Mapped[int] = mapped_column(Integer, default=25)
+    comskip_max_commercial_size: Mapped[int] = mapped_column(Integer, default=125)
+    comskip_min_commercial_size: Mapped[int] = mapped_column(Integer, default=4)
+    comskip_always_keep_first_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    comskip_always_keep_last_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    comskip_remove_before: Mapped[int] = mapped_column(Integer, default=0)
+    comskip_remove_after: Mapped[int] = mapped_column(Integer, default=0)
+    comskip_thread_count: Mapped[int] = mapped_column(Integer, default=1)
     admin_password_hash: Mapped[str | None] = mapped_column(String(500), nullable=True)
     admin_username_bootstrap_required: Mapped[bool] = mapped_column(Boolean, default=False)
     onboarding_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -95,6 +109,17 @@ class AppSettings(Base):
             "comskip_enabled": self.comskip_enabled,
             "comskip_path": self.comskip_path,
             "comskip_ini_path": self.comskip_ini_path,
+            "comskip_custom_ini_path": self.comskip_custom_ini_path,
+            "comskip_detect_method": self.comskip_detect_method,
+            "comskip_max_commercialbreak": self.comskip_max_commercialbreak,
+            "comskip_min_commercialbreak": self.comskip_min_commercialbreak,
+            "comskip_max_commercial_size": self.comskip_max_commercial_size,
+            "comskip_min_commercial_size": self.comskip_min_commercial_size,
+            "comskip_always_keep_first_seconds": self.comskip_always_keep_first_seconds,
+            "comskip_always_keep_last_seconds": self.comskip_always_keep_last_seconds,
+            "comskip_remove_before": self.comskip_remove_before,
+            "comskip_remove_after": self.comskip_remove_after,
+            "comskip_thread_count": self.comskip_thread_count,
             "admin_username_bootstrap_required": self.admin_username_bootstrap_required,
             "epg_offset_minutes": self.epg_offset_minutes,
             "show_future_programs": self.show_future_programs,

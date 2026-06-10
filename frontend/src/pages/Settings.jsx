@@ -46,10 +46,12 @@ import {
   IconDeviceTv,
   IconCalendar,
   IconRefresh,
+  IconScissors,
 } from '@tabler/icons-react'
 
 import { adminPlexApi, adminUsersApi, authApi, epgApi, settingsApi } from '../api'
 import AccountsSection from '../components/settings/AccountsSection'
+import ComskipSection, { COMSKIP_DEFAULTS, getComskipErrors } from '../components/settings/ComskipSection'
 import LogsSection from '../components/settings/LogsSection'
 import FoldersStatus from '../components/settings/FoldersStatus'
 
@@ -215,6 +217,7 @@ const ADMIN_SECTIONS = [
   { id: 'plex', label: 'Plex Integration', icon: IconDeviceTv },
   { id: 'recording', label: 'Recording', icon: IconDownload },
   { id: 'processing', label: 'Post-Processing', icon: IconWand },
+  { id: 'comskip', label: 'Comskip', icon: IconScissors },
   { id: 'naming', label: 'File Naming', icon: IconFile },
   { id: 'guide', label: 'Guide', icon: IconCalendar },
   { id: 'appearance', label: 'Appearance', icon: IconMoon },
@@ -1053,13 +1056,9 @@ export default function Settings() {
                 value={formData.comskip_path || ''}
                 onChange={(e) => handleChange('comskip_path', e.target.value || null)}
               />
-              <TextInput
-                label="Comskip INI Path (optional)"
-                description="Custom comskip.ini file (leave blank to use the app default)"
-                placeholder="/path/to/comskip.ini"
-                value={formData.comskip_ini_path || ''}
-                onChange={(e) => handleChange('comskip_ini_path', e.target.value || null)}
-              />
+              <Text size="xs" c="dimmed">
+                Commercial detection tuning (and a custom INI override) lives in the Comskip section.
+              </Text>
             </Stack>
           )}
         </Stack>
@@ -1490,9 +1489,23 @@ export default function Settings() {
     </Stack>
   )
 
+  const comskipErrors = getComskipErrors(formData)
+
+  const renderComskip = () => (
+    <ComskipSection
+      formData={formData}
+      onChange={handleChange}
+      onResetDefaults={() => {
+        setFormData((prev) => ({ ...prev, ...COMSKIP_DEFAULTS }))
+        setHasChanges(true)
+      }}
+    />
+  )
+
   const sectionContent = {
     recording: renderRecording,
     processing: renderProcessing,
+    comskip: renderComskip,
     naming: renderNaming,
     guide: renderGuide,
     appearance: renderAppearance,
@@ -1502,7 +1515,7 @@ export default function Settings() {
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }
-  const configSections = new Set(['recording', 'processing', 'naming', 'appearance', 'security'])
+  const configSections = new Set(['recording', 'processing', 'comskip', 'naming', 'appearance', 'security'])
   const inConfigSection = isAdmin && configSections.has(activeSection)
   const visibleSectionId = availableSections.some((section) => section.id === activeSection)
     ? activeSection
@@ -1615,6 +1628,7 @@ export default function Settings() {
             <Button
               onClick={handleSave}
               loading={updateMutation.isPending}
+              disabled={Object.keys(comskipErrors).length > 0}
             >
               Save Settings
             </Button>

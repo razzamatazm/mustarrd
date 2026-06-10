@@ -100,6 +100,18 @@ class SettingsUpdate(BaseModel):
     comskip_enabled: Optional[bool] = None
     comskip_path: Optional[str] = None
     comskip_ini_path: Optional[str] = None
+    comskip_custom_ini_path: Optional[str] = None
+    comskip_detect_method: Optional[int] = Field(default=None, ge=0, le=255)
+    comskip_max_commercialbreak: Optional[int] = Field(default=None, ge=0)
+    comskip_min_commercialbreak: Optional[int] = Field(default=None, ge=0)
+    comskip_max_commercial_size: Optional[int] = Field(default=None, ge=0)
+    comskip_min_commercial_size: Optional[int] = Field(default=None, ge=0)
+    comskip_always_keep_first_seconds: Optional[int] = Field(default=None, ge=0)
+    comskip_always_keep_last_seconds: Optional[int] = Field(default=None, ge=0)
+    comskip_remove_before: Optional[int] = Field(default=None, ge=0)
+    comskip_remove_after: Optional[int] = Field(default=None, ge=0)
+    # Clamped to 1..16 in update_settings rather than rejected.
+    comskip_thread_count: Optional[int] = None
     epg_offset_minutes: Optional[int] = None
     show_future_programs: Optional[bool] = None
     launch_on_startup: Optional[bool] = None
@@ -125,6 +137,16 @@ NON_NULLABLE_FIELDS = {
     "remux_only",
     "integrity_check_enabled",
     "comskip_enabled",
+    "comskip_detect_method",
+    "comskip_max_commercialbreak",
+    "comskip_min_commercialbreak",
+    "comskip_max_commercial_size",
+    "comskip_min_commercial_size",
+    "comskip_always_keep_first_seconds",
+    "comskip_always_keep_last_seconds",
+    "comskip_remove_before",
+    "comskip_remove_after",
+    "comskip_thread_count",
     "epg_offset_minutes",
     "show_future_programs",
     "launch_on_startup",
@@ -274,6 +296,10 @@ async def update_settings(
             value = int(value)
         if field == "min_free_space_gb" and value is not None:
             value = int(value)
+        if field == "comskip_thread_count" and value is not None:
+            value = max(1, min(16, int(value)))
+        if field == "comskip_custom_ini_path" and value is not None:
+            value = value.strip() or None
         setattr(settings, field, value)
 
     # Enforce ComSkip constraint on the final stored state: comskip requires
@@ -283,6 +309,22 @@ async def update_settings(
     # is the valid "fast remux + skip commercials" profile written by onboarding.
     if settings.comskip_enabled:
         settings.transcode_enabled = True
+
+    # Validate min<=max pairs on the final stored state so two separate PUT
+    # requests cannot sneak an inverted range past per-request validation.
+    def _pair_inverted(min_value, max_value) -> bool:
+        return min_value is not None and max_value is not None and min_value > max_value
+
+    if _pair_inverted(settings.comskip_min_commercialbreak, settings.comskip_max_commercialbreak):
+        raise HTTPException(
+            status_code=400,
+            detail="Min commercial break cannot exceed max commercial break",
+        )
+    if _pair_inverted(settings.comskip_min_commercial_size, settings.comskip_max_commercial_size):
+        raise HTTPException(
+            status_code=400,
+            detail="Min single commercial cannot exceed max single commercial",
+        )
 
     if _paths_match(settings.download_folder, settings.completed_folder):
         logger.warning(

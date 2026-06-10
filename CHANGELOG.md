@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-10
 
+### Added: Tune Comskip commercial detection from the Settings page
+
+**What you would notice:** Settings now has a dedicated **Comskip** section (between Post-Processing and File Naming). You can choose which signals Comskip uses to find commercials (black frames, logo detection, scene change, resolution change, aspect ratio change, silence), set commercial break and single-commercial length limits, protect the start and end of recordings from being cut, and pick how many CPU threads Comskip uses. Every field has a tooltip explaining what it does, there is a Reset to Defaults button, and the page warns you inline if a minimum is set higher than its maximum. When Comskip is turned off, the section stays visible but greyed out with a note pointing to Post-Processing. Previously these values could only be changed by editing `comskip.ini` by hand.
+
+**What changed:** Ten Comskip tunables are now stored in app settings and written into a generated `comskip.ini` (based on your existing config-dir INI, so non-exposed keys like `output_edl` keep working) each time commercial detection runs. A new optional "Custom Comskip INI path" field overrides the generated file entirely; anyone who had previously pointed the old INI path setting at their own file is migrated to the new override automatically. The backend validates min/max pairs on the final stored state and clamps thread count to 1–16.
+
+---
+
 ### Improved: Downloads page now shows a countdown to when a scheduled recording will start
 
 **What you would notice:** On the Downloads page, each card in the Upcoming tab now shows how long until the recording begins, next to the scheduled start time. For example, you might see "Download starts: Today at 9:30 PM (in 20h 1m)". Previously you had to do the math yourself. If you have pre or post-recording padding set, the countdown and the padding note appear together: "(in 20h 1m, 1h 45m with padding)". The countdown disappears automatically once the recording is underway.

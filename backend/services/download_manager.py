@@ -2011,9 +2011,12 @@ class DownloadManager:
                     comskip_indeterminate = False
                     await broadcast_processing(comskip_progress, current_message, indeterminate=False)
 
+                from services.comskip_ini import resolve_comskip_ini
+
+                comskip_ini_path = await asyncio.to_thread(resolve_comskip_ini, settings)
                 edl_path = await post_processor.detect_commercials(
                     current_path,
-                    settings.comskip_ini_path,
+                    comskip_ini_path,
                     log_callback=log_callback,
                     progress_callback=comskip_progress_callback
                 )
