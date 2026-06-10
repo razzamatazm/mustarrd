@@ -845,6 +845,18 @@ class EPGIngestManager:
         if "-" in first_chunk[:10] or "T" in first_chunk:
             try:
                 parts = value.split()
+                # Named TZ suffix ("2024-01-15 20:00:00 EST"): fromisoformat
+                # rejects it, so resolve it via _NAMED_TZ_OFFSETS up front and
+                # parse the rest as a naive ISO timestamp. Unknown names fall
+                # back to UTC, matching the compact-format path below.
+                named_tz = None
+                if len(parts) >= 2 and parts[-1].isalpha():
+                    upper = parts[-1].upper()
+                    if upper in _NAMED_TZ_OFFSETS:
+                        named_tz = timezone(timedelta(minutes=_NAMED_TZ_OFFSETS[upper]))
+                    else:
+                        named_tz = timezone.utc
+                    parts = parts[:-1]
                 if len(parts) == 3:
                     # "2024-01-15 20:00:00 +0100" -> "2024-01-15T20:00:00+0100"
                     iso_str = parts[0] + "T" + parts[1] + parts[2]
@@ -854,6 +866,8 @@ class EPGIngestManager:
                 elif len(parts) == 2:
                     # "2024-01-15 20:00:00" (no tz)
                     iso_str = parts[0] + "T" + parts[1]
+                elif len(parts) == 1:
+                    iso_str = parts[0]
                 else:
                     iso_str = value
                 if iso_str.endswith("Z"):
@@ -863,7 +877,7 @@ class EPGIngestManager:
                     iso_str = iso_str[:-2] + ":" + iso_str[-2:]
                 dt = datetime.fromisoformat(iso_str)
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt = dt.replace(tzinfo=named_tz or timezone.utc)
                 return dt
             except (ValueError, TypeError):
                 return None

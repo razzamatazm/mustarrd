@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Guides using ISO timestamps with timezone names (EST, CET, MSK) no longer come up empty
+
+**What you would notice:** With some providers, certain channels (or the whole guide) showed no programs at all, with no error anywhere. This happened when the provider's guide file wrote program times in ISO format with a named timezone, for example "2024-01-15 20:00:00 EST" instead of a numeric offset. Mustarrd could not parse those times and silently skipped every affected program. These guides now load correctly, with program times converted from the named timezone.
+
+**What changed:** `_parse_xmltv_time` resolved named timezone abbreviations only in the compact XMLTV format path; the ISO format path fed the abbreviation to `datetime.fromisoformat`, which rejected it, and the parser returned None. The ISO path now strips a trailing named timezone, looks it up in the existing offset table, and applies it to the parsed time. Unknown abbreviations fall back to UTC, the same behavior as the compact path. 14 regression tests cover the affected formats.
+
+---
+
 ### Added: GPU-accelerated encoding in Docker, with a plain-language GPU status panel in Settings
 
 **What you would notice:** The Docker image can now encode recordings on your GPU. If your server has an Intel, AMD, or NVIDIA GPU visible to the container, re-encoding finished recordings is much faster and uses far less CPU. The Settings page tells you where you stand in plain language: a green "GPU encoding ready" badge with the detected vendor when everything works, a note when the driver was set manually, and a clear explanation when no GPU is available (for example, Docker Desktop on macOS and Windows does not share the host GPU with containers, so encoding falls back to the CPU; slower, but everything still works).
