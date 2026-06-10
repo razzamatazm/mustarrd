@@ -967,6 +967,7 @@ class DownloadManager:
         async with async_session_maker() as session:
             working_input_path: Optional[str] = None
             completed_output_path: Optional[str] = None
+            post_processed_path: Optional[str] = None
             try:
                 result = await session.execute(
                     select(Download).where(Download.id == download_id)
@@ -1047,6 +1048,7 @@ class DownloadManager:
                 )
 
                 final_path = self._select_final_path(original_path, final_path)
+                post_processed_path = final_path
                 completed_path = await self._move_to_completed_async(final_path, completed_folder, download_folder)
                 completed_output_path = completed_path
                 moved_completed_path = completed_path
@@ -1113,7 +1115,7 @@ class DownloadManager:
                     if working_input_path:
                         self._cleanup_working_files(
                             working_input_path,
-                            completed_output_path or working_input_path,
+                            completed_output_path or post_processed_path or working_input_path,
                             keep_logs=False,
                             delete_original=False,
                         )
@@ -1161,7 +1163,7 @@ class DownloadManager:
                 if working_input_path:
                     self._cleanup_working_files(
                         working_input_path,
-                        completed_output_path or working_input_path,
+                        completed_output_path or post_processed_path or working_input_path,
                         keep_logs=True,
                         delete_original=False,
                     )
