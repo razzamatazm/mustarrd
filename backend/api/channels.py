@@ -383,9 +383,16 @@ async def preview_channel_stream(
     # generator can park on a yield forever, never reaching its finally — the
     # slot and provider connection would leak until restart. Force cleanup
     # shortly after the relay deadline regardless of consumer behavior.
+    def _spawn_failsafe_cleanup():
+        # Keep a strong ref: the loop only weakly references tasks, so an
+        # unanchored cleanup task could in principle be collected before it runs.
+        task = asyncio.ensure_future(cleanup())
+        _pending_preview_closes.add(task)
+        task.add_done_callback(_pending_preview_closes.discard)
+
     failsafe = asyncio.get_running_loop().call_later(
         PREVIEW_MAX_SECONDS + 30,
-        lambda: asyncio.ensure_future(cleanup()),
+        _spawn_failsafe_cleanup,
     )
     logger.info(
         "Preview slot acquired account_id=%s channel_id=%s mode=%s active=%s",

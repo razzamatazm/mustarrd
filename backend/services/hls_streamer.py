@@ -12,6 +12,7 @@ directory. Sessions are reaped after an idle TTL.
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -74,7 +75,10 @@ class HLSStreamer:
         self._sessions: Dict[int, HLSSession] = {}
         self._lock = asyncio.Lock()
         self._reaper_task: Optional[asyncio.Task] = None
-        self._root_dir = Path(tempfile.gettempdir()) / "mustarrd-hls"
+        # Per-process root: shutdown() removes the whole tree, and a shared
+        # name would let one instance (e.g. desktop app) wipe another's
+        # (e.g. dev server) live sessions on the same machine.
+        self._root_dir = Path(tempfile.gettempdir()) / f"mustarrd-hls-{os.getpid()}"
 
     # ------------------------------------------------------------------ probe
 
@@ -233,6 +237,14 @@ class HLSStreamer:
             except OSError as exc:
                 shutil.rmtree(session_dir, ignore_errors=True)
                 raise HLSStartError(f"FFmpeg could not be started: {exc}")
+            except BaseException:
+                # CancelledError (client gone mid-spawn) or anything else:
+                # the session was never registered, so nothing would ever
+                # reap the temp dir or the just-spawned FFmpeg.
+                if session.process is not None and session.process.returncode is None:
+                    session.process.kill()
+                shutil.rmtree(session_dir, ignore_errors=True)
+                raise
 
             self._sessions[download_id] = session
             self._ensure_reaper()

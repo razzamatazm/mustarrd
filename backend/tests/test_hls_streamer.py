@@ -1,10 +1,11 @@
 import asyncio
+import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -195,6 +196,47 @@ class SessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await streamer.shutdown()
         self.assertEqual(streamer._sessions, {})
         self.assertFalse(session.directory.exists())
+
+    def test_root_dir_is_per_process(self):
+        """shutdown() rmtree's the whole root; a shared name would let one
+        instance wipe another instance's live sessions on the same host."""
+        streamer = HLSStreamer()
+        self.assertEqual(streamer._root_dir.name, f"mustarrd-hls-{os.getpid()}")
+
+    async def test_cancelled_spawn_cleans_up_dir_and_process(self):
+        """Cancellation during the FFmpeg spawn must not leak the session
+        temp dir (it was never registered, so nothing else would reap it)."""
+        streamer = HLSStreamer()
+        created_dirs = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def tracking_mkdtemp(*args, **kwargs):
+            path = real_mkdtemp(*args, **kwargs)
+            created_dirs.append(Path(path))
+            return path
+
+        fake_process = AsyncMock()
+        fake_process.returncode = None
+        fake_process.kill = lambda: None
+
+        async def cancelled_spawn(*_args, **_kwargs):
+            raise asyncio.CancelledError()
+
+        with (
+            patch("services.hls_streamer.tempfile.mkdtemp", tracking_mkdtemp),
+            patch("services.hls_streamer.asyncio.create_subprocess_exec", cancelled_spawn),
+            patch.object(streamer, "_probe_codecs", AsyncMock(return_value=("h264", "aac"))),
+            patch("services.hls_streamer.post_processor") as mock_pp,
+        ):
+            mock_pp.get_ffmpeg_path.return_value = "/usr/bin/ffmpeg"
+            mock_pp.get_ffprobe_path.return_value = "/usr/bin/ffprobe"
+            with self.assertRaises(asyncio.CancelledError):
+                await streamer.get_or_create(1, Path("/media/a.ts"))
+
+        self.assertEqual(len(created_dirs), 1)
+        self.assertFalse(created_dirs[0].exists(), "session temp dir leaked")
+        self.assertNotIn(1, streamer._sessions)
+        await streamer.shutdown()
 
 
 class WaitForPlaylistTests(unittest.IsolatedAsyncioTestCase):
