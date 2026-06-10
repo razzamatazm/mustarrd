@@ -64,7 +64,7 @@ export default function FoldersStatus() {
         )}
         {data && (
           <>
-            <FolderRow label="Download folder (in progress)" status={data.download_folder} />
+            <FolderRow label="Download folder" status={data.download_folder} />
             <FolderRow label="Completed recordings folder" status={data.completed_folder} />
           </>
         )}
