@@ -19,6 +19,23 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 **What you would notice:** The Docker image can now encode recordings on your GPU. If your server has an Intel, AMD, or NVIDIA GPU visible to the container, re-encoding finished recordings is much faster and uses far less CPU. The Settings page tells you where you stand in plain language: a green "GPU encoding ready" badge with the detected vendor when everything works, a note when the driver was set manually, and a clear explanation when no GPU is available (for example, Docker Desktop on macOS and Windows does not share the host GPU with containers, so encoding falls back to the CPU; slower, but everything still works).
 
 **What changed:** The Docker image now installs `jellyfin-ffmpeg7` from the Jellyfin apt repository (bundles VAAPI, QSV, NVENC, and AMF encoder builds) instead of copying ffmpeg binaries out of the LinuxServer ffmpeg image. Compatibility symlinks keep `/usr/local/bin/ffmpeg` and `ffprobe` working, and `CATCHUP_FFMPEG_PATH`, `CATCHUP_FFPROBE_PATH`, `LIBVA_DRIVERS_PATH`, and `LD_LIBRARY_PATH` point at the bundled tools and drivers. The Settings frontend renders the VAAPI diagnostics the backend already exposes via `/api/settings/tools` as a status badge, mapping the kernel driver or PCI vendor id to a friendly vendor name and explaining each detection state (auto-detected, manual override, device missing, sysfs unavailable).
+
+---
+
+### Improved: Browse EPG shows a direct link to Settings when your provider cannot be reached
+
+**What you would notice:** On the Browse EPG page, when your IPTV provider is unreachable, the large right panel now ends with an actionable link instead of a dead-end message. If you are an admin, you see "Check Settings, Accounts." as a clickable link that takes you directly to the Accounts section where you can check your connection. If you are not an admin, you see "Contact your administrator." Previously, the panel gave you nowhere to go.
+
+**What changed:** One block in the Browse page. No backend, no configuration changes.
+
+---
+
+### Fixed: Downloads no longer complete silently when your provider returns a JSON error instead of a stream
+
+**What you would notice:** Some IPTV providers send a JSON error message (for example, "maximum connections reached" or "stream unavailable") disguised as a normal HTTP 200 response. Before this fix, Mustarrd wrote that tiny JSON blob to the recording file and marked the download as Completed. You would end up with a corrupt, unplayable recording in Plex or Jellyfin showing 0:00 duration, with no indication anything went wrong. After this fix, Mustarrd detects the JSON content type and immediately marks the download as Failed with a clear reason: "Provider returned an error page (Content-Type: application/json)."
+
+**What changed:** The content-type guard in the download manager, which already rejected HTML and plain-text error pages, now also rejects `application/json` responses. The check applies at both the initial request and the restart path so no code path lets a JSON error body through. Two regression tests cover the affected cases.
+
 ---
 
 ### Improved: Browse EPG now clearly tells you when your provider connection is temporarily down
