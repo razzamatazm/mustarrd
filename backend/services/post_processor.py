@@ -187,6 +187,10 @@ class PostProcessor:
         """Return resolved ffmpeg path if available."""
         return self._resolve_ffmpeg_path()
 
+    def get_ffprobe_path(self) -> Optional[str]:
+        """Return resolved ffprobe path if available."""
+        return self._resolve_ffprobe_path()
+
     @property
     def ffmpeg_available(self) -> bool:
         return self._resolve_ffmpeg_path() is not None

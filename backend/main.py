@@ -77,6 +77,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    from services.hls_streamer import hls_streamer
+    await hls_streamer.shutdown()
     stop_server_log_bridge()
     download_task.cancel()
     post_process_task.cancel()

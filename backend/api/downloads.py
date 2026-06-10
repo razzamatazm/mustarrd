@@ -22,6 +22,13 @@ from database import get_session
 from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
 from services.disk_space import check_disk_space
 from services.download_manager import download_manager
+from services.hls_streamer import (
+    HLS_ASSET_PATTERN,
+    HLSError,
+    HLSLimitError,
+    HLSUnavailableError,
+    hls_streamer,
+)
 from services.file_namer import file_namer
 from services.epg_service import epg_service
 from services.download_builder import build_download_from_program
@@ -438,15 +445,13 @@ async def get_download(
     return download.to_dict()
 
 
-@router.get("/{download_id}/file")
-async def get_download_file(
+async def _resolve_completed_download_file(
     download_id: int,
-    request: Request,
-    action: str = Query(default="download", pattern="^(download|play)$"),
-    auth: AuthContext = Depends(require_admin_or_download_user),
-    session: AsyncSession = Depends(get_session),
-):
-    """Serve a completed download file for browser download/play actions."""
+    auth: AuthContext,
+    session: AsyncSession,
+) -> Path:
+    """Look up a completed download (scoped to the requesting user) and return
+    its on-disk path after validating it lives under an allowed folder."""
     query = select(Download).where(Download.id == download_id)
     if not auth.is_admin:
         query = query.where(Download.requested_by_user_id == auth.user_id)
@@ -484,6 +489,20 @@ async def get_download_file(
         raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Downloaded file was not found on disk")
+
+    return file_path
+
+
+@router.get("/{download_id}/file")
+async def get_download_file(
+    download_id: int,
+    request: Request,
+    action: str = Query(default="download", pattern="^(download|play)$"),
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a completed download file for browser download/play actions."""
+    file_path = await _resolve_completed_download_file(download_id, auth, session)
 
     media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     disposition = "inline" if action == "play" else "attachment"
@@ -529,6 +548,56 @@ async def get_download_file(
         path=str(file_path),
         media_type=media_type,
         headers=headers,
+    )
+
+
+@router.get("/{download_id}/hls/{asset}")
+async def get_download_hls_asset(
+    download_id: int,
+    asset: str,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve an on-the-fly HLS rendition of a completed download.
+
+    Requesting playlist.m3u8 starts (or reuses) an FFmpeg repackaging session;
+    init.mp4/segments are only served while that session is alive.
+    """
+    if not HLS_ASSET_PATTERN.match(asset):
+        raise HTTPException(status_code=404, detail="Unknown stream asset")
+
+    file_path = await _resolve_completed_download_file(download_id, auth, session)
+
+    if asset == "playlist.m3u8":
+        try:
+            hls_session = await hls_streamer.get_or_create(download_id, file_path)
+            await hls_streamer.wait_for_playlist(hls_session)
+        except HLSLimitError as exc:
+            raise HTTPException(status_code=429, detail=str(exc))
+        except HLSUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except HLSError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return FileResponse(
+            path=str(hls_session.playlist_path),
+            media_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    hls_session = hls_streamer.get_active(download_id)
+    if not hls_session:
+        raise HTTPException(status_code=409, detail="No active playback session for this download")
+    hls_streamer.touch(hls_session)
+
+    # Asset name is regex-validated above, so it cannot escape the session dir.
+    asset_path = hls_session.directory / asset
+    if not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="Stream segment not found")
+    media_type = "video/mp4" if asset.endswith(".mp4") else "video/iso.segment"
+    return FileResponse(
+        path=str(asset_path),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
     )
 
 
