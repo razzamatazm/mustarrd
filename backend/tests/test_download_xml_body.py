@@ -8,12 +8,12 @@ HTTP error status. For example:
     Content-Type: application/xml
     <error><message>Stream unavailable</message><code>403</code></error>
 
-The existing content-type guard rejects text/* and (after PR #365) application/json.
-application/xml does not start with "text/" and is not application/json, so it slips
-through both guards. The XML body is written to the output .ts file and the download
-is silently marked COMPLETED with a corrupt, non-playable recording.
+Before the fix, the content-type guard only rejected text/* and application/json.
+application/xml slipped through both guards: the XML body was written to the output
+.ts file and the download was silently marked COMPLETED with a corrupt recording.
 
-This test currently FAILS: no exception is raised for application/xml bodies.
+After the fix, the guard also rejects application/xml so the download fails with a
+clear error message instead.
 """
 
 import asyncio
