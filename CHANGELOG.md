@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-10
 
+### Improved: Downloads page now shows a countdown to when a scheduled recording will start
+
+**What you would notice:** On the Downloads page, each card in the Upcoming tab now shows how long until the recording begins, next to the scheduled start time. For example, you might see "Download starts: Today at 9:30 PM (in 20h 1m)". Previously you had to do the math yourself. If you have pre or post-recording padding set, the countdown and the padding note appear together: "(in 20h 1m, 1h 45m with padding)". The countdown disappears automatically once the recording is underway.
+
+**What changed:** Frontend only. No server changes.
+
+---
+
 ### Fixed: Downloading hundreds of TV episodes at once no longer stalls the app
 
 **What you would notice:** If you selected more than 200 episodes of a TV series and clicked Download, the server would accept all of them and start queuing hundreds of individual download tasks at once, which could freeze the interface for several seconds on lower-powered hardware like a Raspberry Pi or Unraid box. Mustarrd now rejects any batch over 200 episodes before doing any database work, and shows a clear validation error so you can split the request into smaller groups.
