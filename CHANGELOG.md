@@ -11,7 +11,29 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 **What you would notice:** The Docker image can now encode recordings on your GPU. If your server has an Intel, AMD, or NVIDIA GPU visible to the container, re-encoding finished recordings is much faster and uses far less CPU. The Settings page tells you where you stand in plain language: a green "GPU encoding ready" badge with the detected vendor when everything works, a note when the driver was set manually, and a clear explanation when no GPU is available (for example, Docker Desktop on macOS and Windows does not share the host GPU with containers, so encoding falls back to the CPU; slower, but everything still works).
 
 **What changed:** The Docker image now installs `jellyfin-ffmpeg7` from the Jellyfin apt repository (bundles VAAPI, QSV, NVENC, and AMF encoder builds) instead of copying ffmpeg binaries out of the LinuxServer ffmpeg image. Compatibility symlinks keep `/usr/local/bin/ffmpeg` and `ffprobe` working, and `CATCHUP_FFMPEG_PATH`, `CATCHUP_FFPROBE_PATH`, `LIBVA_DRIVERS_PATH`, and `LD_LIBRARY_PATH` point at the bundled tools and drivers. The Settings frontend renders the VAAPI diagnostics the backend already exposes via `/api/settings/tools` as a status badge, mapping the kernel driver or PCI vendor id to a friendly vendor name and explaining each detection state (auto-detected, manual override, device missing, sysfs unavailable).
+---
 
+### Improved: Browse EPG now clearly tells you when your provider connection is temporarily down
+
+**What you would notice:** On the Browse EPG page, when your IPTV provider is temporarily unreachable, the guide panel now says "Channel guide will appear here once your provider connection is restored" instead of "once your provider is connected." The old wording sounded like a setup step you had not finished. The new wording makes it clear this is a temporary outage that will go away on its own once your provider comes back.
+
+**What changed:** One line in the Browse page. No backend or configuration changes.
+
+---
+
+### Fixed: Some channels showed an empty guide when the provider and guide file used different capitalization for channel IDs
+
+**What you would notice:** Certain channels would show a completely empty program guide with no error message, even after a successful guide refresh. This happened when your IPTV provider labeled a channel with a mixed-case ID (such as `BBC.ONE`) but the guide file used a different capitalization (such as `bbc.one`). Mustarrd could not match them up, so every program for those channels was silently skipped. After this fix, the matching ignores capitalization, so guide data reaches all channels regardless of how the provider and guide file capitalize their IDs.
+
+**What changed:** Four one-line changes in the EPG ingest code make channel ID comparisons case-insensitive at both ends: provider IDs are stored in lowercase, and guide file IDs are lowercased before any lookup. Three new regression tests cover the affected cases. Backend only, no configuration or frontend changes.
+
+---
+
+### Added: Folder health status now appears in Settings
+
+**What you would notice:** The Recording section of the Settings page now shows a folder health panel directly below the folder path inputs. For each configured folder (download and completed), it shows the resolved path, whether Mustarrd can write to it, and a plain reason if it cannot (for example: folder is missing, drive is not mounted, or no write permission). This panel was built as part of the previous recording reliability update and is now visible in Settings.
+
+**What changed:** The FoldersStatus component is now imported and shown in the Settings Recording section. No new backend endpoints or settings were added. Frontend only.
 ---
 
 ### Added: Back up your scheduled recordings, and let failed downloads retry themselves
