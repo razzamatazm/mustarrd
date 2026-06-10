@@ -21,7 +21,7 @@ describe('FoldersStatus', () => {
 
     renderWithQuery(<FoldersStatus />)
 
-    expect(await screen.findByText('Download folder (in progress)')).toBeInTheDocument()
+    expect(await screen.findByText('Download folder')).toBeInTheDocument()
     expect(screen.getByText('Completed recordings folder')).toBeInTheDocument()
     expect(screen.getAllByText('Writable')).toHaveLength(2)
     expect(screen.getByText('/downloads')).toBeInTheDocument()

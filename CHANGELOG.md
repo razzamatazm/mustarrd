@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-10
 
+### Fixed: Cancelling a recording during commercial removal no longer leaves comskip files on disk
+
+**What you would notice:** After cancelling a recording while Mustarrd was running commercial detection or removal, files like `ShowName.edl`, `ShowName.txt`, `ShowName.log`, and `ShowName.csv` would be left behind in your download folder forever. These are working files Comskip creates and they would slowly accumulate after every cancel. They are now cleaned up automatically when you cancel, the same way they are on a normal failure.
+
+**What changed:** Backend only. When a post-processing job is cancelled, Mustarrd now always cleans up Comskip working files regardless of what the database says about the download's status. Previously, a race condition meant the cancel request would update the database before the cleanup code ran, causing the cleanup to be silently skipped.
+
+---
+
 ### Added: Tune Comskip commercial detection from the Settings page
 
 **What you would notice:** Settings now has a dedicated **Comskip** section (between Post-Processing and File Naming). You can choose which signals Comskip uses to find commercials (black frames, logo detection, scene change, resolution change, aspect ratio change, silence), set commercial break and single-commercial length limits, protect the start and end of recordings from being cut, and pick how many CPU threads Comskip uses. Every field has a tooltip explaining what it does, there is a Reset to Defaults button, and the page warns you inline if a minimum is set higher than its maximum. When Comskip is turned off, the section stays visible but greyed out with a note pointing to Post-Processing. Previously these values could only be changed by editing `comskip.ini` by hand.
@@ -14,11 +22,43 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Scheduling two recordings at once no longer breaks the second one when the first fails
+
+**What you would notice:** On Unraid, if two scheduled recordings were due to start in the same 30-second window and something went wrong with the first one (such as a provider rejecting it), the second recording would silently fail with a confusing internal error ("greenlet_spawn has not been called") and stay stuck as FAILED. The second recording is now unaffected by the first's failure and will be queued normally.
+
+**What changed:** Backend only. When a scheduled recording fails to start, the scheduler now saves a copy of each recording's details before processing begins. This means a failure in one recording can no longer corrupt the data needed to start the next one.
+
+---
+
+### Improved: Scheduled Recordings page also shows a countdown to when each recording will start
+
+**What you would notice:** On the Scheduled Recordings page, each upcoming recording card now shows how long until the download begins, for example "in 2h 30m" or "in 1d 4h". If you have pre or post-recording padding set, the total duration with padding appears alongside the countdown. This countdown was already shown on the Downloads page Upcoming tab and is now on the Scheduled Recordings page too.
+
+**What changed:** Frontend only. No server or configuration changes.
+
+---
+
 ### Fixed: Transcoded recordings are no longer lost when the completed folder drive is full
 
 **What you would notice:** On Unraid (or any setup where your completed recordings folder is on a different drive or NAS array than your download folder), if that destination drive ran out of space while Mustarrd was moving a freshly-transcoded .mkv or .mp4 into it, the file could vanish completely. The original .ts was already deleted by the transcode step, and the error handler then deleted the .mkv too, leaving you with nothing and a FAILED status. After this fix, the .mkv or .mp4 stays safely in the download folder when the move fails, so you can free up space and move it yourself.
 
 **What changed:** The post-processing step now tracks the transcoded output file path separately from the original recording. If the drive-full error fires during the move, cleanup code uses the transcoded path as the "keep this" marker instead of the now-deleted original .ts path. The same protection applies when commercial removal is on (which also deletes the source .ts before returning). A new regression test confirms the .mkv survives a simulated out-of-space move. Backend only.
+
+---
+
+### Fixed: Resuming a download no longer writes a corrupt file when the partial file was deleted
+
+**What you would notice:** On Unraid, if a NAS drive briefly disconnects while a recording is in progress and then Mustarrd restarts, the partial file may be gone by the time Mustarrd tries to resume. Previously, Mustarrd would send a "continue from offset" request to the provider, get the end of the stream, and write it to a new empty file, resulting in a recording missing its first portion and showing as Completed even though it was broken. After this fix, Mustarrd checks that the file on disk actually matches the expected size before resuming. If it does not match (file gone, file truncated, or any mismatch), Mustarrd starts a clean download from the beginning instead.
+
+**What changed:** Before entering append mode, the download manager compares the file size on disk against the expected offset. Any mismatch triggers a fresh download from byte 0. Three regression tests cover the missing file, truncated file, and normal resume cases. Backend only.
+
+---
+
+### Improved: GPU status badge now correctly warns when ffmpeg is not installed
+
+**What you would notice:** On the Settings page, in the Post-Processing section, if your server has a compatible GPU but ffmpeg is not installed inside the Mustarrd container, the GPU status badge now shows a yellow "GPU DETECTED, FFMPEG REQUIRED" warning instead of a misleading green "GPU ENCODING READY". GPU encoding cannot work without ffmpeg, so the old green badge gave users false confidence. The badge turns green again as soon as ffmpeg is present.
+
+**What changed:** Frontend only. No server or configuration changes.
 
 ---
 
