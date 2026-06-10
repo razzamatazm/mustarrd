@@ -1810,14 +1810,35 @@ class DownloadManager:
                         )
                 else:
                     if resuming:
-                        await self._broadcast_log(
-                            download_id,
-                            f"Resuming from byte {offset:,}."
-                        )
-                        return await self._stream_response_to_file(
-                            response, output_path, "ab", offset,
-                            total_size, download_id, session
-                        )
+                        # Guard: verify the partial file still has the expected
+                        # bytes before opening in "ab" mode.  If the file was
+                        # deleted or truncated between recover_incomplete_downloads
+                        # (which recorded the offset) and now, "ab" would create
+                        # a new empty file and write the provider's response body
+                        # (bytes offset..end) starting at position 0, producing a
+                        # corrupt recording that is silently marked COMPLETED.
+                        try:
+                            disk_size = await asyncio.to_thread(
+                                os.path.getsize, output_path
+                            )
+                        except OSError:
+                            disk_size = -1
+                        if disk_size != offset:
+                            await self._broadcast_log(
+                                download_id,
+                                f"Partial file on disk ({disk_size:,} B) does not match "
+                                f"resume offset ({offset:,} B); re-downloading from start.",
+                            )
+                            needs_restart = True
+                        else:
+                            await self._broadcast_log(
+                                download_id,
+                                f"Resuming from byte {offset:,}."
+                            )
+                            return await self._stream_response_to_file(
+                                response, output_path, "ab", offset,
+                                total_size, download_id, session
+                            )
                     else:
                         if offset > 0:
                             # Provider ignored the Range request and returned the
