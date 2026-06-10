@@ -57,6 +57,74 @@ function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
 }
 
+const VAAPI_VENDOR_NAMES = {
+  '0x8086': 'Intel',
+  '0x1002': 'AMD',
+  '0x10de': 'NVIDIA',
+}
+
+const VAAPI_KERNEL_LABELS = {
+  amdgpu: 'AMD',
+  radeon: 'AMD (legacy)',
+  i915: 'Intel',
+  xe: 'Intel (Xe)',
+  nouveau: 'NVIDIA (open driver)',
+  nvidia: 'NVIDIA',
+}
+
+function describeHardwareAccel(vaapi) {
+  if (!vaapi || !vaapi.enabled) {
+    return null
+  }
+  const vendorLabel =
+    VAAPI_KERNEL_LABELS[(vaapi.kernel_driver || '').toLowerCase()] ||
+    VAAPI_VENDOR_NAMES[(vaapi.vendor || '').toLowerCase()] ||
+    null
+
+  switch (vaapi.source) {
+    case 'auto-detected':
+      return {
+        color: 'green',
+        icon: <IconCheck size={12} />,
+        label: `GPU encoding ready${vendorLabel ? ` — ${vendorLabel}` : ''}`,
+        detail: `Recordings will be encoded on your ${vendorLabel || 'GPU'} (driver: ${vaapi.driver}).`,
+      }
+    case 'env':
+      return {
+        color: 'green',
+        icon: <IconCheck size={12} />,
+        label: 'GPU encoding ready (manual)',
+        detail: `Using driver "${vaapi.driver}" from the LIBVA_DRIVER_NAME environment variable.`,
+      }
+    case 'device-missing':
+      return {
+        color: 'gray',
+        icon: <IconAlertCircle size={12} />,
+        label: 'GPU encoding unavailable',
+        detail:
+          'No GPU is visible to the app. This is expected on macOS and Windows — Docker Desktop doesn\'t share the host GPU with containers. Recordings will be encoded on the CPU, which works fine but is slower.',
+      }
+    case 'sysfs-unavailable':
+      return {
+        color: 'yellow',
+        icon: <IconAlertCircle size={12} />,
+        label: 'GPU found, details unknown',
+        detail:
+          'A GPU device was found but the app couldn\'t identify it. Hardware acceleration may still work — try selecting VA-API and running a test transcode.',
+      }
+    case 'auto':
+    default:
+      return {
+        color: 'yellow',
+        icon: <IconAlertCircle size={12} />,
+        label: vendorLabel ? `GPU found — ${vendorLabel}` : 'GPU found',
+        detail: vendorLabel
+          ? `Detected a ${vendorLabel} GPU but couldn\'t auto-pick a driver. Set LIBVA_DRIVER_NAME manually if encoding fails.`
+          : 'Detected a GPU but couldn\'t identify a matching driver. Set LIBVA_DRIVER_NAME manually if encoding fails.',
+      }
+  }
+}
+
 function TemplateSection({ label, template, variables, example, renderedExample, onChange }) {
   const inputRef = useRef(null)
 
@@ -846,13 +914,18 @@ export default function Settings() {
             {toolsStatus.comskip?.error && (
               <Text size="xs" c="dimmed">Comskip error: {toolsStatus.comskip.error}</Text>
             )}
-            {toolsStatus.vaapi?.enabled && (
-              <Text size="xs" c="dimmed">
-                VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}
-                {toolsStatus.vaapi.source ? ` (${toolsStatus.vaapi.source})` : ''}
-                {toolsStatus.vaapi.kernel_driver ? `, kernel: ${toolsStatus.vaapi.kernel_driver}` : ''}
-              </Text>
-            )}
+            {(() => {
+              const hwStatus = describeHardwareAccel(toolsStatus.vaapi)
+              if (!hwStatus) return null
+              return (
+                <Stack gap={4}>
+                  <Badge color={hwStatus.color} variant="light" leftSection={hwStatus.icon} style={{ alignSelf: 'flex-start' }}>
+                    {hwStatus.label}
+                  </Badge>
+                  <Text size="xs" c="dimmed">{hwStatus.detail}</Text>
+                </Stack>
+              )
+            })()}
           </Stack>
         )}
 
@@ -936,12 +1009,16 @@ export default function Settings() {
             />
           )}
 
-          {toolsStatus?.vaapi?.enabled && formData.hw_accel === 'vaapi' && isFullTranscode && (
-            <Text size="xs" c="dimmed">
-              Active VA-API driver: {toolsStatus.vaapi.driver || 'auto/unset'}.
-              {toolsStatus.vaapi.source ? ` Source: ${toolsStatus.vaapi.source}.` : ''}
-            </Text>
-          )}
+          {toolsStatus?.vaapi?.enabled && formData.hw_accel === 'vaapi' && isFullTranscode && (() => {
+            const hwStatus = describeHardwareAccel(toolsStatus.vaapi)
+            if (!hwStatus) return null
+            return (
+              <Alert color={hwStatus.color === 'green' ? 'green' : hwStatus.color === 'gray' ? 'blue' : 'yellow'} variant="light" icon={hwStatus.icon}>
+                <Text size="sm" fw={500}>{hwStatus.label}</Text>
+                <Text size="xs" c="dimmed" mt={4}>{hwStatus.detail}</Text>
+              </Alert>
+            )
+          })()}
 
           {isTranscoding && (
             <SettingRow

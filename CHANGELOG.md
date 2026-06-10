@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Added: GPU-accelerated encoding in Docker, with a plain-language GPU status panel in Settings
+
+**What you would notice:** The Docker image can now encode recordings on your GPU. If your server has an Intel, AMD, or NVIDIA GPU visible to the container, re-encoding finished recordings is much faster and uses far less CPU. The Settings page tells you where you stand in plain language: a green "GPU encoding ready" badge with the detected vendor when everything works, a note when the driver was set manually, and a clear explanation when no GPU is available (for example, Docker Desktop on macOS and Windows does not share the host GPU with containers, so encoding falls back to the CPU; slower, but everything still works).
+
+**What changed:** The Docker image now installs `jellyfin-ffmpeg7` from the Jellyfin apt repository (bundles VAAPI, QSV, NVENC, and AMF encoder builds) instead of copying ffmpeg binaries out of the LinuxServer ffmpeg image. Compatibility symlinks keep `/usr/local/bin/ffmpeg` and `ffprobe` working, and `CATCHUP_FFMPEG_PATH`, `CATCHUP_FFPROBE_PATH`, `LIBVA_DRIVERS_PATH`, and `LD_LIBRARY_PATH` point at the bundled tools and drivers. The Settings frontend renders the VAAPI diagnostics the backend already exposes via `/api/settings/tools` as a status badge, mapping the kernel driver or PCI vendor id to a friendly vendor name and explaining each detection state (auto-detected, manual override, device missing, sysfs unavailable).
+
+---
+
 ### Added: Back up your scheduled recordings, and let failed downloads retry themselves
 
 **What you would notice:** Two additions around scheduled recordings. First, the Scheduled Recordings page has new Export and Import buttons: Export saves your schedules to a JSON file, and Import restores them later — handy before reinstalling, when moving to another machine, or simply as a backup. Importing runs each entry through the same checks as scheduling normally does, so programs that are already scheduled, have already ended, or belong to an IPTV account this server does not have are skipped — and the result tells you exactly how many schedules were created and what was skipped and why. Admins export everyone's schedules; other users export and restore only their own. Second, admins get a small "Auto-retry failed downloads" switch on the same page (off by default). With it on, a catchup download that fails — for example because your provider hiccuped — is retried automatically: up to 3 times, at least 10 minutes apart, and only while the program is still inside the channel's catchup window, so Mustarrd never wastes attempts on programs that have aged out. Recordings you cancelled are never retried behind your back.

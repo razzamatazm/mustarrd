@@ -33,13 +33,11 @@ RUN npm ci
 COPY frontend ./
 RUN npm run build
 
-FROM lscr.io/linuxserver/ffmpeg:latest AS lsffmpeg
-
 FROM ghcr.io/linuxserver/baseimage-ubuntu:noble
 
 WORKDIR /app/backend
 
-# Runtime deps
+# Runtime deps + jellyfin-ffmpeg (bundles nvenc/qsv/vaapi/amf builds)
 RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list \
   && sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list \
   && apt-get update -o Acquire::Retries=3 \
@@ -47,53 +45,37 @@ RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubun
     python3 \
     python3-venv \
     python3-pip \
+    ca-certificates \
+    curl \
+    gnupg \
+    gosu \
+    libargtable2-0 \
     libavcodec60 \
     libavformat60 \
     libavutil58 \
     libswscale7 \
-    libswresample4 \
     libpostproc57 \
-    libargtable2-0 \
-    libedit2 \
-    libelf1 \
-    libexpat1 \
-    libglib2.0-0 \
-    libgomp1 \
-    libpciaccess0 \
-    libv4l-0 \
-    libwayland-client0 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb-dri2-0 \
-    libxcb-dri3-0 \
-    libxcb-present0 \
-    libxcb-randr0 \
-    libxcb-shape0 \
-    libxcb-shm0 \
-    libxcb-sync1 \
-    libxcb-xfixes0 \
-    libxcb1 \
-    libxext6 \
-    libxfixes3 \
-    libxshmfence1 \
-    libxml2 \
-    ocl-icd-libopencl1 \
-    gosu \
-  && for pkg in vainfo libva2 libva-drm2 libdrm2 libasound2t64 libasound2 libllvm18; do \
-       apt-get install -y --no-install-recommends -o Acquire::Retries=3 "$pkg" || true; \
-     done \
+  && install -d -m 0755 /etc/apt/keyrings \
+  && curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg \
+  && . /etc/os-release \
+  && echo "deb [signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/${ID} ${VERSION_CODENAME} main" \
+       > /etc/apt/sources.list.d/jellyfin.list \
+  && apt-get update -o Acquire::Retries=3 \
+  && apt-get install -y --no-install-recommends jellyfin-ffmpeg7 \
   && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
-       for pkg in mesa-va-drivers i965-va-driver intel-media-va-driver libigdgmm12; do \
+       for pkg in mesa-va-drivers intel-media-va-driver i965-va-driver; do \
          apt-get install -y --no-install-recommends -o Acquire::Retries=3 "$pkg" || true; \
        done; \
      fi \
   && rm -rf /var/lib/apt/lists/*
 
 ENV \
-    LIBVA_DRIVERS_PATH="/usr/local/lib/x86_64-linux-gnu/dri:/usr/local/lib/aarch64-linux-gnu/dri:/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri" \
-    LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib/x86_64-linux-gnu:/usr/local/lib/aarch64-linux-gnu" \
-    CATCHUP_FFMPEG_PATH="/usr/local/bin/ffmpeg" \
-    CATCHUP_FRONTEND_DIST="/app/frontend/dist"
+    CATCHUP_FFMPEG_PATH="/usr/lib/jellyfin-ffmpeg/ffmpeg" \
+    CATCHUP_FFPROBE_PATH="/usr/lib/jellyfin-ffmpeg/ffprobe" \
+    CATCHUP_FRONTEND_DIST="/app/frontend/dist" \
+    LIBVA_DRIVERS_PATH="/usr/lib/jellyfin-ffmpeg/lib/dri:/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri" \
+    LD_LIBRARY_PATH="/usr/lib/jellyfin-ffmpeg/lib"
 
 # Install dependencies in a venv (PEP 668 safe)
 ENV VENV_PATH="/opt/venv"
@@ -115,11 +97,9 @@ COPY comskip.ini /app/comskip.ini
 COPY --from=comskip-builder /tmp/comskip/comskip /usr/local/bin/comskip
 RUN chmod +x /usr/local/bin/comskip
 
-# Copy ffmpeg + drivers from LinuxServer ffmpeg image
-COPY --from=lsffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=lsffmpeg /usr/local/bin/ffprobe /usr/local/bin/ffprobe
-COPY --from=lsffmpeg /usr/local/lib/ /usr/local/lib/
-COPY --from=lsffmpeg /usr/local/share/ /usr/local/share/
+# Symlink jellyfin-ffmpeg so callers expecting /usr/local/bin/ffmpeg keep working
+RUN ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/local/bin/ffmpeg \
+  && ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe
 
 # Ensure repo-provided tools are executable if present
 RUN chmod +x /app/tools/bin/*/ffmpeg /app/tools/bin/*/ffprobe /app/tools/bin/*/comskip 2>/dev/null || true
