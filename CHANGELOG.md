@@ -4,6 +4,16 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-06-10
+
+### Fixed: Downloading hundreds of TV episodes at once no longer stalls the app
+
+**What you would notice:** If you selected more than 200 episodes of a TV series and clicked Download, the server would accept all of them and start queuing hundreds of individual download tasks at once, which could freeze the interface for several seconds on lower-powered hardware like a Raspberry Pi or Unraid box. Mustarrd now rejects any batch over 200 episodes before doing any database work, and shows a clear validation error so you can split the request into smaller groups.
+
+**What changed:** The series download endpoint now enforces a hard limit of 200 episodes per request. Requests at or below 200 are unchanged. Three new regression tests cover the limit boundary.
+
+---
+
 ## 2026-06-09
 
 ### Improved: Export and Import buttons on Scheduled Recordings stay together on phone-sized screens
