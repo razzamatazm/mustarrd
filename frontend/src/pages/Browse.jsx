@@ -1106,9 +1106,20 @@ export default function Browse() {
                     <Stack align="center" justify="center" style={{ flex: 1, minHeight: 0 }}>
                       <IconVideo size={48} opacity={0.3} />
                       <Text c="dimmed" ta="center">
-                        {channelsIsError
-                          ? 'Channel guide will appear here once your provider connection is restored.'
-                          : 'Select a channel to view its program guide.'}
+                        {channelsIsError ? (
+                          <>
+                            Channel guide will appear here once your provider connection is restored.{' '}
+                            {authStatus?.is_admin ? (
+                              <Link to="/settings?section=accounts" style={{ color: 'var(--mantine-color-orange-5)' }}>
+                                Check Settings → Accounts.
+                              </Link>
+                            ) : (
+                              'Contact your administrator.'
+                            )}
+                          </>
+                        ) : (
+                          'Select a channel to view its program guide.'
+                        )}
                       </Text>
                     </Stack>
                   )}
