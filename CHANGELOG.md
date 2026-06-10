@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-09
 
+### Fixed: Provider error messages can no longer masquerade as completed recordings
+
+**What you would notice:** Occasionally a download would finish instantly and show as Completed, but the resulting file was a few hundred bytes and would not play. This happened when the provider answered the catchup request with an error message (for example "maximum connections reached" or "stream unavailable") sent as JSON or XML with a success status code; Mustarrd saved that message as if it were the recording. These downloads now fail immediately with a clear error ("Provider returned an error page"), so the recording can be retried while the catchup window is still open instead of being discovered broken later.
+
+**What changed:** The content-type guard in the download manager rejected only `text/*` responses. It now also rejects `application/json` and `application/xml` bodies, in both the initial request and the restart-from-zero path. Regression tests cover both content types. (PRs #365 and #367.)
+
+---
+
 ### Fixed: Guides using ISO timestamps with timezone names (EST, CET, MSK) no longer come up empty
 
 **What you would notice:** With some providers, certain channels (or the whole guide) showed no programs at all, with no error anywhere. This happened when the provider's guide file wrote program times in ISO format with a named timezone, for example "2024-01-15 20:00:00 EST" instead of a numeric offset. Mustarrd could not parse those times and silently skipped every affected program. These guides now load correctly, with program times converted from the named timezone.
