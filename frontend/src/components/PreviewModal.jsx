@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, Badge, Group, Modal, Stack, Text } from '@mantine/core'
 import { IconAlertCircle } from '@tabler/icons-react'
 import { attachMpegts, mpegtsSupported } from '../utils/playbackEngine'
 
 export default function PreviewModal({ opened, onClose, program, channel, accountId, mode = 'catchup' }) {
-  const videoRef = useRef(null)
+  // Callback-ref state instead of useRef: the Modal renders its children in
+  // a portal after open, so a plain ref is still null when the attach effect
+  // first runs and the effect would never retry.
+  const [videoEl, setVideoEl] = useState(null)
   const [playbackError, setPlaybackError] = useState(null)
   // The preview endpoint relays raw MPEG-TS, which no browser plays in a bare
   // <video>. With MSE we demux it client-side via mpegts.js; without MSE
@@ -30,18 +33,17 @@ export default function PreviewModal({ opened, onClose, program, channel, accoun
 
   useEffect(() => {
     setPlaybackError(null)
-    const video = videoRef.current
-    if (!opened || !previewUrl || !video || !canDemuxTs) return undefined
-    const destroy = attachMpegts(video, previewUrl, {
+    if (!opened || !previewUrl || !videoEl || !canDemuxTs) return undefined
+    const destroy = attachMpegts(videoEl, previewUrl, {
       live: true,
       onError: () =>
         setPlaybackError(
           'This stream uses a codec your browser cannot decode. Downloading still works normally.'
         ),
     })
-    video.play()?.catch(() => {})
+    videoEl.play()?.catch(() => {})
     return destroy
-  }, [opened, previewUrl, canDemuxTs])
+  }, [opened, previewUrl, canDemuxTs, videoEl])
 
   return (
     <Modal opened={opened} onClose={onClose} title="Preview" size="lg" returnFocus={false}>
@@ -70,7 +72,7 @@ export default function PreviewModal({ opened, onClose, program, channel, accoun
 
         {previewUrl ? (
           <video
-            ref={videoRef}
+            ref={setVideoEl}
             controls
             autoPlay
             preload="none"
