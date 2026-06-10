@@ -44,7 +44,7 @@ import duration from 'dayjs/plugin/duration'
 
 import { accountsApi, authApi, downloadsApi, createDownloadWebSocket } from '../api'
 import ProgressBar from '../components/ProgressBar'
-import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
+import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours, getChannelDisplayTime, getNowUtc } from '../utils/channelTime'
 
 dayjs.extend(duration)
 
@@ -81,6 +81,22 @@ function formatDuration(minutes) {
     return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
   }
   return `${mins}m`
+}
+
+function formatTimeUntil(displayTime, guideOffsetHours = 0) {
+  if (!displayTime) return null
+  const nowDisplay = getNowUtc().add(getGuideOffsetHours(guideOffsetHours), 'hour')
+  const diffMinutes = displayTime.diff(nowDisplay, 'minute')
+  if (diffMinutes <= 0) return null
+  const hours = Math.floor(diffMinutes / 60)
+  const mins = diffMinutes % 60
+  if (hours >= 48) return `in ${Math.floor(hours / 24)}d`
+  if (hours >= 24) {
+    const remHours = hours % 24
+    return remHours > 0 ? `in 1d ${remHours}h` : 'in 1d'
+  }
+  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`
+  return `in ${mins}m`
 }
 
 function formatRecordedDuration(seconds) {
@@ -730,7 +746,11 @@ export default function Downloads() {
                 const airStart = formatAirDateTime(rec, 'start', guideOffset)
                 const airEnd = formatChannelDateTime(rec, 'end', guideOffset, 'h:mm A')
                 const downloadAt = formatAirDateTime(rec, 'available', guideOffset)
+                const downloadDisplayTime = getChannelDisplayTime(rec, 'available', guideOffset)
+                const timeUntil = formatTimeUntil(downloadDisplayTime, guideOffset)
                 const totalDuration = (rec.duration_minutes || 0) + (rec.pre_padding_minutes || 0) + (rec.post_padding_minutes || 0)
+                const paddingNote = totalDuration !== (rec.duration_minutes || 0) ? `${formatDuration(totalDuration)} with padding` : null
+                const downloadNotes = [timeUntil, paddingNote].filter(Boolean)
                 return (
                   <Card key={rec.id} shadow="sm" padding="md" radius="md" withBorder>
                     <Stack gap={2}>
@@ -745,7 +765,7 @@ export default function Downloads() {
                         Airs: {airStart || 'Unknown'} - {airEnd || 'Unknown'} ({formatDuration(rec.duration_minutes || 0)})
                       </Text>
                       <Text size="xs" c="dimmed">
-                        Download starts: {downloadAt || 'Unknown'}{totalDuration !== (rec.duration_minutes || 0) ? ` (${formatDuration(totalDuration)} with padding)` : ''}
+                        Download starts: {downloadAt || 'Unknown'}{downloadNotes.length > 0 ? ` (${downloadNotes.join(', ')})` : ''}
                       </Text>
                     </Stack>
                   </Card>
