@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-10
 
+### Fixed: Previews no longer get permanently stuck behind "Too Many Requests"
+
+**What you would notice:** After closing a couple of previews abruptly (closing the tab, navigating away, or a player error), every new preview attempt could fail forever — the app silently hit its two-preview safety limit and never recovered until a restart. Previews now free their slot the moment you leave, and if the limit is genuinely reached you see an honest "Preview limit reached" message instead of a misleading codec error.
+
+**What changed:** Backend: when a viewer disconnected, the preview relay's cleanup could be interrupted before it released its concurrency slot, leaking it until restart. The release now happens in an uninterruptible step, the provider connection is closed in a detached task, and a failsafe timer force-releases any preview slot shortly after its five-minute cap. Slot activity is now logged. Frontend: a 429 from the preview endpoint shows a "limit reached" message instead of the codec-unsupported one.
+
+---
+
 ### Added: Recordings and previews now play in every major browser
 
 **What you would notice:** Clicking Play on a finished recording, or Preview on a program in the guide, now actually plays video in Firefox, Chrome, Edge, and Safari. Previously the player showed a black box in most browsers: raw `.ts` recordings and guide previews played nowhere, and `.mkv` recordings only played in Chrome. Now everything plays — `.ts` files and previews are decoded right in the browser, and `.mkv` recordings (or files with broadcast audio like AC-3) are converted on the fly by the server while you watch. If a stream uses a codec your browser truly cannot handle, the player falls back automatically and shows a clear message instead of a silent black box.

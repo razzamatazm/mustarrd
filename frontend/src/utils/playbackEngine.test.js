@@ -114,9 +114,9 @@ describe('attachMpegts', () => {
 
     attachMpegts({}, '/url.ts', { onError })
     const handler = player.on.mock.calls.find(([event]) => event === 'error')[1]
-    handler('MediaError', 'unsupported codec')
+    handler('NetworkError', 'Exception', { code: 429, msg: 'Too Many Requests' })
 
-    expect(onError).toHaveBeenCalledWith('MediaError: unsupported codec')
+    expect(onError).toHaveBeenCalledWith('NetworkError: Exception', { code: 429, msg: 'Too Many Requests' })
   })
 })
 

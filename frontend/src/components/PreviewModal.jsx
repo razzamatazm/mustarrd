@@ -36,9 +36,11 @@ export default function PreviewModal({ opened, onClose, program, channel, accoun
     if (!opened || !previewUrl || !videoEl || !canDemuxTs) return undefined
     const destroy = attachMpegts(videoEl, previewUrl, {
       live: true,
-      onError: () =>
+      onError: (_reason, info) =>
         setPlaybackError(
-          'This stream uses a codec your browser cannot decode. Downloading still works normally.'
+          info?.code === 429
+            ? 'Preview limit reached — close any other open preview and try again.'
+            : 'This stream uses a codec your browser cannot decode. Downloading still works normally.'
         ),
     })
     videoEl.play()?.catch(() => {})

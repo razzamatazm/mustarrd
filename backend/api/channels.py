@@ -31,6 +31,10 @@ PREVIEW_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=6
 
 _active_preview_count = 0
 
+# Strong refs to in-flight connection-close tasks: the event loop only keeps
+# weak references, so an unreferenced task could be garbage-collected mid-close.
+_pending_preview_closes: set = set()
+
 
 def _release_preview_slot() -> None:
     global _active_preview_count
@@ -349,14 +353,44 @@ async def preview_channel_stream(
     cleanup_done = False
 
     async def cleanup():
-        # Idempotent: invoked from the generator's finally and from the
-        # response background task, whichever runs first wins.
+        # Idempotent: invoked from the generator's finally, the response
+        # background task, and the failsafe timer; whichever runs first wins.
+        #
+        # CRITICAL: no awaits in this function. On client disconnect Starlette
+        # CANCELS the streaming task, so this runs with a CancelledError
+        # pending — the first await would re-raise it and skip everything
+        # after, leaking the slot until restart (while cleanup_done, already
+        # set, blocks the failsafe from retrying). Cancellation can only land
+        # at await points, so an await-free body always runs to completion;
+        # the connection close is detached into its own task.
         nonlocal cleanup_done
         if cleanup_done:
             return
         cleanup_done = True
-        await _close_preview_connection(provider_response, http_session)
+        failsafe.cancel()
         _release_preview_slot()
+        logger.info(
+            "Preview slot released account_id=%s channel_id=%s active=%s",
+            account_id, channel_id, _active_preview_count,
+        )
+        close_task = asyncio.ensure_future(
+            _close_preview_connection(provider_response, http_session)
+        )
+        _pending_preview_closes.add(close_task)
+        close_task.add_done_callback(_pending_preview_closes.discard)
+
+    # Failsafe: if the consumer stops reading without disconnecting, the relay
+    # generator can park on a yield forever, never reaching its finally — the
+    # slot and provider connection would leak until restart. Force cleanup
+    # shortly after the relay deadline regardless of consumer behavior.
+    failsafe = asyncio.get_running_loop().call_later(
+        PREVIEW_MAX_SECONDS + 30,
+        lambda: asyncio.ensure_future(cleanup()),
+    )
+    logger.info(
+        "Preview slot acquired account_id=%s channel_id=%s mode=%s active=%s",
+        account_id, channel_id, mode, _active_preview_count,
+    )
 
     async def relay():
         try:

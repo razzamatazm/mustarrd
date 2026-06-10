@@ -10,6 +10,7 @@ account username and password — never reaches the browser. The endpoint must:
 - close the provider connection when the client disconnects,
 - enforce the concurrent-preview cap with HTTP 429.
 """
+import asyncio
 import inspect
 import sys
 import unittest
@@ -223,6 +224,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
         # Starlette calls aclose() on the body iterator when the client goes away
         await result.body_iterator.aclose()
+        await asyncio.sleep(0)  # the connection close runs as a detached task
 
         response.close.assert_called_once()
         http_session.close.assert_awaited()
@@ -239,6 +241,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self._call_preview(http_session)
         received = [chunk async for chunk in result.body_iterator]
+        await asyncio.sleep(0)  # the connection close runs as a detached task
 
         self.assertEqual(received, [b"a", b"b"])
         response.close.assert_called_once()
@@ -290,6 +293,62 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await second.body_iterator.aclose()
 
+    async def test_cancelled_consumer_releases_slot(self):
+        """Starlette CANCELS the streaming task on client disconnect. Cleanup
+        used to await the connection close first, so the pending CancelledError
+        aborted it before the slot release — leaking the slot until restart."""
+        async def infinite_chunks(_size):
+            while True:
+                await asyncio.sleep(0.01)
+                yield b"\x47" * 188
+
+        response = _make_provider_response()
+        response.content.iter_chunked = infinite_chunks
+        http_session = _make_http_session(response)
+
+        result = await self._call_preview(http_session)
+
+        async def consume():
+            async for _ in result.body_iterator:
+                pass
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)
+        self.assertEqual(channels_api._active_preview_count, 1)
+
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+        await asyncio.sleep(0)  # let the detached close task run
+
+        self.assertEqual(
+            channels_api._active_preview_count,
+            0,
+            "Slot must be released even when cleanup runs under cancellation.",
+        )
+        response.close.assert_called_once()
+        http_session.close.assert_awaited()
+
+    async def test_failsafe_releases_parked_relay(self):
+        """A consumer that stops reading without disconnecting parks the relay
+        generator on a yield forever; the failsafe timer must still release
+        the slot and close the provider connection."""
+        response = _make_provider_response(chunks=(b"a", b"b", b"c"))
+        http_session = _make_http_session(response)
+
+        with patch.object(channels_api, "PREVIEW_MAX_SECONDS", -29.9):
+            result = await self._call_preview(http_session)
+            self.assertEqual(channels_api._active_preview_count, 1)
+            # Read one chunk, then never touch the generator again (no aclose):
+            # simulates a client that vanished without a detectable disconnect.
+            await result.body_iterator.__anext__()
+
+            await asyncio.sleep(0.4)
+
+        self.assertEqual(channels_api._active_preview_count, 0)
+        response.close.assert_called_once()
+        http_session.close.assert_awaited()
+        await result.body_iterator.aclose()
+
     async def test_disconnect_before_first_byte_releases_via_background(self):
         """
         Closing a never-started generator skips its finally block (PEP 525),
@@ -305,6 +364,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         await result.body_iterator.aclose()
         self.assertIsNotNone(result.background, "Preview response must carry a cleanup background task.")
         await result.background()
+        await asyncio.sleep(0)  # the connection close runs as a detached task
 
         response.close.assert_called_once()
         http_session.close.assert_awaited()

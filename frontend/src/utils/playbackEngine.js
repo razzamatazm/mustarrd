@@ -47,8 +47,8 @@ export function attachMpegts(video, url, { live = false, onError } = {}) {
     { enableWorker: true, seekType: 'range', lazyLoad: !live },
   )
   player.attachMediaElement(video)
-  player.on(mpegts.Events.ERROR, (errorType, errorDetail) => {
-    if (onError) onError(`${errorType}: ${errorDetail}`)
+  player.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+    if (onError) onError(`${errorType}: ${errorDetail}`, errorInfo)
   })
   player.load()
   let destroyed = false
