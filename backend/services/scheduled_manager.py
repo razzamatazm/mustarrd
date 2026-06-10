@@ -143,7 +143,43 @@ class ScheduledManager:
             # past the minimum free space threshold.
             projected_used_gb = 0.0
 
-            for schedule in ready:
+            # Snapshot all ORM attributes that the dispatch loop will read,
+            # before entering the loop. session.rollback() in a prior
+            # iteration's except handler expires every object in the session
+            # identity map. Without local copies, the next iteration raises
+            # MissingGreenlet when it reads the expired attributes in an async
+            # context, and the generic except marks that schedule FAILED with
+            # a cryptic SQLAlchemy error.
+            ready_data = [
+                {
+                    "schedule": s,
+                    "account_id": s.account_id,
+                    "channel_id": s.channel_id,
+                    "channel_name": s.channel_name,
+                    "program_title": s.program_title,
+                    "program_description": s.program_description,
+                    "program_start": s.program_start,
+                    "program_end": s.program_end,
+                    "start_timestamp": s.start_timestamp,
+                    "stop_timestamp": s.stop_timestamp,
+                    "provider_start": s.provider_start,
+                    "provider_stop": s.provider_stop,
+                    "duration_minutes": s.duration_minutes,
+                    "epg_id": s.epg_id,
+                    "program_id": s.program_id,
+                    "channel_category_name": s.channel_category_name,
+                    "custom_filename": s.custom_filename,
+                    "pre_padding_minutes": s.pre_padding_minutes,
+                    "post_padding_minutes": s.post_padding_minutes,
+                    "requested_by_user_id": s.requested_by_user_id,
+                    "request_source": s.request_source,
+                }
+                for s in ready
+            ]
+
+            for snap in ready_data:
+                schedule = snap["schedule"]
+
                 if free_gb is None:
                     # Folder missing or unreachable (e.g. NAS not mounted).
                     # Fail safe: hold the schedule instead of recording onto
@@ -167,31 +203,31 @@ class ScheduledManager:
 
                 try:
                     program = {
-                        "title": schedule.program_title,
-                        "description": schedule.program_description or "",
-                        "start_time": schedule.program_start.isoformat() if schedule.program_start else None,
-                        "end_time": schedule.program_end.isoformat() if schedule.program_end else None,
-                        "start_timestamp": schedule.start_timestamp,
-                        "stop_timestamp": schedule.stop_timestamp,
-                        "provider_start": schedule.provider_start,
-                        "provider_stop": schedule.provider_stop,
-                        "duration_minutes": schedule.duration_minutes,
-                        "epg_id": schedule.epg_id,
-                        "id": schedule.program_id,
-                        "category": schedule.channel_category_name or "",
+                        "title": snap["program_title"],
+                        "description": snap["program_description"] or "",
+                        "start_time": snap["program_start"].isoformat() if snap["program_start"] else None,
+                        "end_time": snap["program_end"].isoformat() if snap["program_end"] else None,
+                        "start_timestamp": snap["start_timestamp"],
+                        "stop_timestamp": snap["stop_timestamp"],
+                        "provider_start": snap["provider_start"],
+                        "provider_stop": snap["provider_stop"],
+                        "duration_minutes": snap["duration_minutes"],
+                        "epg_id": snap["epg_id"],
+                        "id": snap["program_id"],
+                        "category": snap["channel_category_name"] or "",
                     }
 
                     download = await build_download_from_program(
                         session,
-                        account_id=schedule.account_id,
-                        channel_id=schedule.channel_id,
-                        channel_name=schedule.channel_name,
+                        account_id=snap["account_id"],
+                        channel_id=snap["channel_id"],
+                        channel_name=snap["channel_name"],
                         program=program,
-                        custom_filename=schedule.custom_filename,
-                        pre_padding_minutes=schedule.pre_padding_minutes,
-                        post_padding_minutes=schedule.post_padding_minutes,
-                        requested_by_user_id=schedule.requested_by_user_id,
-                        request_source=schedule.request_source or "admin",
+                        custom_filename=snap["custom_filename"],
+                        pre_padding_minutes=snap["pre_padding_minutes"],
+                        post_padding_minutes=snap["post_padding_minutes"],
+                        requested_by_user_id=snap["requested_by_user_id"],
+                        request_source=snap["request_source"] or "admin",
                     )
 
                     # Stage the download row on this session so it commits

@@ -14,6 +14,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+### Fixed: Scheduling two recordings at once no longer breaks the second one when the first fails
+
+**What you would notice:** On Unraid, if two scheduled recordings were due to start in the same 30-second window and something went wrong with the first one (such as a provider rejecting it), the second recording would silently fail with a confusing internal error ("greenlet_spawn has not been called") and stay stuck as FAILED. The second recording is now unaffected by the first's failure and will be queued normally.
+
+**What changed:** Backend only. When a scheduled recording fails to start, the scheduler now saves a copy of each recording's details before processing begins. This means a failure in one recording can no longer corrupt the data needed to start the next one.
+
+---
+
 ### Improved: Downloads page now shows a countdown to when a scheduled recording will start
 
 **What you would notice:** On the Downloads page, each card in the Upcoming tab now shows how long until the recording begins, next to the scheduled start time. For example, you might see "Download starts: Today at 9:30 PM (in 20h 1m)". Previously you had to do the math yourself. If you have pre or post-recording padding set, the countdown and the padding note appear together: "(in 20h 1m, 1h 45m with padding)". The countdown disappears automatically once the recording is underway.
