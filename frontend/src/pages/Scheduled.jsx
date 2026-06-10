@@ -41,7 +41,7 @@ import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 
 import { accountsApi, authApi, downloadsApi, schedulesApi, settingsApi } from '../api'
-import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
+import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours, getChannelDisplayTime, getNowUtc } from '../utils/channelTime'
 
 dayjs.extend(duration)
 
@@ -70,6 +70,22 @@ function formatDuration(minutes) {
     return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
   }
   return `${mins}m`
+}
+
+function formatTimeUntil(displayTime, guideOffsetHours = 0) {
+  if (!displayTime) return null
+  const nowDisplay = getNowUtc().add(getGuideOffsetHours(guideOffsetHours), 'hour')
+  const diffMinutes = displayTime.diff(nowDisplay, 'minute')
+  if (diffMinutes <= 0) return null
+  const hours = Math.floor(diffMinutes / 60)
+  const mins = diffMinutes % 60
+  if (hours >= 48) return `in ${Math.floor(hours / 24)}d`
+  if (hours >= 24) {
+    const remHours = hours % 24
+    return remHours > 0 ? `in 1d ${remHours}h` : 'in 1d'
+  }
+  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`
+  return `in ${mins}m`
 }
 
 function getStatusBadge(status) {
@@ -117,9 +133,13 @@ function ScheduleCard({
   const startTime = formatAirDateTime(schedule, 'start', guideOffsetHours)
   const endTime = formatChannelDateTime(schedule, 'end', guideOffsetHours, 'h:mm A')
   const availableAt = formatAirDateTime(schedule, 'available', guideOffsetHours)
+  const downloadDisplayTime = getChannelDisplayTime(schedule, 'available', guideOffsetHours)
+  const timeUntil = isActive ? formatTimeUntil(downloadDisplayTime, guideOffsetHours) : null
   const totalDuration = (schedule.duration_minutes || 0)
     + (schedule.pre_padding_minutes || 0)
     + (schedule.post_padding_minutes || 0)
+  const paddingNote = totalDuration !== (schedule.duration_minutes || 0) ? `${formatDuration(totalDuration)} with padding` : null
+  const downloadNotes = [timeUntil, paddingNote].filter(Boolean)
   const downloadHref = schedule.download_id
     ? `/api/downloads/${schedule.download_id}/file?action=download`
     : null
@@ -174,7 +194,7 @@ function ScheduleCard({
 
         {(isActive || schedule.status === 'completed') && (
           <Text size="xs" c="dimmed">
-            Download starts: {availableAt || 'Unknown'}{totalDuration !== (schedule.duration_minutes || 0) ? ` (${formatDuration(totalDuration)} with padding)` : ''}
+            Download starts: {availableAt || 'Unknown'}{downloadNotes.length > 0 ? ` (${downloadNotes.join(', ')})` : ''}
           </Text>
         )}
 
