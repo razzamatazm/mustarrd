@@ -917,12 +917,19 @@ export default function Settings() {
             {(() => {
               const hwStatus = describeHardwareAccel(toolsStatus.vaapi)
               if (!hwStatus) return null
+              const gpuBlockedByFfmpeg = hwStatus.color === 'green' && ffmpegReady === false
+              const badgeColor = gpuBlockedByFfmpeg ? 'yellow' : hwStatus.color
+              const badgeIcon = gpuBlockedByFfmpeg ? <IconAlertCircle size={12} /> : hwStatus.icon
+              const badgeLabel = gpuBlockedByFfmpeg ? 'GPU detected, ffmpeg required' : hwStatus.label
+              const badgeDetail = gpuBlockedByFfmpeg
+                ? 'A GPU was found but ffmpeg is not installed. Install ffmpeg to use GPU encoding.'
+                : hwStatus.detail
               return (
                 <Stack gap={4}>
-                  <Badge color={hwStatus.color} variant="light" leftSection={hwStatus.icon} style={{ alignSelf: 'flex-start' }}>
-                    {hwStatus.label}
+                  <Badge color={badgeColor} variant="light" leftSection={badgeIcon} style={{ alignSelf: 'flex-start' }}>
+                    {badgeLabel}
                   </Badge>
-                  <Text size="xs" c="dimmed">{hwStatus.detail}</Text>
+                  <Text size="xs" c="dimmed">{badgeDetail}</Text>
                 </Stack>
               )
             })()}
