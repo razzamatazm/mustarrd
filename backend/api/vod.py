@@ -1,9 +1,9 @@
 from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Optional
+from typing import Annotated, Optional
 import logging
 import os
 
@@ -44,7 +44,7 @@ class SeriesDownloadRequest(BaseModel):
     account_id: int
     series_id: str
     series_name: str
-    episodes: list[EpisodeItem]
+    episodes: Annotated[list[EpisodeItem], Field(max_length=200)]
 
 
 async def _get_client(session: AsyncSession, account: XtreamAccount) -> XtreamClient:
