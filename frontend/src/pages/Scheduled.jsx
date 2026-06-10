@@ -558,23 +558,25 @@ export default function Scheduled() {
               />
             </Tooltip>
           )}
-          <Button
-            size="xs"
-            variant="default"
-            leftSection={<IconFileExport size={14} />}
-            onClick={handleExport}
-          >
-            Export
-          </Button>
-          <Button
-            size="xs"
-            variant="default"
-            leftSection={<IconFileImport size={14} />}
-            onClick={() => importInputRef.current?.click()}
-            loading={importMutation.isPending}
-          >
-            Import
-          </Button>
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              size="xs"
+              variant="default"
+              leftSection={<IconFileExport size={14} />}
+              onClick={handleExport}
+            >
+              Export
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              leftSection={<IconFileImport size={14} />}
+              onClick={() => importInputRef.current?.click()}
+              loading={importMutation.isPending}
+            >
+              Import
+            </Button>
+          </Group>
           <input
             ref={importInputRef}
             type="file"
