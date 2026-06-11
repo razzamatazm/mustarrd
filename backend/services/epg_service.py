@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from models import XtreamAccount, EPGProgram, AppSettings
 from services.account_credentials import resolve_account_password_with_migration
+from services.file_namer import FileNamer
 from services.xtream_client import XtreamClient
 from config import settings as app_settings
 
@@ -484,25 +485,24 @@ class EPGService:
 
         Returns: 'tv_show', 'movie', 'sports', 'news', or 'other'
         """
-        title = program.get("title", "").lower()
-        description = program.get("description", "").lower()
+        import re
+        title = program.get("title", "") or ""
+        description = program.get("description", "") or ""
         category = ""
         if channel:
-            category = channel.get("category_name", "").lower()
+            category = (channel.get("category_name", "") or "").lower()
 
-        # Check for TV show patterns (season/episode)
-        import re
-        if re.search(r's\d{1,2}e\d{1,2}|season\s*\d+|episode\s*\d+', title + description, re.IGNORECASE):
+        # TV show: season/episode markers anywhere in title or description.
+        # Uses the same patterns as FileNamer so the detected type and the
+        # generated filename can't disagree.
+        full_text = f"{title} {description}"
+        if FileNamer.extract_season_episode(full_text):
+            return "tv_show"
+        # Episode-only markers (daily shows): "Ep 173", "Episode 5"
+        if re.search(r'\b(?:season|episode|ep)\.?\s*\d{1,4}\b', full_text, re.IGNORECASE):
             return "tv_show"
 
-        # Check for sports
-        sports_keywords = ['vs', 'vs.', ' @ ', 'nfl', 'nba', 'nhl', 'mlb', 'ufc', 'boxing',
-                          'soccer', 'football', 'basketball', 'hockey', 'baseball', 'tennis',
-                          'golf', 'racing', 'motorsport', 'wrestling', 'mma']
-        sports_categories = ['sports', 'deportes', 'sport', 'esports']
-
-        if any(kw in title for kw in sports_keywords) or \
-           any(cat in category for cat in sports_categories):
+        if FileNamer.detect_sports(title, category):
             return "sports"
 
         # Check for movies
@@ -513,7 +513,8 @@ class EPGService:
         # Check for news
         news_keywords = ['news', 'noticias', 'journal', 'breaking']
         news_categories = ['news', 'noticias', 'information']
-        if any(kw in title for kw in news_keywords) or \
+        title_lower = title.lower()
+        if any(re.search(rf'\b{kw}\b', title_lower) for kw in news_keywords) or \
            any(cat in category for cat in news_categories):
             return "news"
 

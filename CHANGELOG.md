@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-11
 
+### Fixed: TV episodes are actually detected, so recordings get proper episode filenames
+
+**What you would notice:** Programs with season/episode info in their guide data — like "S54 E173" in the description — were being treated as generic programs and named with just the title and date (e.g. `The Price Is Right 2026-06-10.ts`). They're now recognized as TV episodes and named accordingly (e.g. `The Price Is Right - S54E173.ts`), both in the download dialog's filename preview and in the final file. Sports detection also got smarter: it no longer flags titles like "Canvas Painting" as sports just because "vs" appears inside a word, and it recognizes more leagues and competitions (MLS, WNBA, NCAA, F1, NASCAR, world cup, playoffs, and others).
+
+**What changed:** Backend only. The episode detection regex only matched `S01E01` glued together with a two-digit episode number; real EPG data commonly uses spaced (`S54 E173`), punctuated (`S04, E12`), worded (`Season 4, Episode 12`, `S54 Ep. 173`), and three-digit-episode forms, all of which now match (episode numbers up to 4 digits). The program-type classifier (`epg_service.detect_program_type`) and the filename generator (`file_namer`) each had their own slightly different patterns and could disagree; both now share one pattern set in `FileNamer`. Sports keyword matching switched from substring checks to word-boundary regexes with an expanded league list, and news keywords got word boundaries too ("The Newsroom" is no longer classified as news). Regression tests cover all the new formats.
+
+---
+
 ### Changed: Channel logos in the guide render clean and load instantly after the first visit
 
 **What you would notice:** In the Browse channel list and guide header, channel logos no longer sit inside a bordered box with a dark fill behind them — logos with transparency now sit directly on the row, sized consistently. The boxed look only remains for channels with no logo at all, which still show their two-letter initials. Logos also load instantly after the first visit instead of re-downloading from your provider every time you open the guide; if a channel's logo URL is dead, the initials fallback appears instead of a broken image.

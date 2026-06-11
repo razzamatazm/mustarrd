@@ -4,13 +4,32 @@ from typing import Optional, Tuple
 
 
 class FileNamer:
-    # Sports keywords for detection
-    SPORTS_KEYWORDS = [
-        'vs', 'vs.', ' @ ', 'nfl', 'nba', 'nhl', 'mlb', 'ufc', 'boxing',
-        'soccer', 'football', 'basketball', 'hockey', 'baseball', 'tennis',
-        'golf', 'racing', 'motorsport', 'wrestling', 'mma', 'fifa', 'uefa',
-        'premier league', 'la liga', 'serie a', 'bundesliga', 'champions league'
+    # Shared season/episode patterns. Order matters: the S/E form is tried first
+    # so "S54 E173" doesn't fall through to the looser NxNN form.
+    # Covers: S01E01, S54 E173, S54.E173, S54-E173, S04, E12,
+    # Season 4 Episode 12, Season 4, Episode 12, S54 Ep. 173, Sn 4 Ep 12
+    SEASON_EPISODE_PATTERNS = [
+        re.compile(
+            r'\b[Ss](?:eason|n)?\s*(\d{1,2})\s*[.,\-]?\s*'
+            r'[Ee](?:p(?:isode)?)?\.?\s*(\d{1,4})\b'
+        ),
+        # 4x12, 54x173 — no spaces around the x, so "3 x 4" in prose doesn't match
+        re.compile(r'\b(\d{1,2})[xX](\d{1,4})\b'),
     ]
+
+    # Word-boundary sports detection: bare substrings like 'vs' or 'mma'
+    # false-positive inside words ("canvas", "grammar").
+    SPORTS_TITLE_PATTERN = re.compile(
+        r'\bvs\.?\b'
+        r'|@'
+        r'|\b(?:nfl|nba|wnba|nhl|mlb|mls|ufc|mma|ncaa|fifa|uefa|f1|nascar|motogp|pga|lpga|atp|wta)\b'
+        r'|\b(?:boxing|soccer|football|basketball|hockey|baseball|tennis|golf|racing|motorsport|wrestling|cricket|rugby)\b'
+        r'|\b(?:premier league|la liga|serie a|bundesliga|ligue 1|champions league|europa league'
+        r'|world cup|stanley cup|super bowl|world series|grand prix)\b'
+        r'|\b(?:round|week|matchday)\s+\d+\b'
+        r'|\bplayoffs?\b|\bsemi-?finals?\b|\bquarter-?finals?\b',
+        re.IGNORECASE,
+    )
 
     SPORTS_CATEGORIES = ['sports', 'deportes', 'sport', 'esports']
 
@@ -41,53 +60,43 @@ class FileNamer:
             sanitized = encoded[:200].decode("utf-8", errors="ignore").rstrip() or "unknown-program"
         return sanitized
 
-    @staticmethod
-    def extract_season_episode(text: str) -> Optional[Tuple[int, int]]:
+    @classmethod
+    def extract_season_episode(cls, text: str) -> Optional[Tuple[int, int]]:
         """Extract season and episode numbers from text."""
-        # Common patterns: S01E01, S1E1, Season 1 Episode 1, 1x01
-        patterns = [
-            r'[Ss](\d{1,2})[Ee](\d{1,2})',  # S01E01
-            r'[Ss]eason\s*(\d{1,2})\s*[Ee]pisode\s*(\d{1,2})',  # Season 1 Episode 1
-            r'(\d{1,2})[xX](\d{1,2})',  # 1x01
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+        for pattern in cls.SEASON_EPISODE_PATTERNS:
+            match = pattern.search(text)
             if match:
                 return (int(match.group(1)), int(match.group(2)))
 
         return None
 
-    @staticmethod
-    def extract_show_name(title: str) -> str:
+    @classmethod
+    def extract_show_name(cls, title: str) -> str:
         """Extract the show name from a title with season/episode info."""
-        # Remove season/episode patterns
-        patterns = [
-            r'\s*[Ss]\d{1,2}[Ee]\d{1,2}.*$',
-            r'\s*[Ss]eason\s*\d+.*$',
-            r'\s*\d{1,2}[xX]\d{1,2}.*$',
-        ]
+        for pattern in cls.SEASON_EPISODE_PATTERNS:
+            match = pattern.search(title)
+            if match:
+                before = title[:match.start()].strip(' -:,.(')
+                if before:
+                    return before
+                # Pattern at the very start of the title — keep whatever follows
+                return pattern.sub('', title, count=1).strip(' -:,.)')
 
-        show_name = title
-        for pattern in patterns:
-            show_name = re.sub(pattern, '', show_name, flags=re.IGNORECASE)
-
+        # Season-only titles like "Show Name Season 4"
+        show_name = re.sub(r'\s*[Ss]eason\s*\d+.*$', '', title)
         return show_name.strip(' -:')
 
-    @staticmethod
-    def extract_episode_title(title: str) -> str:
+    @classmethod
+    def extract_episode_title(cls, title: str) -> str:
         """Extract the episode title from a full title."""
-        # Try to find content after season/episode pattern
-        patterns = [
-            r'[Ss]\d{1,2}[Ee]\d{1,2}\s*[-:]\s*(.+)$',
-            r'[Ss]eason\s*\d+\s*[Ee]pisode\s*\d+\s*[-:]\s*(.+)$',
-            r'\d{1,2}[xX]\d{1,2}\s*[-:]\s*(.+)$',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, title, re.IGNORECASE)
+        for pattern in cls.SEASON_EPISODE_PATTERNS:
+            match = pattern.search(title)
             if match:
-                return match.group(1).strip()
+                after = title[match.end():]
+                sep = re.match(r'\s*[-–:]\s*(.+)$', after)
+                if sep:
+                    return sep.group(1).strip()
+                return ""
 
         return ""
 
@@ -102,11 +111,10 @@ class FileNamer:
     @classmethod
     def detect_sports(cls, title: str, category: str = "") -> bool:
         """Check if content is sports-related."""
-        title_lower = title.lower()
         category_lower = category.lower()
 
         return (
-            any(kw in title_lower for kw in cls.SPORTS_KEYWORDS) or
+            bool(cls.SPORTS_TITLE_PATTERN.search(title)) or
             any(cat in category_lower for cat in cls.SPORTS_CATEGORIES)
         )
 
