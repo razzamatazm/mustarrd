@@ -371,6 +371,31 @@ export default function Browse() {
 
     setSelectedAccountId(availableAccountIds[0])
   }, [accounts, appSettings?.default_account_id, selectedAccountId])
+  // The panels pin their height to the viewport, but the chrome above them
+  // varies (low-disk banner, wrapping header rows), so a fixed offset in CSS
+  // leaves the rail poking below the fold on small windows. Measure the real
+  // top of the visible panel into --panel-top for Browse.module.css to use.
+  const pageRef = useRef(null)
+  useEffect(() => {
+    const root = pageRef.current
+    if (!root) return undefined
+    const update = () => {
+      const panels = root.querySelectorAll(`.${classes.panel}`)
+      const visible = Array.from(panels).find((el) => el.offsetParent !== null)
+      if (!visible) return
+      const top = Math.round(visible.getBoundingClientRect().top + window.scrollY)
+      root.style.setProperty('--panel-top', `${top}px`)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(document.body)
+    window.addEventListener('resize', update)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [accountsLoading])
+
   const { data: preferences } = useQuery({
     queryKey: ['auth', 'preferences'],
     queryFn: authApi.getPreferences,
@@ -801,7 +826,7 @@ export default function Browse() {
   }
 
   return (
-    <Stack className={classes.page}>
+    <Stack className={classes.page} ref={pageRef}>
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
         <Group gap="md" align="center" wrap="wrap" style={{ flex: 1, minWidth: 0 }}>
           <Title order={2}>Browse</Title>

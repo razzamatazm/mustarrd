@@ -26,8 +26,11 @@
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 210px);
-  min-height: 420px;
+  /* --panel-top is measured by Browse.jsx (the chrome above varies with the
+     low-disk banner and header wrapping); 16px is the shell bottom padding */
+  height: calc(100vh - var(--panel-top, 210px) - 16px);
+  height: calc(100dvh - var(--panel-top, 210px) - 16px);
+  min-height: 260px;
   min-width: 0;
 }
 
@@ -296,7 +299,8 @@
 
   .panel {
     height: auto;
-    max-height: calc(100vh - 200px);
+    max-height: calc(100vh - var(--panel-top, 200px) - 16px);
+    max-height: calc(100dvh - var(--panel-top, 200px) - 16px);
   }
 
   .vodGrid {

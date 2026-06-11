@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-11
 
+### Fixed: Browse panels no longer spill below the window when it's small
+
+**What you would notice:** With the browser window shrunk (or with the low-disk banner showing), the Browse channel list and guide used to extend past the bottom of the window. That spawned a second page scrollbar at the window edge that barely moved anything, right next to the channel list's own thin scrollbar — so grabbing "the scrollbar" often did nothing. The channel list and guide now end at the bottom of the window at any size, and the only scrollbar is the one inside the list, fully visible and working.
+
+**What changed:** Frontend only. The Browse panels sized themselves with a hard-coded `calc(100vh - 210px)`, assuming a fixed amount of chrome above them; the low-disk banner and wrapping header rows made the real offset bigger, pushing the panels below the fold. Browse now measures the visible panel's actual top offset into a `--panel-top` CSS variable (kept fresh via ResizeObserver and window resize) and sizes panels with `calc(100dvh - var(--panel-top) - 16px)`. The 420px minimum panel height dropped to 260px so short windows fit too. Regression test in `Browse.test.jsx` covers the measurement; the layout itself was verified in-browser across seven window sizes.
+
+---
+
 ### Fixed: TV episodes are actually detected, so recordings get proper episode filenames
 
 **What you would notice:** Programs with season/episode info in their guide data — like "S54 E173" in the description — were being treated as generic programs and named with just the title and date (e.g. `The Price Is Right 2026-06-10.ts`). They're now recognized as TV episodes and named accordingly (e.g. `The Price Is Right - S54E173.ts`), both in the download dialog's filename preview and in the final file. Sports detection also got smarter: it no longer flags titles like "Canvas Painting" as sports just because "vs" appears inside a word, and it recognizes more leagues and competitions (MLS, WNBA, NCAA, F1, NASCAR, world cup, playoffs, and others).
