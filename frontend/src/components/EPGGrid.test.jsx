@@ -96,7 +96,15 @@ describe('EPGGrid', () => {
   })
 
   it('renders sticky day headers with TODAY styling for the current day', () => {
-    renderGrid({ epgData: [pastProgram] })
+    // Day grouping happens in UTC; "3 hours ago" lands on yesterday when the
+    // local evening has crossed UTC midnight. Pin the program to UTC today.
+    const utcMidnight = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`
+    const todayProgram = {
+      ...pastProgram,
+      start_time: utcMidnight,
+      end_time: `${new Date().toISOString().slice(0, 10)}T00:01:00.000Z`,
+    }
+    renderGrid({ epgData: [todayProgram], showFuture: true })
     expect(screen.getByText('TODAY')).toBeInTheDocument()
   })
 })

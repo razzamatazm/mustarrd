@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-11
 
+### Fixed: On phones, the channel guide scrolls again and program titles wrap instead of getting chopped
+
+**What you would notice:** On a phone, opening a channel in Browse showed its program list spilling past the bottom of the screen with no way to scroll it — the list wouldn't budge and neither would the page, so anything below the first screenful was unreachable. That works again: the guide panel now ends at the bottom of the screen and the program list scrolls inside it. Long program titles ("Entertainment Tonig…") and the channel header's catchup summary ("105 pro…") were also being cut off mid-word; titles now wrap onto a second line and the header text wraps fully.
+
+**What changed:** Frontend only. The phone layout sized panels with `height: auto` plus a `max-height` cap — but flex children don't shrink against a max-height-clamped container, so the guide's inner scroll viewport laid itself out at full content height (thousands of pixels) inside the capped panel: nothing overflowed *inside* the scroller, so it had nothing to scroll, and the clamped panel kept the page from growing a scrollbar either. The mobile rule now sets a definite `height` (same measured `--panel-top` calc the desktop uses), which lets the flex chain shrink and the scroller work. Program titles get a two-line clamp on mobile instead of single-line ellipsis, and the guide header title/subtitle wrap. Also pinned a time-of-day flake in `EPGGrid.test.jsx` (the TODAY day-header test failed after 5pm Pacific because "3 hours ago" crossed UTC midnight).
+
+---
+
 ### Fixed: Browse panels no longer spill below the window when it's small
 
 **What you would notice:** With the browser window shrunk (or with the low-disk banner showing), the Browse channel list and guide used to extend past the bottom of the window. That spawned a second page scrollbar at the window edge that barely moved anything, right next to the channel list's own thin scrollbar — so grabbing "the scrollbar" often did nothing. The channel list and guide now end at the bottom of the window at any size, and the only scrollbar is the one inside the list, fully visible and working.

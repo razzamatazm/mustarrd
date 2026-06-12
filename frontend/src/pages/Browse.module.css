@@ -297,10 +297,20 @@
     grid-template-columns: 1fr;
   }
 
+  /* A definite height (not max-height) is required: flex children don't
+     shrink against a max-height-clamped container, so the guide's inner
+     ScrollArea would lay out at full content height and never scroll. */
   .panel {
-    height: auto;
-    max-height: calc(100vh - var(--panel-top, 200px) - 16px);
-    max-height: calc(100dvh - var(--panel-top, 200px) - 16px);
+    height: calc(100vh - var(--panel-top, 200px) - 16px);
+    height: calc(100dvh - var(--panel-top, 200px) - 16px);
+  }
+
+  /* The header subtitle gets cramped on phone widths — wrap, don't truncate */
+  .gdTitle,
+  .gdSub {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .vodGrid {

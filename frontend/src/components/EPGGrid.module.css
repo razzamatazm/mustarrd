@@ -273,4 +273,14 @@
   .actLabel {
     display: none;
   }
+
+  /* Narrow rows: wrap program titles to two lines instead of truncating */
+  .titleText {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
 }
