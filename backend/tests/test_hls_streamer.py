@@ -42,11 +42,13 @@ class AssetPatternTests(unittest.TestCase):
 
 
 class FfmpegCommandTests(unittest.TestCase):
-    def _cmd(self, video, audio):
-        return HLSStreamer.build_ffmpeg_command("ffmpeg", Path("/x/in.ts"), video, audio)
+    def _cmd(self, video, audio, profile="LC", start=0.0):
+        return HLSStreamer.build_ffmpeg_command(
+            "ffmpeg", Path("/x/in.ts"), video, audio, profile, start
+        )
 
-    def test_h264_aac_copies_both(self):
-        cmd = self._cmd("h264", "aac")
+    def test_h264_aac_lc_copies_both(self):
+        cmd = self._cmd("h264", "aac", "LC")
         self.assertIn("-c:v", cmd)
         self.assertEqual(cmd[cmd.index("-c:v") + 1], "copy")
         self.assertEqual(cmd[cmd.index("-c:a") + 1], "copy")
@@ -66,6 +68,32 @@ class FfmpegCommandTests(unittest.TestCase):
         """ADTS AAC from MPEG-TS breaks fMP4 muxing without aac_adtstoasc."""
         cmd = self._cmd("h264", "aac")
         self.assertEqual(cmd[cmd.index("-bsf:a") + 1], "aac_adtstoasc")
+
+    def test_he_aac_transcodes_to_lc(self):
+        """Firefox MSE rejects non-LC AAC codec strings (bufferAddCodecError)."""
+        cmd = self._cmd("h264", "aac", "HE-AAC")
+        self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
+        self.assertNotIn("-bsf:a", cmd)
+
+    def test_main_profile_aac_transcodes_to_lc(self):
+        """Provider ADTS headers mislabeled as AAC Main become mp4a.40.1
+        under -c:a copy, which Firefox refuses to buffer."""
+        cmd = self._cmd("h264", "aac", "Main")
+        self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
+
+    def test_unknown_aac_profile_transcodes_to_lc(self):
+        cmd = self._cmd("h264", "aac", None)
+        self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
+
+    def test_start_offset_seeks_before_input(self):
+        cmd = self._cmd("h264", "aac", "LC", start=93.5)
+        ss = cmd.index("-ss")
+        self.assertEqual(cmd[ss + 1], "93.500")
+        self.assertLess(ss, cmd.index("-i"))
+
+    def test_zero_start_offset_omits_seek(self):
+        cmd = self._cmd("h264", "aac", "LC", start=0.0)
+        self.assertNotIn("-ss", cmd)
 
     def test_ac3_audio_transcodes_to_aac(self):
         cmd = self._cmd("h264", "ac3")
@@ -92,15 +120,30 @@ class ProbeParseTests(unittest.TestCase):
         raw = (
             '{"streams": ['
             '{"codec_type": "video", "codec_name": "h264"},'
-            '{"codec_type": "audio", "codec_name": "ac3"},'
-            '{"codec_type": "audio", "codec_name": "aac"},'
+            '{"codec_type": "audio", "codec_name": "ac3", "profile": "Dolby Digital"},'
+            '{"codec_type": "audio", "codec_name": "aac", "profile": "LC"},'
             '{"codec_type": "subtitle", "codec_name": "dvb_subtitle"}'
             "]}"
         )
-        self.assertEqual(HLSStreamer._parse_probe_output(raw), ("h264", "ac3"))
+        self.assertEqual(
+            HLSStreamer._parse_probe_output(raw), ("h264", "ac3", "Dolby Digital", None)
+        )
+
+    def test_parses_audio_profile_and_duration(self):
+        raw = (
+            '{"streams": ['
+            '{"codec_type": "video", "codec_name": "h264"},'
+            '{"codec_type": "audio", "codec_name": "aac", "profile": "HE-AAC"}'
+            '], "format": {"duration": "2641.472000"}}'
+        )
+        self.assertEqual(
+            HLSStreamer._parse_probe_output(raw), ("h264", "aac", "HE-AAC", 2641.472)
+        )
 
     def test_missing_streams_returns_nones(self):
-        self.assertEqual(HLSStreamer._parse_probe_output('{"streams": []}'), (None, None))
+        self.assertEqual(
+            HLSStreamer._parse_probe_output('{"streams": []}'), (None, None, None, None)
+        )
 
     def test_garbage_raises(self):
         with self.assertRaises(HLSStartError):
@@ -125,6 +168,20 @@ class SessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         result = await streamer.get_or_create(1, Path("/media/a.ts"))
         self.assertIs(result, session)
         self.assertTrue(session.directory.exists())
+        await streamer.shutdown()
+
+    async def test_different_start_offset_rebuilds_session(self):
+        """Seeking outside the produced range requests a new offset; the old
+        session must be torn down rather than served from the wrong position."""
+        streamer = HLSStreamer()
+        session = self._make_session(streamer, 1, "/media/a.ts")
+        with patch("services.hls_streamer.post_processor") as mock_pp:
+            mock_pp.get_ffmpeg_path.return_value = None
+            mock_pp.get_ffprobe_path.return_value = None
+            with self.assertRaises(hls_module.HLSUnavailableError):
+                await streamer.get_or_create(1, Path("/media/a.ts"), start_offset=120.0)
+        self.assertNotIn(1, streamer._sessions)
+        self.assertFalse(session.directory.exists())
         await streamer.shutdown()
 
     async def test_failed_session_is_not_reused(self):
@@ -225,7 +282,7 @@ class SessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.hls_streamer.tempfile.mkdtemp", tracking_mkdtemp),
             patch("services.hls_streamer.asyncio.create_subprocess_exec", cancelled_spawn),
-            patch.object(streamer, "_probe_codecs", AsyncMock(return_value=("h264", "aac"))),
+            patch.object(streamer, "_probe_media", AsyncMock(return_value=("h264", "aac", "LC", None))),
             patch("services.hls_streamer.post_processor") as mock_pp,
         ):
             mock_pp.get_ffmpeg_path.return_value = "/usr/bin/ffmpeg"

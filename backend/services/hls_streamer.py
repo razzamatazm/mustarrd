@@ -61,6 +61,7 @@ class HLSSession:
     download_id: int
     source_path: Path
     directory: Path
+    start_offset: float = 0.0
     process: Optional[asyncio.subprocess.Process] = None
     last_access: float = field(default_factory=time.monotonic)
     failed_reason: Optional[str] = None
@@ -82,13 +83,17 @@ class HLSStreamer:
 
     # ------------------------------------------------------------------ probe
 
-    async def _probe_codecs(self, ffprobe: str, source: Path) -> tuple[Optional[str], Optional[str]]:
-        """Return (video_codec, audio_codec) of the first streams, or Nones."""
+    async def _probe_media(
+        self, ffprobe: str, source: Path
+    ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
+        """Return (video_codec, audio_codec, audio_profile, duration) of the
+        first streams, or Nones for whatever is missing."""
         process = await asyncio.create_subprocess_exec(
             ffprobe,
             "-v", "error",
             "-print_format", "json",
             "-show_streams",
+            "-show_format",
             str(source),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -104,20 +109,41 @@ class HLSStreamer:
         return self._parse_probe_output(stdout.decode("utf-8", errors="replace"))
 
     @staticmethod
-    def _parse_probe_output(raw: str) -> tuple[Optional[str], Optional[str]]:
+    def _parse_probe_output(
+        raw: str,
+    ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
         try:
-            streams = json.loads(raw).get("streams", [])
+            parsed = json.loads(raw)
+            streams = parsed.get("streams", [])
         except (json.JSONDecodeError, AttributeError):
             raise HLSStartError("The recording could not be probed")
         video_codec = None
         audio_codec = None
+        audio_profile = None
         for stream in streams:
             codec_type = stream.get("codec_type")
             if codec_type == "video" and video_codec is None:
                 video_codec = stream.get("codec_name")
             elif codec_type == "audio" and audio_codec is None:
                 audio_codec = stream.get("codec_name")
-        return video_codec, audio_codec
+                audio_profile = stream.get("profile")
+        duration = None
+        try:
+            duration = float(parsed.get("format", {}).get("duration"))
+        except (TypeError, ValueError):
+            pass
+        return video_codec, audio_codec, audio_profile, duration
+
+    async def probe_duration(self, source_path: Path) -> Optional[float]:
+        """Best-effort duration of a recording in seconds, or None."""
+        ffprobe = post_processor.get_ffprobe_path()
+        if not ffprobe:
+            return None
+        try:
+            _, _, _, duration = await self._probe_media(ffprobe, source_path)
+        except HLSError:
+            return None
+        return duration
 
     # ----------------------------------------------------------------- ffmpeg
 
@@ -127,6 +153,8 @@ class HLSStreamer:
         source: Path,
         video_codec: Optional[str],
         audio_codec: Optional[str],
+        audio_profile: Optional[str] = None,
+        start_offset: float = 0.0,
     ) -> list[str]:
         cmd = [
             ffmpeg,
@@ -134,12 +162,18 @@ class HLSStreamer:
             "-nostdin",
             "-hide_banner",
             "-loglevel", "error",
+        ]
+        if start_offset > 0:
+            # Input-side seek: lands on the keyframe at/before the target so
+            # copied video starts decodable.
+            cmd.extend(["-ss", f"{start_offset:.3f}"])
+        cmd.extend([
             "-i", str(source),
             "-map", "0:v:0",
             "-map", "0:a:0?",
             "-sn",
             "-dn",
-        ]
+        ])
         if video_codec in COPYABLE_VIDEO_CODECS:
             cmd.extend(["-c:v", "copy"])
             if video_codec == "hevc":
@@ -153,7 +187,11 @@ class HLSStreamer:
                 "-pix_fmt", "yuv420p",
                 "-force_key_frames", "expr:gte(t,n_forced*6)",
             ])
-        if audio_codec == "aac":
+        if audio_codec == "aac" and audio_profile == "LC":
+            # Only AAC-LC is copied: Firefox's MSE rejects any AAC codec
+            # string other than mp4a.40.2/.5/.29, and provider streams often
+            # carry HE-AAC or a mislabeled Main profile (mp4a.40.1) that
+            # throws bufferAddCodecError. Re-encoding guarantees LC.
             # ADTS-framed AAC (MPEG-TS sources) must be converted to ASC for
             # fMP4; the filter passes non-ADTS packets through untouched.
             cmd.extend(["-c:a", "copy", "-bsf:a", "aac_adtstoasc"])
@@ -182,7 +220,9 @@ class HLSStreamer:
     def touch(session: HLSSession) -> None:
         session.last_access = time.monotonic()
 
-    async def get_or_create(self, download_id: int, source_path: Path) -> HLSSession:
+    async def get_or_create(
+        self, download_id: int, source_path: Path, start_offset: float = 0.0
+    ) -> HLSSession:
         async with self._lock:
             existing = self._sessions.get(download_id)
             if existing:
@@ -192,11 +232,16 @@ class HLSStreamer:
                     and process.returncode is not None
                     and process.returncode != 0
                 )
-                if existing.source_path == source_path and not existing.failed_reason and not crashed:
+                if (
+                    existing.source_path == source_path
+                    and existing.start_offset == start_offset
+                    and not existing.failed_reason
+                    and not crashed
+                ):
                     self.touch(existing)
                     return existing
-                # Source changed (re-download), FFmpeg crashed, or a previous
-                # attempt failed: rebuild from scratch.
+                # Source changed (re-download), seek to a new offset, FFmpeg
+                # crashed, or a previous attempt failed: rebuild from scratch.
                 await self._destroy_locked(existing)
 
             await self._reap_idle_locked()
@@ -210,7 +255,9 @@ class HLSStreamer:
             if not ffmpeg or not ffprobe:
                 raise HLSUnavailableError("FFmpeg is required for browser playback but was not found")
 
-            video_codec, audio_codec = await self._probe_codecs(ffprobe, source_path)
+            video_codec, audio_codec, audio_profile, _ = await self._probe_media(
+                ffprobe, source_path
+            )
             if video_codec is None:
                 raise HLSStartError("The recording has no video stream")
 
@@ -220,9 +267,12 @@ class HLSStreamer:
                 download_id=download_id,
                 source_path=source_path,
                 directory=session_dir,
+                start_offset=start_offset,
             )
 
-            cmd = self.build_ffmpeg_command(ffmpeg, source_path, video_codec, audio_codec)
+            cmd = self.build_ffmpeg_command(
+                ffmpeg, source_path, video_codec, audio_codec, audio_profile, start_offset
+            )
             # stderr goes to a log file in the session dir: no pipe to drain,
             # and the tail is available for error reporting.
             stderr_path = session_dir / "ffmpeg.log"
@@ -249,8 +299,8 @@ class HLSStreamer:
             self._sessions[download_id] = session
             self._ensure_reaper()
             logger.info(
-                "HLS session started download_id=%s video=%s audio=%s dir=%s",
-                download_id, video_codec, audio_codec, session_dir,
+                "HLS session started download_id=%s video=%s audio=%s profile=%s start=%.1f dir=%s",
+                download_id, video_codec, audio_codec, audio_profile, start_offset, session_dir,
             )
             return session
 

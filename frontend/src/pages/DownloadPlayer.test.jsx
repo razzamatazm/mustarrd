@@ -1,11 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithQuery } from '../test/renderWithProviders'
 
 const getDownload = vi.fn()
+const getPlaybackInfo = vi.fn()
 vi.mock('../api', () => ({
-  downloadsApi: { get: (...args) => getDownload(...args) },
+  downloadsApi: {
+    get: (...args) => getDownload(...args),
+    playbackInfo: (...args) => getPlaybackInfo(...args),
+  },
 }))
 
 const attachMpegts = vi.fn(() => () => {})
@@ -34,6 +38,7 @@ function renderPlayer(downloadId) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  getPlaybackInfo.mockResolvedValue({ duration: null })
 })
 
 describe('DownloadPlayer', () => {
@@ -89,6 +94,67 @@ describe('DownloadPlayer', () => {
     // A second fatal error surfaces the failure instead of looping.
     attachHls.mock.calls[1][2].onError('fatalError')
     await waitFor(() => expect(screen.getByText(/Playback failed/)).toBeInTheDocument())
+  })
+
+  it('shows a full-length transport bar once the duration is known', async () => {
+    getDownload.mockResolvedValue({
+      id: 7,
+      output_path: '/data/completed/Show.mkv',
+      program_title: 'Show',
+    })
+    getPlaybackInfo.mockResolvedValue({ duration: 600 })
+    renderPlayer(7)
+
+    await waitFor(() => expect(screen.getByTestId('transport-bar')).toBeInTheDocument())
+    // Native controls give way to the custom bar, which spans the recording.
+    expect(document.querySelector('video')).not.toHaveAttribute('controls')
+    expect(screen.getByText('0:00 / 10:00')).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Seek' })).toHaveAttribute('aria-valuemax', '600')
+  })
+
+  it('restarts the HLS session at the scrub target when seeking past the produced range', async () => {
+    getDownload.mockResolvedValue({
+      id: 7,
+      output_path: '/data/completed/Show.mkv',
+      program_title: 'Show',
+    })
+    getPlaybackInfo.mockResolvedValue({ duration: 600 })
+    renderPlayer(7)
+
+    await waitFor(() => expect(screen.getByRole('slider', { name: 'Seek' })).toBeInTheDocument())
+    expect(attachHls).toHaveBeenCalledTimes(1)
+    expect(attachHls.mock.calls[0][1]).toBe('/api/downloads/7/hls/playlist.m3u8')
+
+    // jsdom's video has no seekable ranges, so any forward seek lands outside
+    // the produced portion and must spawn a fresh session at the offset.
+    const slider = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+
+    await waitFor(() => expect(attachHls).toHaveBeenCalledTimes(2))
+    expect(attachHls.mock.calls[1][1]).toBe('/api/downloads/7/hls/playlist.m3u8?start=1.000')
+  })
+
+  it('seeks within the already-produced range without a new session', async () => {
+    getDownload.mockResolvedValue({
+      id: 7,
+      output_path: '/data/completed/Show.mkv',
+      program_title: 'Show',
+    })
+    getPlaybackInfo.mockResolvedValue({ duration: 600 })
+    renderPlayer(7)
+
+    await waitFor(() => expect(screen.getByRole('slider', { name: 'Seek' })).toBeInTheDocument())
+    const video = document.querySelector('video')
+    Object.defineProperty(video, 'seekable', {
+      value: { length: 1, end: () => 120 },
+    })
+    Object.defineProperty(video, 'currentTime', { value: 0, writable: true })
+
+    const slider = screen.getByRole('slider', { name: 'Seek' })
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+
+    await waitFor(() => expect(video.currentTime).toBe(1))
+    expect(attachHls).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to HLS when mpegts.js reports an error', async () => {

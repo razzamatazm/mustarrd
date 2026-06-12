@@ -6,7 +6,13 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-06-11
 
-### Fixed: On phones, the channel guide scrolls again and program titles wrap instead of getting chopped
+### Fixed: Recordings play in Firefox-based browsers, and the player scrub bar now spans the whole recording
+
+**What you would notice:** Playing a finished MKV recording in Firefox (or forks like Zen) failed immediately with a `bufferAddCodecError`, even though the same recording played fine in Chrome. That's fixed. Separately, the in-app player's progress bar used to only cover the part of the recording the server had prepared so far, growing as it went — you couldn't jump ahead. The player now shows a scrub bar spanning the full length of the show right away, and dragging it anywhere starts playback from that spot, even into parts that haven't been prepared yet.
+
+**What changed:** Browser playback of MKV/odd-codec recordings goes through an on-the-fly FFmpeg HLS repackager that copied any AAC audio as-is. Provider streams often carry HE-AAC or a mislabeled "Main"-profile AAC, which becomes a codec string (`mp4a.40.1`/`mp4a.40.5`) Firefox's MediaSource refuses to buffer; Chrome is lenient, which is why it only broke in Firefox. The repackager now copies only AAC-LC and re-encodes anything else to AAC-LC. For scrubbing: a new `playback-info` endpoint reports the recording's full duration up front, the player replaces the native controls with its own transport bar (play/pause, full-length seek slider, mute, fullscreen) when using the HLS path, and seeking past the prepared portion restarts the FFmpeg session at the target offset via a `start` parameter on the playlist URL. Regression tests cover the codec gating, offset sessions, and the new seek behavior.
+
+---
 
 **What you would notice:** On a phone, opening a channel in Browse showed its program list spilling past the bottom of the screen with no way to scroll it — the list wouldn't budge and neither would the page, so anything below the first screenful was unreachable. That works again: the guide panel now ends at the bottom of the screen and the program list scrolls inside it. Long program titles ("Entertainment Tonig…") and the channel header's catchup summary ("105 pro…") were also being cut off mid-word; titles now wrap onto a second line and the header text wraps fully.
 

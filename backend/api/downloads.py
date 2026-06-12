@@ -551,17 +551,33 @@ async def get_download_file(
     )
 
 
+@router.get("/{download_id}/playback-info")
+async def get_download_playback_info(
+    download_id: int,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Duration metadata for the player's scrub bar (full length up front,
+    even while the HLS rendition is still being produced)."""
+    file_path = await _resolve_completed_download_file(download_id, auth, session)
+    duration = await hls_streamer.probe_duration(file_path)
+    return {"duration": duration}
+
+
 @router.get("/{download_id}/hls/{asset}")
 async def get_download_hls_asset(
     download_id: int,
     asset: str,
+    start: float = Query(default=0.0, ge=0.0),
     auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Serve an on-the-fly HLS rendition of a completed download.
 
     Requesting playlist.m3u8 starts (or reuses) an FFmpeg repackaging session;
-    init.mp4/segments are only served while that session is alive.
+    init.mp4/segments are only served while that session is alive. `start`
+    repackages from that offset so the player can scrub ahead of the
+    already-produced portion.
     """
     if not HLS_ASSET_PATTERN.match(asset):
         raise HTTPException(status_code=404, detail="Unknown stream asset")
@@ -570,7 +586,7 @@ async def get_download_hls_asset(
 
     if asset == "playlist.m3u8":
         try:
-            hls_session = await hls_streamer.get_or_create(download_id, file_path)
+            hls_session = await hls_streamer.get_or_create(download_id, file_path, start)
             await hls_streamer.wait_for_playlist(hls_session)
         except HLSLimitError as exc:
             raise HTTPException(status_code=429, detail=str(exc))

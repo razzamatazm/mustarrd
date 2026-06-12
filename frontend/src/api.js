@@ -124,6 +124,7 @@ export const downloadsApi = {
   getQueue: () => request('/downloads/queue'),
   getHistory: () => request('/downloads/history'),
   get: (id) => request(`/downloads/${id}`),
+  playbackInfo: (id) => request(`/downloads/${id}/playback-info`),
   create: (data) => request('/downloads', { method: 'POST', body: data }),
   cancel: (id) => request(`/downloads/${id}`, { method: 'DELETE' }),
   retry: (id) => request(`/downloads/${id}/retry`, { method: 'POST' }),
