@@ -62,7 +62,7 @@ RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubun
   && echo "deb [signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/${ID} ${VERSION_CODENAME} main" \
        > /etc/apt/sources.list.d/jellyfin.list \
   && apt-get update -o Acquire::Retries=3 \
-  && apt-get install -y --no-install-recommends jellyfin-ffmpeg7 \
+  && apt-get install -y --no-install-recommends jellyfin-ffmpeg8 \
   && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
        for pkg in mesa-va-drivers intel-media-va-driver i965-va-driver; do \
          apt-get install -y --no-install-recommends -o Acquire::Retries=3 "$pkg" || true; \
