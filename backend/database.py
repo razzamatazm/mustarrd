@@ -148,6 +148,11 @@ async def _apply_lightweight_migrations(conn) -> None:
                 text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_spec}")
             )
 
+    if not await _column_exists(conn, "app_settings", "vaapi_render_device"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN vaapi_render_device VARCHAR(255) DEFAULT ''")
+        )
+
     if not await _column_exists(conn, "app_settings", "comskip_custom_ini_path"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN comskip_custom_ini_path VARCHAR(1000)")

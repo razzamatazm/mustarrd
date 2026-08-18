@@ -65,17 +65,29 @@ else
   usermod -u "${PUID}" -g "${PGID}" "${APP_USER}"
 fi
 
-if [[ -e /dev/dri/renderD128 ]]; then
-  RENDER_GID="$(stat -c '%g' /dev/dri/renderD128)"
-  ensure_group "render" "${RENDER_GID}"
-  usermod -aG render "${APP_USER}"
-fi
+# Grant access to every DRM node present, not just the first one. The render
+# device is chosen at runtime in Settings, which happens long after this script
+# runs, so the container cannot know in advance which node ffmpeg will open.
+grant_drm_access() {
+  local pattern="$1" group_base="$2" node gid seen=""
+  for node in ${pattern}; do
+    [[ -e "${node}" ]] || continue
+    gid="$(stat -c '%g' "${node}")" || continue
+    case " ${seen} " in
+      *" ${gid} "*) continue ;;
+    esac
+    seen="${seen} ${gid}"
+    local group_name="${group_base}"
+    if [[ -n "${seen% ${gid}}" ]]; then
+      group_name="${group_base}${gid}"
+    fi
+    ensure_group "${group_name}" "${gid}"
+    usermod -aG "${group_name}" "${APP_USER}"
+  done
+}
 
-if [[ -e /dev/dri/card0 ]]; then
-  VIDEO_GID="$(stat -c '%g' /dev/dri/card0)"
-  ensure_group "video" "${VIDEO_GID}"
-  usermod -aG video "${APP_USER}"
-fi
+grant_drm_access "/dev/dri/renderD*" "render"
+grant_drm_access "/dev/dri/card*" "video"
 
 ensure_owned_path /app/config
 ensure_owned_path /app/downloads

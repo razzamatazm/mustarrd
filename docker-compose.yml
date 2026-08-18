@@ -14,7 +14,10 @@ services:
     devices:
       - /dev/dri:/dev/dri # Optional: pass through render nodes for Linux hardware transcoding
     environment:
-      # Optional manual VA-API override. Leave unset for automatic Intel/AMD selection.
+      # Optional VA-API render device override. Defaults to /dev/dri/renderD128.
+      # Optional: pin the GPU here to override the Settings > GPU device picker
+      # - CATCHUP_VAAPI_RENDER_DEVICE=/dev/dri/renderD129
+      # Optional manual VA-API driver override. Leave unset for automatic Intel/AMD selection.
       # - LIBVA_DRIVER_NAME=radeonsi
       # Container/system timezone (used for logs, cron-like tools, etc.).
       - TZ=America/Los_Angeles

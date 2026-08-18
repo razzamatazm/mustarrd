@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Literal, Optional
@@ -8,6 +8,7 @@ import asyncio
 import errno
 import logging
 import os
+import re
 import tempfile
 
 from auth import require_admin, require_authenticated, AuthContext
@@ -94,6 +95,22 @@ class SettingsUpdate(BaseModel):
     transcode_enabled: Optional[bool] = None
     transcode_format: Optional[Literal["ts", "mp4", "mkv"]] = None
     hw_accel: Optional[Literal["cpu", "videotoolbox", "nvenc", "amf", "vaapi"]] = None
+    vaapi_render_device: Optional[str] = Field(default=None, max_length=255)
+
+    @field_validator("vaapi_render_device")
+    @classmethod
+    def _validate_render_device(cls, value: Optional[str]) -> Optional[str]:
+        """Empty clears the override; anything else must be a DRM render node."""
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        if not re.fullmatch(r"/dev/dri/renderD\d+", cleaned):
+            raise ValueError(
+                "Render device must look like /dev/dri/renderD128"
+            )
+        return cleaned
     delete_original_after_transcode: Optional[bool] = None
     remux_only: Optional[bool] = None
     integrity_check_enabled: Optional[bool] = None
@@ -134,6 +151,7 @@ NON_NULLABLE_FIELDS = {
     "transcode_enabled",
     "transcode_format",
     "hw_accel",
+    "vaapi_render_device",
     "delete_original_after_transcode",
     "remux_only",
     "integrity_check_enabled",
@@ -418,10 +436,17 @@ async def get_template_variables(_admin: None = Depends(require_admin)):
 
 
 @router.get("/tools")
-async def get_tools_status(_admin: None = Depends(require_admin)):
+async def get_tools_status(
+    _admin: None = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
     """Check availability of post-processing tools."""
     tool_status = post_processor.get_tool_runtime_status()
-    vaapi_status = post_processor.get_vaapi_diagnostics()
+    result = await session.execute(select(AppSettings))
+    settings = result.scalar_one_or_none()
+    vaapi_status = post_processor.get_vaapi_diagnostics(
+        settings.vaapi_render_device if settings else None
+    )
     ffmpeg_status = tool_status["ffmpeg"]
     ffprobe_status = tool_status["ffprobe"]
     comskip_status = tool_status["comskip"]

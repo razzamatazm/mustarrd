@@ -176,6 +176,89 @@ describe('Settings page', () => {
     expect(screen.getByRole('textbox', { name: 'Max concurrent downloads' })).toHaveValue('2')
   })
 
+  it('offers a GPU device picker listing every detected render node', async () => {
+    settingsApi.get.mockResolvedValue({
+      ...baseSettings,
+      remux_only: false,
+      hw_accel: 'vaapi',
+      vaapi_render_device: '',
+    })
+    settingsApi.getTools.mockResolvedValue({
+      ffmpeg: { available: true },
+      comskip: { available: true },
+      hardware_accels: [
+        { id: 'cpu', name: 'CPU (Software)', available: true },
+        { id: 'vaapi', name: 'VA-API', available: true },
+      ],
+      vaapi: {
+        enabled: true,
+        source: 'auto-detected',
+        device: '/dev/dri/renderD128',
+        device_locked_by_env: false,
+        available_devices: [
+          { device: '/dev/dri/renderD128', kernel_driver: 'i915', vendor: '0x8086' },
+          { device: '/dev/dri/renderD129', kernel_driver: 'amdgpu', vendor: '0x1002' },
+        ],
+      },
+    })
+
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.click(screen.getByText('Post-Processing'))
+
+    const picker = await screen.findByRole('textbox', { name: 'GPU device' })
+    fireEvent.click(picker)
+
+    expect(await screen.findByText('renderD129 — AMD')).toBeInTheDocument()
+    expect(screen.getByText('renderD128 — Intel')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('renderD129 — AMD'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({
+      vaapi_render_device: '/dev/dri/renderD129',
+    })
+  })
+
+  it('disables the GPU picker when the env var pins the device', async () => {
+    settingsApi.get.mockResolvedValue({
+      ...baseSettings,
+      remux_only: false,
+      hw_accel: 'vaapi',
+      vaapi_render_device: '',
+    })
+    settingsApi.getTools.mockResolvedValue({
+      ffmpeg: { available: true },
+      comskip: { available: true },
+      hardware_accels: [
+        { id: 'cpu', name: 'CPU (Software)', available: true },
+        { id: 'vaapi', name: 'VA-API', available: true },
+      ],
+      vaapi: {
+        enabled: true,
+        source: 'auto-detected',
+        device: '/dev/dri/renderD129',
+        device_locked_by_env: true,
+        available_devices: [
+          { device: '/dev/dri/renderD128', kernel_driver: 'i915', vendor: '0x8086' },
+        ],
+      },
+    })
+
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.click(screen.getByText('Post-Processing'))
+
+    expect(
+      await screen.findByRole('textbox', { name: 'GPU device' }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText(/Pinned by CATCHUP_VAAPI_RENDER_DEVICE/),
+    ).toBeInTheDocument()
+  })
+
   it('maps the two-step format picker onto the transcode fields', async () => {
     renderSettings()
     await screen.findByText('Connections')

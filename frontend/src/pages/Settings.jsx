@@ -74,6 +74,23 @@ const VAAPI_KERNEL_LABELS = {
   nvidia: 'NVIDIA',
 }
 
+// Builds the GPU picker options. A node we couldn't identify still gets listed —
+// the user may know which card it is even when sysfs doesn't say.
+function renderDeviceOptions(vaapi) {
+  const devices = vaapi?.available_devices || []
+  return devices.map((device) => {
+    const shortName = device.device.split('/').pop()
+    const vendorLabel =
+      VAAPI_KERNEL_LABELS[(device.kernel_driver || '').toLowerCase()] ||
+      VAAPI_VENDOR_NAMES[(device.vendor || '').toLowerCase()] ||
+      null
+    return {
+      value: device.device,
+      label: vendorLabel ? `${shortName} — ${vendorLabel}` : shortName,
+    }
+  })
+}
+
 // Returns a warning descriptor when VA-API has a problem worth surfacing,
 // or null when everything is fine (working GPU setups stay silent).
 function describeHardwareAccel(vaapi) {
@@ -1067,6 +1084,30 @@ export default function Settings() {
                 />
               </SettingRow>
             </Stack>
+            {formData.hw_accel === 'vaapi' && renderDeviceOptions(toolsStatus?.vaapi).length > 0 && (
+              <Stack gap={0}>
+                <SettingRow
+                  label="GPU device"
+                  description={
+                    toolsStatus?.vaapi?.device_locked_by_env
+                      ? 'Pinned by CATCHUP_VAAPI_RENDER_DEVICE; unset it to choose here'
+                      : 'Which GPU to encode on, when the system has more than one'
+                  }
+                >
+                  <Select
+                    aria-label="GPU device"
+                    disabled={toolsStatus?.vaapi?.device_locked_by_env}
+                    value={formData.vaapi_render_device || ''}
+                    onChange={(val) => handleChange('vaapi_render_device', val || '')}
+                    data={[
+                      { value: '', label: 'Automatic (first available)' },
+                      ...renderDeviceOptions(toolsStatus?.vaapi),
+                    ]}
+                    allowDeselect={false}
+                  />
+                </SettingRow>
+              </Stack>
+            )}
             {toolsStatus?.vaapi?.enabled && formData.hw_accel === 'vaapi' && (() => {
               const hwStatus = describeHardwareAccel(toolsStatus.vaapi)
               if (!hwStatus) return null

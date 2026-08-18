@@ -4,6 +4,18 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-08-18
+
+### Added: Pick which GPU does the encoding
+
+**What you would notice:** If your machine has more than one GPU, you can now choose which one Mustarrd encodes with. Under **Settings > Post-Processing**, turn on GPU hardware acceleration and a **GPU device** picker appears listing every graphics card the app can see, named where possible ("renderD129 — AMD") so you can tell them apart. Previously Mustarrd always used the first one it found, which meant that on a machine with, say, onboard Intel graphics plus a discrete AMD card, it might well pick the weaker of the two and there was nothing you could do about it from the app.
+
+You don't have to touch this. Leaving it on **Automatic** keeps the existing behaviour, and if you only have one GPU the picker won't tell you anything you didn't already know.
+
+**What changed:** Mustarrd now enumerates every DRM render node on the host and exposes them through the settings API, with the chosen node saved as `vaapi_render_device` and passed into every FFmpeg hardware-encode path. The render device is resolved per job rather than at startup, so changing it takes effect on the next recording without restarting the container. The Docker entrypoint now grants the app user access to every render and card node present instead of only the first, so any GPU passed into the container is actually usable.
+
+`CATCHUP_VAAPI_RENDER_DEVICE` still works and now acts as an override for headless setups: when it's set it wins over the Settings choice and the picker is shown greyed out, explaining why.
+
 ## 2026-08-17
 
 ### Changed: Filename templates can create folders

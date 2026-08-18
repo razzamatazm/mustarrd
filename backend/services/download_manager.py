@@ -1967,6 +1967,7 @@ class DownloadManager:
             post_processor.set_comskip_path(settings.comskip_path)
 
         # Get hardware acceleration setting
+        render_device = getattr(settings, "vaapi_render_device", None) or None
         try:
             hw_accel = HardwareAccel(settings.hw_accel) if settings.hw_accel else HardwareAccel.CPU
         except ValueError:
@@ -2126,7 +2127,8 @@ class DownloadManager:
                         remove_original=settings.delete_original_after_transcode,
                         progress_callback=transcode_progress_callback,
                         log_callback=log_callback,
-                        remux_only=remux_only
+                        remux_only=remux_only,
+                        render_device=render_device
                     )
                     commercials_removed = True
                     await log_callback(f"Commercial removal complete: {current_path}")
@@ -2161,7 +2163,8 @@ class DownloadManager:
                     progress_callback=transcode_progress_callback,
                     log_callback=log_callback,
                     remove_original=settings.delete_original_after_transcode,
-                    remux_only=remux_only
+                    remux_only=remux_only,
+                    render_device=render_device
                 )
                 await log_callback(f"{'Remux' if remux_only else 'Transcode'} complete: {current_path}")
             except Exception as e:

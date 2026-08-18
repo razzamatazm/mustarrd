@@ -46,6 +46,8 @@ class AppSettings(Base):
     transcode_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     transcode_format: Mapped[str] = mapped_column(String(10), default="mkv")  # ts, mp4, mkv
     hw_accel: Mapped[str] = mapped_column(String(20), default="cpu")  # cpu, videotoolbox, nvenc, amf, vaapi
+    # Empty means "use the default render node"; only meaningful for vaapi.
+    vaapi_render_device: Mapped[str] = mapped_column(String(255), default="")
     delete_original_after_transcode: Mapped[bool] = mapped_column(Boolean, default=True)
     remux_only: Mapped[bool] = mapped_column(Boolean, default=True)
     epg_offset_minutes: Mapped[int] = mapped_column(Integer, default=0)
@@ -108,6 +110,7 @@ class AppSettings(Base):
             "transcode_enabled": self.transcode_enabled,
             "transcode_format": self.transcode_format,
             "hw_accel": self.hw_accel,
+            "vaapi_render_device": self.vaapi_render_device or "",
             "delete_original_after_transcode": self.delete_original_after_transcode,
             "remux_only": self.remux_only,
             "integrity_check_enabled": self.integrity_check_enabled,

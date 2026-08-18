@@ -59,8 +59,10 @@ ENCODER_MAP = {
 class PostProcessor:
     """Handles transcoding and commercial detection/removal."""
 
-    VAAPI_RENDER_DEVICE = Path("/dev/dri/renderD128")
+    VAAPI_DEFAULT_RENDER_DEVICE = Path("/dev/dri/renderD128")
+    VAAPI_RENDER_DEVICE_ENV = "CATCHUP_VAAPI_RENDER_DEVICE"
     VAAPI_SYSFS_DRM_CLASS = Path("/sys/class/drm")
+    VAAPI_DEVICE_ROOT = Path("/dev/dri")
     # Corrupt input can make ffprobe hang forever; cap how long we wait for it.
     FFPROBE_TIMEOUT_SECONDS = 60.0
     # Re-encoding a second of video costs roughly this many times more wall
@@ -308,9 +310,88 @@ class PostProcessor:
         except OSError:
             return None
 
-    @lru_cache(maxsize=1)
-    def _resolve_vaapi_driver(self) -> Dict[str, Optional[str]]:
-        """Resolve the Linux VA-API driver to use, if any."""
+    @classmethod
+    def resolve_render_device(cls, configured: Optional[str] = None) -> Path:
+        """Resolve which DRM render node VA-API should open.
+
+        Precedence is env, then the saved setting, then the historical default.
+        The env var wins so a headless deployment can pin a node without the UI,
+        and this runs per call rather than at import so changing the setting
+        takes effect without a restart.
+        """
+        env_device = (os.environ.get(cls.VAAPI_RENDER_DEVICE_ENV) or "").strip()
+        if env_device:
+            return Path(env_device)
+        if configured and configured.strip():
+            return Path(configured.strip())
+        return cls.VAAPI_DEFAULT_RENDER_DEVICE
+
+    @classmethod
+    def render_device_is_locked(cls) -> bool:
+        """True when the env var pins the device, making the UI choice inert."""
+        return bool((os.environ.get(cls.VAAPI_RENDER_DEVICE_ENV) or "").strip())
+
+    def _vaapi_device_args(
+        self, hw_accel: Optional[HardwareAccel], device: Path
+    ) -> List[str]:
+        """FFmpeg args selecting the VA-API device, or nothing for other encoders."""
+        if hw_accel != HardwareAccel.VAAPI:
+            return []
+        return ["-vaapi_device", str(device)]
+
+    VAAPI_KERNEL_DRIVER_MAP = {
+        "amdgpu": "radeonsi",
+        "i915": "iHD",
+        "xe": "iHD",
+    }
+
+    def _probe_drm_node(self, device: Path) -> Dict[str, Optional[str]]:
+        """Read the kernel driver and PCI vendor backing one render node.
+
+        Returns empty values when sysfs has nothing to say, so callers can
+        describe a device they cannot identify rather than dropping it.
+        """
+        sysfs_class_entry = self.VAAPI_SYSFS_DRM_CLASS / device.name
+        try:
+            sysfs_base = sysfs_class_entry.resolve(strict=True)
+        except OSError:
+            return {"kernel_driver": None, "vendor": None, "driver": None}
+
+        vendor = self._read_text_file(sysfs_base / "device" / "vendor")
+        try:
+            kernel_driver = (sysfs_base / "device" / "driver").resolve(strict=True).name
+        except OSError:
+            kernel_driver = None
+
+        return {
+            "kernel_driver": kernel_driver,
+            "vendor": vendor,
+            "driver": self.VAAPI_KERNEL_DRIVER_MAP.get((kernel_driver or "").lower()),
+        }
+
+    def list_render_devices(self) -> List[Dict[str, Optional[str]]]:
+        """Every DRM render node on this host, for the Settings picker.
+
+        Deliberately uncached: a node can appear after a GPU is passed through,
+        and this is only called when someone opens Settings.
+        """
+        if platform.system() != "Linux":
+            return []
+
+        try:
+            nodes = sorted(self.VAAPI_DEVICE_ROOT.glob("renderD*"))
+        except OSError:
+            return []
+
+        devices = []
+        for node in nodes:
+            details = self._probe_drm_node(node)
+            devices.append({"device": str(node), **details})
+        return devices
+
+    @lru_cache(maxsize=8)
+    def _resolve_vaapi_driver(self, device: Path) -> Dict[str, Optional[str]]:
+        """Resolve the Linux VA-API driver to use for a render node, if any."""
         if platform.system() != "Linux":
             return {
                 "enabled": False,
@@ -327,12 +408,11 @@ class PostProcessor:
                 "enabled": True,
                 "driver": env_driver,
                 "source": "env",
-                "device": str(self.VAAPI_RENDER_DEVICE),
+                "device": str(device),
                 "kernel_driver": None,
                 "vendor": None,
             }
 
-        device = self.VAAPI_RENDER_DEVICE
         if not device.exists():
             return {
                 "enabled": True,
@@ -343,10 +423,8 @@ class PostProcessor:
                 "vendor": None,
             }
 
-        sysfs_class_entry = self.VAAPI_SYSFS_DRM_CLASS / device.name
-        try:
-            sysfs_base = sysfs_class_entry.resolve(strict=True)
-        except OSError:
+        details = self._probe_drm_node(device)
+        if details["kernel_driver"] is None and details["vendor"] is None:
             return {
                 "enabled": True,
                 "driver": None,
@@ -356,43 +434,35 @@ class PostProcessor:
                 "vendor": None,
             }
 
-        driver_link = sysfs_base / "device" / "driver"
-        vendor_path = sysfs_base / "device" / "vendor"
-        kernel_driver = None
-        vendor = self._read_text_file(vendor_path)
-
-        try:
-            kernel_driver = driver_link.resolve(strict=True).name
-        except OSError:
-            kernel_driver = None
-
-        driver_map = {
-            "amdgpu": "radeonsi",
-            "i915": "iHD",
-            "xe": "iHD",
-        }
-        driver = driver_map.get((kernel_driver or "").lower())
-        source = "auto-detected" if driver else "auto"
         return {
             "enabled": True,
-            "driver": driver,
-            "source": source,
+            "source": "auto-detected" if details["driver"] else "auto",
             "device": str(device),
-            "kernel_driver": kernel_driver,
-            "vendor": vendor,
+            **details,
         }
 
-    def get_vaapi_diagnostics(self) -> Dict[str, Optional[str] | bool]:
-        details = dict(self._resolve_vaapi_driver())
+    def get_vaapi_diagnostics(
+        self, configured_device: Optional[str] = None
+    ) -> Dict[str, Optional[str] | bool]:
+        device = self.resolve_render_device(configured_device)
+        details = dict(self._resolve_vaapi_driver(device))
         details["drivers_path"] = os.environ.get("LIBVA_DRIVERS_PATH", self.VAAPI_DEFAULT_DRIVERS_PATH)
+        details["available_devices"] = self.list_render_devices()
+        details["device_locked_by_env"] = self.render_device_is_locked()
         return details
 
-    def _build_ffmpeg_env(self, hw_accel: Optional[HardwareAccel] = None) -> Dict[str, str]:
+    def _build_ffmpeg_env(
+        self,
+        hw_accel: Optional[HardwareAccel] = None,
+        render_device: Optional[Path] = None,
+    ) -> Dict[str, str]:
         env = os.environ.copy()
         if platform.system() == "Linux":
             env.setdefault("LIBVA_DRIVERS_PATH", self.VAAPI_DEFAULT_DRIVERS_PATH)
             if hw_accel == HardwareAccel.VAAPI:
-                details = self._resolve_vaapi_driver()
+                details = self._resolve_vaapi_driver(
+                    render_device or self.resolve_render_device()
+                )
                 if details.get("driver"):
                     env["LIBVA_DRIVER_NAME"] = str(details["driver"])
                 else:
@@ -648,13 +718,17 @@ class PostProcessor:
             return cmd
         return [cmd[0], "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err", *cmd[1:]]
 
-    def _prepend_vaapi_env(self, cmd: List[str]) -> List[str]:
+    def _prepend_vaapi_env(
+        self, cmd: List[str], render_device: Optional[Path] = None
+    ) -> List[str]:
         """Run ffmpeg with an explicit LIBVA_DRIVER_NAME prefix for VA-API."""
         if platform.system() != "Linux":
             return cmd
         if not cmd:
             return cmd
-        details = self._resolve_vaapi_driver()
+        details = self._resolve_vaapi_driver(
+            render_device or self.resolve_render_device()
+        )
         drivers_path = os.environ.get("LIBVA_DRIVERS_PATH", self.VAAPI_DEFAULT_DRIVERS_PATH)
         env_cmd = ["/usr/bin/env", f"LIBVA_DRIVERS_PATH={drivers_path}"]
         if details.get("driver"):
@@ -824,7 +898,8 @@ class PostProcessor:
         progress_callback: Optional[Callable[[float], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
         remove_original: bool = False,
-        remux_only: bool = False
+        remux_only: bool = False,
+        render_device: Optional[str] = None
     ) -> str:
         """
         Transcode a video file to a different format.
@@ -852,12 +927,13 @@ class PostProcessor:
         if not self.ffmpeg_available:
             raise Exception("ffmpeg not found. Please install ffmpeg.")
 
+        vaapi_device = self.resolve_render_device(render_device)
+
         selected_map_args = await self._select_best_av_map_args(input_path, log_callback)
 
         # Build ffmpeg command
         cmd = [self._ffmpeg_path]
-        if hw_accel == HardwareAccel.VAAPI:
-            cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
+        cmd.extend(self._vaapi_device_args(hw_accel, vaapi_device))
         cmd.extend([
             "-i", str(input_path),
             "-y",  # Overwrite output
@@ -896,10 +972,10 @@ class PostProcessor:
             log_callback,
             f"ffmpeg cmd: {' '.join(shlex.quote(str(c)) for c in cmd)}"
         )
-        ffmpeg_env = self._build_ffmpeg_env(hw_accel)
+        ffmpeg_env = self._build_ffmpeg_env(hw_accel, vaapi_device)
         if hw_accel == HardwareAccel.VAAPI:
-            vaapi = self.get_vaapi_diagnostics()
-            cmd = self._prepend_vaapi_env(cmd)
+            vaapi = self._resolve_vaapi_driver(vaapi_device)
+            cmd = self._prepend_vaapi_env(cmd, vaapi_device)
             await self._notify_log(
                 log_callback,
                 "ffmpeg env: "
@@ -934,8 +1010,7 @@ class PostProcessor:
                         except Exception:
                             pass
                     retry_cmd = [self._ffmpeg_path]
-                    if hw_accel == HardwareAccel.VAAPI:
-                        retry_cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
+                    retry_cmd.extend(self._vaapi_device_args(hw_accel, vaapi_device))
                     retry_cmd.extend([
                         "-i", str(input_path),
                         "-y",
@@ -961,7 +1036,7 @@ class PostProcessor:
                         f"ffmpeg retry cmd: {' '.join(shlex.quote(str(c)) for c in retry_cmd)}"
                     )
                     if hw_accel == HardwareAccel.VAAPI:
-                        retry_cmd = self._prepend_vaapi_env(retry_cmd)
+                        retry_cmd = self._prepend_vaapi_env(retry_cmd, vaapi_device)
                     returncode, stderr = await self._run_ffmpeg_with_progress(
                         retry_cmd,
                         duration,
@@ -1225,7 +1300,8 @@ class PostProcessor:
         remove_original: bool = False,
         progress_callback: Optional[Callable[[float], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
-        remux_only: bool = False
+        remux_only: bool = False,
+        render_device: Optional[str] = None
     ) -> str:
         """
         Remove commercials from video using EDL file.
@@ -1242,6 +1318,8 @@ class PostProcessor:
         """
         if not self.ffmpeg_available:
             raise Exception("ffmpeg not found. Please install ffmpeg.")
+
+        vaapi_device = self.resolve_render_device(render_device)
 
         # Parse EDL file to get commercial segments
         segments = self._parse_edl(edl_path)
@@ -1381,8 +1459,7 @@ class PostProcessor:
 
             # Concat and encode
             cmd = [self._ffmpeg_path]
-            if hw_accel == HardwareAccel.VAAPI:
-                cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
+            cmd.extend(self._vaapi_device_args(hw_accel, vaapi_device))
             cmd.extend([
                 "-f", "concat",
                 "-safe", "0",
@@ -1416,10 +1493,10 @@ class PostProcessor:
                 log_callback,
                 f"ffmpeg concat cmd: {' '.join(shlex.quote(str(c)) for c in cmd)}"
             )
-            ffmpeg_env = self._build_ffmpeg_env(hw_accel)
+            ffmpeg_env = self._build_ffmpeg_env(hw_accel, vaapi_device)
             if hw_accel == HardwareAccel.VAAPI:
-                vaapi = self.get_vaapi_diagnostics()
-                cmd = self._prepend_vaapi_env(cmd)
+                vaapi = self._resolve_vaapi_driver(vaapi_device)
+                cmd = self._prepend_vaapi_env(cmd, vaapi_device)
                 await self._notify_log(
                     log_callback,
                     "ffmpeg env: "
@@ -1446,8 +1523,7 @@ class PostProcessor:
                         except Exception:
                             pass
                     retry_cmd = [self._ffmpeg_path]
-                    if hw_accel == HardwareAccel.VAAPI:
-                        retry_cmd.extend(["-vaapi_device", "/dev/dri/renderD128"])
+                    retry_cmd.extend(self._vaapi_device_args(hw_accel, vaapi_device))
                     retry_cmd.extend([
                         "-f", "concat",
                         "-safe", "0",
@@ -1466,7 +1542,7 @@ class PostProcessor:
                         f"ffmpeg concat retry cmd: {' '.join(shlex.quote(str(c)) for c in retry_cmd)}"
                     )
                     if hw_accel == HardwareAccel.VAAPI:
-                        retry_cmd = self._prepend_vaapi_env(retry_cmd)
+                        retry_cmd = self._prepend_vaapi_env(retry_cmd, vaapi_device)
                     returncode, stderr = await self._run_ffmpeg_with_progress(
                         retry_cmd,
                         kept_duration,

@@ -140,6 +140,8 @@ Before first run, update the host paths in `docker-compose.yml` (`./config`, `./
 
 Most users never need to touch these. Set them in `docker-compose.yml` or a `backend/.env` file.
 
+A few variables are read straight from the process environment rather than through `backend/.env` — `CATCHUP_FFMPEG_PATH`, `CATCHUP_FFPROBE_PATH`, `CATCHUP_COMSKIP_PATH` and `CATCHUP_VAAPI_RENDER_DEVICE`. Set those in `docker-compose.yml`, your Unraid template, or the shell that launches the app.
+
 | Desktop | Mobile |
 |---------|--------|
 | ![Settings page](docs/screenshots/screenshot-settings.png) | ![Settings on mobile](docs/screenshots/screenshot-settings-mobile.png) |
@@ -157,6 +159,7 @@ Most users never need to touch these. Set them in `docker-compose.yml` or a `bac
 | `CATCHUP_FFMPEG_PATH` | Path to ffmpeg binary | *(auto-detected)* |
 | `CATCHUP_FFPROBE_PATH` | Path to ffprobe binary (required for commercial removal) | *(auto-detected)* |
 | `CATCHUP_COMSKIP_PATH` | Path to comskip binary | *(auto-detected)* |
+| `CATCHUP_VAAPI_RENDER_DEVICE` | DRM render node used for VA-API hardware encoding. Usually unnecessary — pick the GPU under **Settings > Post-Processing > GPU device** instead. Setting this pins the choice and disables the picker | *(chosen in Settings)* |
 | `CATCHUP_DATABASE_URL` | SQLite database URL | `sqlite+aiosqlite:////app/config/catchup_dvr.db` |
 | `CATCHUP_DEBUG` | Enable debug logging | `false` |
 
