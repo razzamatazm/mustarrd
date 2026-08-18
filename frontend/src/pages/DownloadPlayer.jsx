@@ -1,30 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ActionIcon, Alert, Button, Group, Loader, Slider, Stack, Text, Title } from '@mantine/core'
-import {
-  IconAlertCircle,
-  IconDownload,
-  IconMaximize,
-  IconPlayerPauseFilled,
-  IconPlayerPlayFilled,
-  IconVolume,
-  IconVolumeOff,
-} from '@tabler/icons-react'
+import { Alert, Button, Group, Loader, Stack, Text, Title } from '@mantine/core'
+import { IconAlertCircle, IconDownload } from '@tabler/icons-react'
 import { downloadsApi } from '../api'
+import TransportBar from '../components/TransportBar'
 import { attachHls, attachMpegts, pickEngine } from '../utils/playbackEngine'
-
-function formatTime(totalSeconds) {
-  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00'
-  const s = Math.floor(totalSeconds)
-  const hours = Math.floor(s / 3600)
-  const minutes = Math.floor((s % 3600) / 60)
-  const seconds = s % 60
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-  }
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
 
 export default function DownloadPlayer() {
   const { downloadId } = useParams()
@@ -49,7 +30,6 @@ export default function DownloadPlayer() {
   const [currentTime, setCurrentTime] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
-  const [scrubValue, setScrubValue] = useState(null)
 
   const { data: download, isLoading, error: loadError } = useQuery({
     queryKey: ['download', parsedId],
@@ -199,7 +179,7 @@ export default function DownloadPlayer() {
     }
   }, [])
 
-  const timelinePosition = scrubValue ?? Math.min(hlsStart + currentTime, fullDuration || 0)
+  const timelinePosition = hlsStart + currentTime
 
   if (!isValidId) {
     return (
@@ -273,50 +253,16 @@ export default function DownloadPlayer() {
             data-engine={engine || undefined}
           />
           {customControls && (
-            <Group gap="sm" px="sm" py={8} wrap="nowrap" bg="dark.8" data-testid="transport-bar">
-              <ActionIcon
-                variant="subtle"
-                color="gray.0"
-                onClick={togglePlay}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-              >
-                {isPlaying ? <IconPlayerPauseFilled size={18} /> : <IconPlayerPlayFilled size={18} />}
-              </ActionIcon>
-              <Text size="xs" c="gray.3" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                {formatTime(timelinePosition)} / {formatTime(fullDuration)}
-              </Text>
-              <Slider
-                style={{ flex: 1 }}
-                size="sm"
-                min={0}
-                max={fullDuration}
-                step={1}
-                value={timelinePosition}
-                onChange={setScrubValue}
-                onChangeEnd={(value) => {
-                  setScrubValue(null)
-                  seekTo(value)
-                }}
-                label={(value) => formatTime(value)}
-                thumbLabel="Seek"
-              />
-              <ActionIcon
-                variant="subtle"
-                color="gray.0"
-                onClick={toggleMute}
-                aria-label={isMuted ? 'Unmute' : 'Mute'}
-              >
-                {isMuted ? <IconVolumeOff size={18} /> : <IconVolume size={18} />}
-              </ActionIcon>
-              <ActionIcon
-                variant="subtle"
-                color="gray.0"
-                onClick={toggleFullscreen}
-                aria-label="Fullscreen"
-              >
-                <IconMaximize size={18} />
-              </ActionIcon>
-            </Group>
+            <TransportBar
+              position={timelinePosition}
+              duration={fullDuration}
+              isPlaying={isPlaying}
+              isMuted={isMuted}
+              onSeek={seekTo}
+              onTogglePlay={togglePlay}
+              onToggleMute={toggleMute}
+              onToggleFullscreen={toggleFullscreen}
+            />
           )}
         </div>
       )}

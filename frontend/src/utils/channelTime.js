@@ -79,6 +79,59 @@ export function getNowUtc() {
   return dayjs.utc()
 }
 
+// The helpers above all go one way: a UTC instant out of the provider, shown on
+// the channel's clock. A time slot is typed rather than read, so it needs the
+// reverse — a wall-clock time the user entered against the guide, turned back
+// into the UTC instant the provider is asked for.
+
+const CHANNEL_INPUT_FORMAT = 'YYYY-MM-DDTHH:mm'
+
+/**
+ * Parse a datetime-local string entered on the channel's clock into a UTC instant.
+ * Returns null when the value is absent or unparseable.
+ */
+export function channelDisplayToUtc(value, guideOffsetHours = 0) {
+  if (!value) {
+    return null
+  }
+  const parsed = dayjs.utc(value)
+  if (!parsed.isValid()) {
+    return null
+  }
+  return parsed.subtract(getGuideOffsetHours(guideOffsetHours), 'hour')
+}
+
+/** As channelDisplayToUtc, but as a unix timestamp in seconds. */
+export function channelDisplayToUnix(value, guideOffsetHours = 0) {
+  const instant = channelDisplayToUtc(value, guideOffsetHours)
+  return instant ? instant.unix() : null
+}
+
+/** Format a UTC instant as a datetime-local value on the channel's clock. */
+export function utcToChannelInput(instant, guideOffsetHours = 0) {
+  if (!instant) {
+    return ''
+  }
+  return dayjs.utc(instant).add(getGuideOffsetHours(guideOffsetHours), 'hour').format(CHANNEL_INPUT_FORMAT)
+}
+
+/** Now on the channel's clock, rounded down, as a datetime-local value. */
+export function nowChannelInput(guideOffsetHours = 0, roundToMinutes = 15) {
+  const now = getNowUtc().add(getGuideOffsetHours(guideOffsetHours), 'hour')
+  const step = Math.max(1, roundToMinutes)
+  const rounded = now.minute(Math.floor(now.minute() / step) * step).second(0).millisecond(0)
+  return rounded.format(CHANNEL_INPUT_FORMAT)
+}
+
+/** Shift a datetime-local value by minutes, staying on the channel's clock. */
+export function addMinutesToChannelInput(value, minutes) {
+  if (!value) {
+    return ''
+  }
+  const parsed = dayjs.utc(value)
+  return parsed.isValid() ? parsed.add(minutes, 'minute').format(CHANNEL_INPUT_FORMAT) : ''
+}
+
 export function formatAirDateTime(program, kind = 'start', guideOffsetHours = 0) {
   const displayTime = getChannelDisplayTime(program, kind, guideOffsetHours)
   if (!displayTime) return ''

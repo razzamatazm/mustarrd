@@ -28,7 +28,14 @@ class HlsMock {
 vi.mock('mpegts.js', () => ({ default: mpegtsMock }))
 vi.mock('hls.js', () => ({ default: HlsMock }))
 
-const { attachHls, attachMpegts, fileExtension, pickEngine } = await import('./playbackEngine')
+const {
+  attachHls,
+  attachMpegts,
+  fileExtension,
+  pickEngine,
+  previewNeedsConversion,
+  rememberPreviewNeedsConversion,
+} = await import('./playbackEngine')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -134,7 +141,7 @@ describe('attachHls', () => {
     hls.handlers[HlsMock.Events.ERROR]('hlsError', { fatal: false, details: 'minor' })
     expect(onError).not.toHaveBeenCalled()
     hls.handlers[HlsMock.Events.ERROR]('hlsError', { fatal: true, details: 'fatalError' })
-    expect(onError).toHaveBeenCalledWith('fatalError')
+    expect(onError).toHaveBeenCalledWith('fatalError', expect.objectContaining({ fatal: true }))
 
     destroy()
     destroy()
@@ -145,6 +152,8 @@ describe('attachHls', () => {
     HlsMock.isSupported.mockReturnValue(false)
     const video = {
       canPlayType: vi.fn(() => 'maybe'),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       removeAttribute: vi.fn(),
       load: vi.fn(),
     }
@@ -154,6 +163,28 @@ describe('attachHls', () => {
 
     destroy()
     expect(video.removeAttribute).toHaveBeenCalledWith('src')
+    expect(video.removeEventListener).toHaveBeenCalledWith('error', expect.any(Function))
+  })
+
+  it('reports native HLS failures, which have no hls.js error event', () => {
+    // On iOS Safari the element plays the playlist itself, so a stream the
+    // server refuses would otherwise sit as a blank player.
+    HlsMock.isSupported.mockReturnValue(false)
+    const listeners = {}
+    const onError = vi.fn()
+    const video = {
+      canPlayType: vi.fn(() => 'maybe'),
+      addEventListener: (event, handler) => {
+        listeners[event] = handler
+      },
+      removeEventListener: vi.fn(),
+      removeAttribute: vi.fn(),
+      load: vi.fn(),
+    }
+
+    attachHls(video, '/playlist.m3u8', { onError })
+    listeners.error()
+    expect(onError).toHaveBeenCalled()
   })
 
   it('reports unsupported browsers', () => {
@@ -163,5 +194,49 @@ describe('attachHls', () => {
 
     attachHls(video, '/playlist.m3u8', { onError })
     expect(onError).toHaveBeenCalled()
+  })
+})
+
+describe('converted-preview memory', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('defaults to trying the Direct preview first', () => {
+    expect(previewNeedsConversion(1, '42')).toBe(false)
+  })
+
+  it('remembers a failure per account and channel', () => {
+    rememberPreviewNeedsConversion(1, '42')
+    expect(previewNeedsConversion(1, '42')).toBe(true)
+    // A different channel, and the same channel on another account, are
+    // unaffected: one bad codec says nothing about the rest.
+    expect(previewNeedsConversion(1, '43')).toBe(false)
+    expect(previewNeedsConversion(2, '42')).toBe(false)
+  })
+
+  it('survives storage being unavailable', () => {
+    // Private browsing throws on any localStorage access; a preview must not
+    // take the whole modal down with it.
+    const real = window.localStorage
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('denied')
+      },
+    })
+
+    try {
+      expect(() => rememberPreviewNeedsConversion(1, '42')).not.toThrow()
+      expect(previewNeedsConversion(1, '42')).toBe(false)
+    } finally {
+      Object.defineProperty(window, 'localStorage', { configurable: true, value: real })
+    }
+  })
+
+  it('ignores incomplete identifiers', () => {
+    rememberPreviewNeedsConversion(null, '42')
+    expect(previewNeedsConversion(null, '42')).toBe(false)
+    expect(previewNeedsConversion(1, null)).toBe(false)
   })
 })

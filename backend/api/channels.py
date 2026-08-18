@@ -14,9 +14,26 @@ from auth import require_admin_or_download_user, AuthContext
 from database import get_session
 from models import StarredChannel, XtreamAccount
 from services.download_builder import _normalize_provider_start_token
+from api.hls_common import (
+    acquire_preview_slot,
+    close_provider_connection,
+    detach_cleanup,
+    hls_asset_response,
+    hls_http_error,
+    hls_playlist_response,
+    release_preview_slot,
+)
 from services.epg_service import epg_service, NoCatchupSupportError
+from services.hls_streamer import (
+    HLS_ASSET_PATTERN,
+    HLSError,
+    HLSStartError,
+    hls_streamer,
+    preview_session_key,
+)
 from services.account_credentials import resolve_account_password_with_migration
 from services.logo_cache import logo_cache
+from services.preview_budget import PREVIEW_MAX_CONCURRENT, preview_budget
 from services.xtream_client import XtreamClient
 
 
@@ -25,35 +42,105 @@ logger = logging.getLogger(__name__)
 
 # Stream-preview proxy limits: previews relay provider bytes through the
 # backend so credentials embedded in provider URLs never reach the browser.
-PREVIEW_MAX_CONCURRENT = 2
+# The concurrency budget is shared with VOD previews; see services/preview_budget.
 PREVIEW_MAX_SECONDS = 300
 PREVIEW_CHUNK_SIZE = 64 * 1024
 PREVIEW_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60)
 
-_active_preview_count = 0
-
-# Strong refs to in-flight connection-close tasks: the event loop only keeps
-# weak references, so an unreferenced task could be garbage-collected mid-close.
-_pending_preview_closes: set = set()
-
-
-def _release_preview_slot() -> None:
-    global _active_preview_count
-    _active_preview_count = max(0, _active_preview_count - 1)
-
-
-async def _close_preview_connection(provider_response, http_session) -> None:
-    """Close the provider response and its session, tolerating partial setup."""
-    try:
-        if provider_response is not None:
-            provider_response.close()
-    finally:
-        if http_session is not None and not http_session.closed:
-            await http_session.close()
-
-
 def _channel_has_tv_archive(ch: dict) -> bool:
     return int(ch.get("tv_archive", 0) or 0) == 1
+
+
+async def _resolve_preview_stream_url(
+    session: AsyncSession,
+    account_id: int,
+    channel_id: str,
+    mode: str,
+    start_timestamp: Optional[int],
+    stop_timestamp: Optional[int],
+    provider_start: Optional[str],
+) -> str:
+    """Build the provider URL for a preview. The result carries the account
+    username and password, so it must never reach a response or a process
+    argument list."""
+    result = await session.execute(
+        select(XtreamAccount).where(XtreamAccount.id == account_id)
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    password = await resolve_account_password_with_migration(session, account)
+    client = XtreamClient(account.server_url, account.username, password)
+
+    if mode != "catchup":
+        return client.build_stream_url(channel_id, "ts")
+
+    if not start_timestamp or not stop_timestamp or stop_timestamp <= start_timestamp:
+        raise HTTPException(
+            status_code=400,
+            detail="Catchup preview requires valid start and stop timestamps",
+        )
+    try:
+        start_utc = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid start timestamp")
+    duration_minutes = max(1, (stop_timestamp - start_timestamp) // 60)
+    normalized_start = (
+        _normalize_provider_start_token(provider_start, 0) if provider_start else None
+    )
+    return client.build_timeshift_url(
+        channel_id,
+        start_utc,
+        duration_minutes,
+        provider_start=normalized_start,
+    )
+
+
+def _preview_fingerprint(
+    mode: str,
+    start_timestamp: Optional[int],
+    stop_timestamp: Optional[int],
+    provider_start: Optional[str],
+) -> str:
+    """Identify *what* a preview session is showing, so a request for a
+    different program on the same channel rebuilds it. Derived only from
+    request parameters, never from the credentialed URL."""
+    return f"{mode}:{start_timestamp}:{stop_timestamp}:{provider_start}"
+
+
+def _provider_refused(status: int) -> str:
+    # Never echo the provider URL: it carries credentials.
+    return f"Provider refused the preview stream (HTTP {status})"
+
+
+class _ProviderStream:
+    """A provider URL presented to HLSStreamer as a plain byte source.
+
+    The backend owns the HTTP connection, so FFmpeg is handed bytes on stdin
+    and never sees the credentialed URL — which `ps` would otherwise expose
+    to every user on the host.
+    """
+
+    def __init__(self, url: str):
+        self._url = url
+        self._http_session = None
+        self._response = None
+
+    async def open(self):
+        self._http_session = aiohttp.ClientSession(timeout=PREVIEW_TIMEOUT)
+        self._response = await self._http_session.get(self._url)
+        if self._response.status != 200:
+            status = self._response.status
+            await self.close()
+            raise HLSStartError(_provider_refused(status))
+        return self._response.content.iter_chunked(PREVIEW_CHUNK_SIZE)
+
+    async def close(self) -> None:
+        response, self._response = self._response, None
+        http_session, self._http_session = self._http_session, None
+        await close_provider_connection(response, http_session)
 
 
 @router.get("/logos")
@@ -311,48 +398,11 @@ async def preview_channel_stream(
     backend: the stream is opened server-side and bytes are proxied to the
     authenticated browser session.
     """
-    global _active_preview_count
-
-    result = await session.execute(
-        select(XtreamAccount).where(XtreamAccount.id == account_id)
+    stream_url = await _resolve_preview_stream_url(
+        session, account_id, channel_id, mode, start_timestamp, stop_timestamp, provider_start
     )
-    account = result.scalar_one_or_none()
 
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    password = await resolve_account_password_with_migration(session, account)
-    client = XtreamClient(account.server_url, account.username, password)
-
-    if mode == "catchup":
-        if not start_timestamp or not stop_timestamp or stop_timestamp <= start_timestamp:
-            raise HTTPException(
-                status_code=400,
-                detail="Catchup preview requires valid start and stop timestamps",
-            )
-        try:
-            start_utc = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
-        except (OverflowError, OSError, ValueError):
-            raise HTTPException(status_code=400, detail="Invalid start timestamp")
-        duration_minutes = max(1, (stop_timestamp - start_timestamp) // 60)
-        normalized_start = (
-            _normalize_provider_start_token(provider_start, 0) if provider_start else None
-        )
-        stream_url = client.build_timeshift_url(
-            channel_id,
-            start_utc,
-            duration_minutes,
-            provider_start=normalized_start,
-        )
-    else:
-        stream_url = client.build_stream_url(channel_id, "ts")
-
-    if _active_preview_count >= PREVIEW_MAX_CONCURRENT:
-        raise HTTPException(
-            status_code=429,
-            detail="Preview limit reached. Close another preview and try again.",
-        )
-    _active_preview_count += 1
+    acquire_preview_slot()
 
     http_session = None
     provider_response = None
@@ -360,18 +410,17 @@ async def preview_channel_stream(
         http_session = aiohttp.ClientSession(timeout=PREVIEW_TIMEOUT)
         provider_response = await http_session.get(stream_url)
         if provider_response.status != 200:
-            # Never echo the provider URL: it carries credentials.
             raise HTTPException(
                 status_code=502,
-                detail=f"Provider refused the preview stream (HTTP {provider_response.status})",
+                detail=_provider_refused(provider_response.status),
             )
     except HTTPException:
-        await _close_preview_connection(provider_response, http_session)
-        _release_preview_slot()
+        await close_provider_connection(provider_response, http_session)
+        release_preview_slot()
         raise
     except Exception:
-        await _close_preview_connection(provider_response, http_session)
-        _release_preview_slot()
+        await close_provider_connection(provider_response, http_session)
+        release_preview_slot()
         logger.exception(
             "Preview stream failed account_id=%s channel_id=%s mode=%s",
             account_id,
@@ -398,27 +447,19 @@ async def preview_channel_stream(
             return
         cleanup_done = True
         failsafe.cancel()
-        _release_preview_slot()
+        release_preview_slot()
         logger.info(
             "Preview slot released account_id=%s channel_id=%s active=%s",
-            account_id, channel_id, _active_preview_count,
+            account_id, channel_id, preview_budget.active,
         )
-        close_task = asyncio.ensure_future(
-            _close_preview_connection(provider_response, http_session)
-        )
-        _pending_preview_closes.add(close_task)
-        close_task.add_done_callback(_pending_preview_closes.discard)
+        detach_cleanup(close_provider_connection(provider_response, http_session))
 
     # Failsafe: if the consumer stops reading without disconnecting, the relay
     # generator can park on a yield forever, never reaching its finally — the
     # slot and provider connection would leak until restart. Force cleanup
     # shortly after the relay deadline regardless of consumer behavior.
     def _spawn_failsafe_cleanup():
-        # Keep a strong ref: the loop only weakly references tasks, so an
-        # unanchored cleanup task could in principle be collected before it runs.
-        task = asyncio.ensure_future(cleanup())
-        _pending_preview_closes.add(task)
-        task.add_done_callback(_pending_preview_closes.discard)
+        detach_cleanup(cleanup())
 
     failsafe = asyncio.get_running_loop().call_later(
         PREVIEW_MAX_SECONDS + 30,
@@ -426,7 +467,7 @@ async def preview_channel_stream(
     )
     logger.info(
         "Preview slot acquired account_id=%s channel_id=%s mode=%s active=%s",
-        account_id, channel_id, mode, _active_preview_count,
+        account_id, channel_id, mode, preview_budget.active,
     )
 
     async def relay():
@@ -455,6 +496,100 @@ async def preview_channel_stream(
         # still runs the background task after the response ends.
         background=BackgroundTask(cleanup),
     )
+
+
+@router.get("/accounts/{account_id}/channels/{channel_id}/preview/hls/{asset}")
+async def preview_channel_hls_asset(
+    account_id: int,
+    channel_id: str,
+    asset: str,
+    mode: str = Query("live", pattern="^(live|catchup)$"),
+    start_timestamp: Optional[int] = Query(None, ge=0),
+    stop_timestamp: Optional[int] = Query(None, ge=0),
+    provider_start: Optional[str] = Query(None, max_length=64),
+    _auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a Converted preview: the provider stream repackaged by FFmpeg.
+
+    Requesting playlist.m3u8 starts (or reuses) a repackaging session that
+    copies the video and re-encodes the audio to AAC-LC, for browsers that
+    cannot decode the provider's original stream. Segments are relative to
+    the playlist, so they carry no query string and resolve by channel alone.
+
+    A Converted preview is still a preview: it takes a slot from the same
+    budget as the Direct path and stops at the same time cap.
+    """
+    if not HLS_ASSET_PATTERN.match(asset):
+        raise HTTPException(status_code=404, detail="Unknown stream asset")
+
+    key = preview_session_key(account_id, channel_id)
+
+    if asset != "playlist.m3u8":
+        hls_session = hls_streamer.get_active(key)
+        if not hls_session:
+            raise HTTPException(status_code=409, detail="No active preview session for this channel")
+        hls_streamer.touch(hls_session)
+        return hls_asset_response(hls_session, asset)
+
+    stream_url = await _resolve_preview_stream_url(
+        session, account_id, channel_id, mode, start_timestamp, stop_timestamp, provider_start
+    )
+    fingerprint = _preview_fingerprint(mode, start_timestamp, stop_timestamp, provider_start)
+
+    existing = hls_streamer.get_active(key)
+    if existing is not None and existing.fingerprint == fingerprint:
+        hls_streamer.touch(existing)
+        return hls_playlist_response(existing)
+
+    acquire_preview_slot()
+    released = False
+
+    def release_slot():
+        # One-shot: the streamer calls this when the session dies, and this
+        # handler calls it when the session never came to life.
+        nonlocal released
+        if released:
+            return
+        released = True
+        release_preview_slot()
+        logger.info(
+            "Converted preview slot released account_id=%s channel_id=%s active=%s",
+            account_id, channel_id, preview_budget.active,
+        )
+
+    hls_session = None
+
+    async def abandon():
+        # wait_for_playlist can fail on a session that is still running, so
+        # tear it down rather than just dropping the slot: otherwise FFmpeg
+        # would keep the stream open with nothing accounting for it.
+        # Release first — under cancellation the await below never returns.
+        release_slot()
+        if hls_session is not None:
+            await hls_streamer.close_session(hls_session)
+
+    try:
+        hls_session = await hls_streamer.get_or_create_stream(
+            key,
+            _ProviderStream(stream_url),
+            fingerprint,
+            PREVIEW_MAX_SECONDS,
+            on_close=release_slot,
+        )
+        await hls_streamer.wait_for_playlist(hls_session)
+    except HLSError as exc:
+        await abandon()
+        raise hls_http_error(exc)
+    except BaseException:
+        await abandon()
+        raise
+
+    logger.info(
+        "Converted preview started account_id=%s channel_id=%s mode=%s active=%s",
+        account_id, channel_id, mode, preview_budget.active,
+    )
+    return hls_playlist_response(hls_session)
 
 
 @router.get("/accounts/{account_id}/channels/{channel_id}")

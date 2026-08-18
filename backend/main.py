@@ -26,6 +26,7 @@ from api import (
     downloads,
     settings as settings_api,
     schedules,
+    time_slots,
     vod,
     epg,
     logs,
@@ -297,6 +298,7 @@ app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
 app.include_router(channels.router, prefix="/api", tags=["channels"])
 app.include_router(downloads.router, prefix="/api/downloads", tags=["downloads"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["schedules"])
+app.include_router(time_slots.router, prefix="/api/time-slots", tags=["time-slots"])
 app.include_router(vod.router, prefix="/api/vod", tags=["vod"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["settings"])
 app.include_router(epg.router, prefix="/api", tags=["epg"])

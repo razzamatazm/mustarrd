@@ -147,7 +147,20 @@ export const schedulesApi = {
   importDoc: (doc) => request('/schedules/import', { method: 'POST', body: doc }),
 }
 
+// Time slots (hand-picked channel + start + end, no EPG program)
+export const timeSlotsApi = {
+  create: (data) => request('/time-slots', { method: 'POST', body: data }),
+}
+
 // VOD (On Demand)
+function vodPreviewPath(accountId, kind, itemId, suffix, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value != null && value !== '')
+  ).toString()
+  const path = `/vod/preview/${accountId}/${kind}/${encodeURIComponent(itemId)}/${suffix}`
+  return query ? `${path}?${query}` : path
+}
+
 export const vodApi = {
   getMovieCategories: (accountId) => request(`/vod/movies/categories?account_id=${accountId}`),
   getMovies: (accountId, categoryId = null) => {
@@ -169,6 +182,22 @@ export const vodApi = {
   getSeriesInfo: (accountId, seriesId) =>
     request(`/vod/series/${seriesId}?account_id=${accountId}`),
   downloadSeries: (data) => request('/vod/series/download', { method: 'POST', body: data }),
+  // Full length up front, so the preview's scrub bar is the length of the film
+  // rather than the length of what FFmpeg has produced so far.
+  previewDuration: (accountId, kind, itemId, { seriesId = null, containerExtension = null } = {}) =>
+    request(
+      vodPreviewPath(accountId, kind, itemId, 'duration', {
+        series_id: seriesId,
+        container_extension: containerExtension,
+      })
+    ),
+  // Fed to the player, not to request(): hls.js fetches it itself, so this is
+  // an absolute path rather than one relative to the API base.
+  previewPlaylistUrl: (accountId, kind, itemId, { containerExtension = null, start = 0 } = {}) =>
+    `/api${vodPreviewPath(accountId, kind, itemId, 'hls/playlist.m3u8', {
+      container_extension: containerExtension,
+      start: start > 0 ? start.toFixed(3) : null,
+    })}`,
 }
 
 // Settings

@@ -12,7 +12,9 @@ account username and password — never reaches the browser. The endpoint must:
 """
 import asyncio
 import inspect
+import shutil
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,10 +28,12 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import api.channels as channels_api
-from api.channels import preview_channel_stream
+from services.preview_budget import preview_budget
+from api.channels import preview_channel_hls_asset, preview_channel_stream
 from auth import AuthContext, require_admin_or_download_user
 from database import Base
 from models import XtreamAccount
+from services.hls_streamer import HLSSession, HLSStartError, HLSUnavailableError
 
 SECRET_PASSWORD = "sup3r-secret-pw"
 SECRET_USERNAME = "secret-user"
@@ -74,7 +78,7 @@ def _make_http_session(response):
 class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        channels_api._active_preview_count = 0
+        preview_budget.active = 0
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -89,7 +93,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
             self.account_id = account.id
 
     async def asyncTearDown(self):
-        channels_api._active_preview_count = 0
+        preview_budget.active = 0
         await self.engine.dispose()
 
     async def _call_preview(self, http_session, mode="live", **kwargs):
@@ -138,7 +142,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as ctx:
             await self._call_preview(_make_http_session(response), mode="catchup")
         self.assertEqual(ctx.exception.status_code, 400)
-        self.assertEqual(channels_api._active_preview_count, 0)
+        self.assertEqual(preview_budget.active, 0)
 
     async def test_catchup_builds_timeshift_url(self):
         """Catchup mode must hit the provider's timeshift URL with the program duration."""
@@ -190,7 +194,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         # Provider connection must be torn down and the slot released
         response.close.assert_called_once()
         http_session.close.assert_awaited()
-        self.assertEqual(channels_api._active_preview_count, 0)
+        self.assertEqual(preview_budget.active, 0)
 
     async def test_success_response_has_no_credentials(self):
         """Headers of a successful preview must not carry the provider URL."""
@@ -220,7 +224,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         result = await self._call_preview(http_session)
         first = await result.body_iterator.__anext__()
         self.assertEqual(first, chunk)
-        self.assertEqual(channels_api._active_preview_count, 1)
+        self.assertEqual(preview_budget.active, 1)
 
         # Starlette calls aclose() on the body iterator when the client goes away
         await result.body_iterator.aclose()
@@ -229,7 +233,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         response.close.assert_called_once()
         http_session.close.assert_awaited()
         self.assertEqual(
-            channels_api._active_preview_count,
+            preview_budget.active,
             0,
             "Preview slot must be released on client disconnect.",
         )
@@ -246,7 +250,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received, [b"a", b"b"])
         response.close.assert_called_once()
         http_session.close.assert_awaited()
-        self.assertEqual(channels_api._active_preview_count, 0)
+        self.assertEqual(preview_budget.active, 0)
 
     # ------------------------------------------------------------------
     # concurrency cap
@@ -254,7 +258,7 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_preview_limit_returns_429(self):
         """When the concurrent-preview cap is reached, new previews get HTTP 429."""
-        channels_api._active_preview_count = channels_api.PREVIEW_MAX_CONCURRENT
+        preview_budget.active = preview_budget.limit
 
         response = _make_provider_response()
         http_session = _make_http_session(response)
@@ -264,25 +268,25 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 429)
         http_session.get.assert_not_awaited()
         self.assertEqual(
-            channels_api._active_preview_count,
-            channels_api.PREVIEW_MAX_CONCURRENT,
+            preview_budget.active,
+            preview_budget.limit,
             "A rejected preview must not consume or release a slot.",
         )
 
     async def test_slot_freed_after_close_allows_new_preview(self):
         """Closing an active preview frees its slot for the next request."""
-        channels_api._active_preview_count = channels_api.PREVIEW_MAX_CONCURRENT - 1
+        preview_budget.active = preview_budget.limit - 1
 
         first_response = _make_provider_response()
         first_session = _make_http_session(first_response)
         first = await self._call_preview(first_session)
-        self.assertEqual(channels_api._active_preview_count, channels_api.PREVIEW_MAX_CONCURRENT)
+        self.assertEqual(preview_budget.active, preview_budget.limit)
 
         await first.body_iterator.__anext__()
         await first.body_iterator.aclose()
         self.assertEqual(
-            channels_api._active_preview_count,
-            channels_api.PREVIEW_MAX_CONCURRENT - 1,
+            preview_budget.active,
+            preview_budget.limit - 1,
         )
 
         second_response = _make_provider_response()
@@ -314,14 +318,14 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
         consumer = asyncio.create_task(consume())
         await asyncio.sleep(0.05)
-        self.assertEqual(channels_api._active_preview_count, 1)
+        self.assertEqual(preview_budget.active, 1)
 
         consumer.cancel()
         await asyncio.gather(consumer, return_exceptions=True)
         await asyncio.sleep(0)  # let the detached close task run
 
         self.assertEqual(
-            channels_api._active_preview_count,
+            preview_budget.active,
             0,
             "Slot must be released even when cleanup runs under cancellation.",
         )
@@ -337,14 +341,14 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(channels_api, "PREVIEW_MAX_SECONDS", -29.9):
             result = await self._call_preview(http_session)
-            self.assertEqual(channels_api._active_preview_count, 1)
+            self.assertEqual(preview_budget.active, 1)
             # Read one chunk, then never touch the generator again (no aclose):
             # simulates a client that vanished without a detectable disconnect.
             await result.body_iterator.__anext__()
 
             await asyncio.sleep(0.4)
 
-        self.assertEqual(channels_api._active_preview_count, 0)
+        self.assertEqual(preview_budget.active, 0)
         response.close.assert_called_once()
         http_session.close.assert_awaited()
         await result.body_iterator.aclose()
@@ -368,11 +372,11 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
 
         response.close.assert_called_once()
         http_session.close.assert_awaited()
-        self.assertEqual(channels_api._active_preview_count, 0)
+        self.assertEqual(preview_budget.active, 0)
 
     async def test_cleanup_is_idempotent(self):
         """Generator finally plus background task must not double-release the slot."""
-        channels_api._active_preview_count = 1  # an unrelated active preview
+        preview_budget.active = 1  # an unrelated active preview
 
         response = _make_provider_response(chunks=(b"a",))
         http_session = _make_http_session(response)
@@ -383,10 +387,249 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         await result.background()  # Starlette always runs background afterwards
 
         self.assertEqual(
-            channels_api._active_preview_count,
+            preview_budget.active,
             1,
             "Cleanup ran twice: the unrelated preview's slot was stolen.",
         )
+
+
+class ConvertedPreviewTests(unittest.IsolatedAsyncioTestCase):
+    """
+    GET .../preview/hls/{asset} is the Converted preview: the backend
+    repackages the provider stream with FFmpeg for browsers that cannot decode
+    it directly. It shares the Direct preview's concurrency budget, and the
+    credentialed provider URL must reach neither the browser nor FFmpeg's argv.
+    """
+
+    async def asyncSetUp(self):
+        preview_budget.active = 0
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.session_factory = async_sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with self.session_factory() as session:
+            account = _make_account()
+            session.add(account)
+            await session.commit()
+            await session.refresh(account)
+            self.account_id = account.id
+
+    async def asyncTearDown(self):
+        preview_budget.active = 0
+        await self.engine.dispose()
+
+    def _make_hls_session(self, on_close=None):
+        directory = Path(tempfile.mkdtemp(prefix="converted-preview-test-"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        session = HLSSession(key="preview:1:55", directory=directory, live=True)
+        session.on_close = on_close
+        session.playlist_path.write_text("#EXTM3U\nseg00000.m4s\n")
+        return session
+
+    async def _call(self, asset="playlist.m3u8", mode="live", streamer=None, **kwargs):
+        with (
+            patch("api.channels.hls_streamer", streamer or MagicMock()),
+            patch(
+                "api.channels.resolve_account_password_with_migration",
+                AsyncMock(return_value=SECRET_PASSWORD),
+            ),
+        ):
+            async with self.session_factory() as session:
+                return await preview_channel_hls_asset(
+                    account_id=kwargs.pop("account_id", self.account_id),
+                    channel_id=kwargs.pop("channel_id", "55"),
+                    asset=asset,
+                    mode=mode,
+                    start_timestamp=kwargs.pop("start_timestamp", None),
+                    stop_timestamp=kwargs.pop("stop_timestamp", None),
+                    provider_start=kwargs.pop("provider_start", None),
+                    _auth=_make_auth(),
+                    session=session,
+                )
+
+    def _streamer(self, hls_session, active=None):
+        streamer = MagicMock()
+        streamer.get_active.return_value = active
+
+        async def start(_key, _source, _fingerprint, _max_seconds, on_close=None):
+            hls_session.on_close = on_close
+            return hls_session
+
+        streamer.get_or_create_stream = AsyncMock(side_effect=start)
+        streamer.wait_for_playlist = AsyncMock()
+        streamer.close_session = AsyncMock()
+        return streamer
+
+    def test_converted_preview_requires_authentication(self):
+        sig = inspect.signature(preview_channel_hls_asset)
+        auth_param = sig.parameters.get("_auth")
+        self.assertIsNotNone(auth_param, "_auth parameter missing from handler")
+        self.assertEqual(auth_param.default.dependency, require_admin_or_download_user)
+
+    async def test_unknown_asset_name_404(self):
+        for asset in ["../../etc/passwd", "ffmpeg.log", "probe.ts"]:
+            with self.assertRaises(HTTPException) as ctx:
+                await self._call(asset=asset)
+            self.assertEqual(ctx.exception.status_code, 404, asset)
+
+    async def test_segment_without_session_409(self):
+        streamer = self._streamer(None, active=None)
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(asset="seg00000.m4s", streamer=streamer)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_playlist_starts_session_and_takes_a_slot(self):
+        hls_session = self._make_hls_session()
+        streamer = self._streamer(hls_session)
+
+        response = await self._call(streamer=streamer)
+
+        self.assertEqual(response.media_type, "application/vnd.apple.mpegurl")
+        self.assertEqual(preview_budget.active, 1)
+        streamer.get_or_create_stream.assert_awaited_once()
+        # A Converted preview must be as short-lived as a Direct one.
+        self.assertEqual(
+            streamer.get_or_create_stream.await_args.args[3], channels_api.PREVIEW_MAX_SECONDS
+        )
+
+    async def test_provider_url_is_handed_over_as_a_stream_not_an_argument(self):
+        """FFmpeg must be fed bytes, never the credentialed URL: argv is
+        visible to every user on the host via `ps`."""
+        hls_session = self._make_hls_session()
+        streamer = self._streamer(hls_session)
+
+        await self._call(streamer=streamer)
+
+        source = streamer.get_or_create_stream.await_args.args[1]
+        self.assertIsInstance(source, channels_api._ProviderStream)
+        fingerprint = streamer.get_or_create_stream.await_args.args[2]
+        self.assertNotIn(SECRET_PASSWORD, fingerprint)
+        self.assertNotIn(SECRET_USERNAME, fingerprint)
+
+    async def test_playlist_response_has_no_credentials(self):
+        hls_session = self._make_hls_session()
+        response = await self._call(streamer=self._streamer(hls_session))
+        for name, value in response.headers.items():
+            self.assertNotIn(SECRET_PASSWORD, value, f"Credential leaked in header {name}")
+            self.assertNotIn(SECRET_USERNAME, value, f"Credential leaked in header {name}")
+            self.assertNotIn("provider.example", value, f"Provider URL leaked in header {name}")
+
+    async def test_shares_the_direct_preview_budget(self):
+        """One viewer must not be able to hold a Direct slot and a Converted
+        slot at once — unlike a download, a live encode never ends by itself."""
+        preview_budget.active = preview_budget.limit
+        streamer = self._streamer(self._make_hls_session())
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(streamer=streamer)
+
+        self.assertEqual(ctx.exception.status_code, 429)
+        streamer.get_or_create_stream.assert_not_awaited()
+        self.assertEqual(
+            preview_budget.active, preview_budget.limit
+        )
+
+    async def test_reusing_a_live_session_does_not_take_a_second_slot(self):
+        hls_session = self._make_hls_session()
+        hls_session.fingerprint = "live:None:None:None"
+        streamer = self._streamer(hls_session, active=hls_session)
+
+        await self._call(streamer=streamer)
+
+        streamer.get_or_create_stream.assert_not_awaited()
+        self.assertEqual(preview_budget.active, 0)
+        streamer.touch.assert_called_once_with(hls_session)
+
+    async def test_losing_the_start_race_gives_the_slot_back(self):
+        """Two players opening the same channel at once both reserve a slot,
+        but only one session exists. The streamer hands the loser's callback
+        straight back, and the handler must not sit on the reservation."""
+        hls_session = self._make_hls_session(on_close=lambda: None)
+        streamer = self._streamer(hls_session)
+
+        async def reuse(_key, _source, _fingerprint, _max_seconds, on_close=None):
+            on_close()  # not adopted: an equivalent session already existed
+            return hls_session
+
+        streamer.get_or_create_stream = AsyncMock(side_effect=reuse)
+
+        await self._call(streamer=streamer)
+
+        self.assertEqual(preview_budget.active, 0)
+
+    async def test_failed_start_releases_the_slot_and_tears_down(self):
+        streamer = self._streamer(None)
+        streamer.get_or_create_stream = AsyncMock(side_effect=HLSStartError("no video track"))
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(streamer=streamer)
+
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertEqual(
+            preview_budget.active, 0, "A failed Converted preview leaked its slot."
+        )
+        # The streamer already tore down the session it failed to start;
+        # there is nothing for the handler to close.
+        streamer.close_session.assert_not_awaited()
+
+    async def test_ffmpeg_missing_returns_503(self):
+        streamer = self._streamer(None)
+        streamer.get_or_create_stream = AsyncMock(
+            side_effect=HLSUnavailableError("FFmpeg was not found")
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(streamer=streamer)
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(preview_budget.active, 0)
+
+    async def test_playlist_timeout_releases_the_slot(self):
+        hls_session = self._make_hls_session()
+        streamer = self._streamer(hls_session)
+        streamer.wait_for_playlist = AsyncMock(side_effect=HLSStartError("timed out"))
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(streamer=streamer)
+
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertEqual(preview_budget.active, 0)
+        streamer.close_session.assert_awaited_once_with(hls_session)
+
+    async def test_abandon_tears_down_its_own_session_not_the_key(self):
+        """A request whose playlist never arrived must not kill the healthy
+        replacement session a later request already started on that channel —
+        that would 404 someone else's player mid-playback."""
+        mine = self._make_hls_session()
+        streamer = self._streamer(mine)
+        streamer.wait_for_playlist = AsyncMock(side_effect=HLSStartError("timed out"))
+
+        with self.assertRaises(HTTPException):
+            await self._call(streamer=streamer)
+
+        # Torn down by identity, so a session that replaced it is untouched.
+        streamer.close_session.assert_awaited_once_with(mine)
+
+    async def test_abandon_tears_down_its_own_session_not_the_key(self):
+        """A request whose playlist never arrived must not kill the healthy
+        replacement session a later request already started on that channel —
+        that would 404 someone else's player mid-playback."""
+        mine = self._make_hls_session()
+        streamer = self._streamer(mine)
+        streamer.wait_for_playlist = AsyncMock(side_effect=HLSStartError("timed out"))
+
+        with self.assertRaises(HTTPException):
+            await self._call(streamer=streamer)
+
+        # Torn down by identity, so a session that replaced it is untouched.
+        streamer.close_session.assert_awaited_once_with(mine)
+
+    async def test_catchup_without_timestamps_400(self):
+        streamer = self._streamer(self._make_hls_session())
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(mode="catchup", streamer=streamer)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(preview_budget.active, 0)
 
 
 if __name__ == "__main__":

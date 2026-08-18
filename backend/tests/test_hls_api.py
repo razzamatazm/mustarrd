@@ -83,7 +83,7 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
             Path(source).write_bytes(b"fake")
             hls_dir = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(hls_dir, ignore_errors=True))
-            hls_session = HLSSession(download_id=1, source_path=Path(source), directory=hls_dir)
+            hls_session = HLSSession(key="download:1", source_path=Path(source), directory=hls_dir)
             hls_session.playlist_path.write_text("#EXTM3U\nseg00000.m4s\n")
 
             session = _session_for(_make_download(source), folder)
@@ -91,7 +91,7 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
                     patch("api.downloads.hls_streamer") as mock_streamer:
                 mock_cfg.default_download_folder = folder
                 mock_cfg.default_completed_folder = folder
-                mock_streamer.get_or_create = AsyncMock(return_value=hls_session)
+                mock_streamer.get_or_create_file = AsyncMock(return_value=hls_session)
                 mock_streamer.wait_for_playlist = AsyncMock()
 
                 result = await get_download_hls_asset(
@@ -100,9 +100,9 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsInstance(result, FileResponse)
             self.assertEqual(result.media_type, "application/vnd.apple.mpegurl")
-            mock_streamer.get_or_create.assert_awaited_once()
+            mock_streamer.get_or_create_file.assert_awaited_once()
             # No explicit start: session begins at the top of the file.
-            self.assertEqual(mock_streamer.get_or_create.await_args.args[2], 0.0)
+            self.assertEqual(mock_streamer.get_or_create_file.await_args.args[2], 0.0)
 
     async def test_playlist_passes_start_offset_to_session(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -111,7 +111,7 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
             hls_dir = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(hls_dir, ignore_errors=True))
             hls_session = HLSSession(
-                download_id=1, source_path=Path(source), directory=hls_dir, start_offset=300.0
+                key="download:1", source_path=Path(source), directory=hls_dir, start_offset=300.0
             )
             hls_session.playlist_path.write_text("#EXTM3U\nseg00000.m4s\n")
 
@@ -120,14 +120,14 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
                     patch("api.downloads.hls_streamer") as mock_streamer:
                 mock_cfg.default_download_folder = folder
                 mock_cfg.default_completed_folder = folder
-                mock_streamer.get_or_create = AsyncMock(return_value=hls_session)
+                mock_streamer.get_or_create_file = AsyncMock(return_value=hls_session)
                 mock_streamer.wait_for_playlist = AsyncMock()
 
                 await get_download_hls_asset(
                     1, "playlist.m3u8", start=300.0, auth=ADMIN, session=session
                 )
 
-            self.assertEqual(mock_streamer.get_or_create.await_args.args[2], 300.0)
+            self.assertEqual(mock_streamer.get_or_create_file.await_args.args[2], 300.0)
 
     async def test_ffmpeg_failure_maps_to_502(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -138,7 +138,7 @@ class HLSPlaylistTests(unittest.IsolatedAsyncioTestCase):
                     patch("api.downloads.hls_streamer") as mock_streamer:
                 mock_cfg.default_download_folder = folder
                 mock_cfg.default_completed_folder = folder
-                mock_streamer.get_or_create = AsyncMock(side_effect=HLSStartError("FFmpeg failed"))
+                mock_streamer.get_or_create_file = AsyncMock(side_effect=HLSStartError("FFmpeg failed"))
 
                 with self.assertRaises(HTTPException) as ctx:
                     await get_download_hls_asset(1, "playlist.m3u8", auth=ADMIN, session=session)
@@ -167,7 +167,7 @@ class HLSSegmentTests(unittest.IsolatedAsyncioTestCase):
             Path(source).write_bytes(b"fake")
             hls_dir = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(hls_dir, ignore_errors=True))
-            hls_session = HLSSession(download_id=1, source_path=Path(source), directory=hls_dir)
+            hls_session = HLSSession(key="download:1", source_path=Path(source), directory=hls_dir)
             (hls_dir / "seg00000.m4s").write_bytes(b"segment")
 
             session = _session_for(_make_download(source), folder)
@@ -189,7 +189,7 @@ class HLSSegmentTests(unittest.IsolatedAsyncioTestCase):
             Path(source).write_bytes(b"fake")
             hls_dir = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(hls_dir, ignore_errors=True))
-            hls_session = HLSSession(download_id=1, source_path=Path(source), directory=hls_dir)
+            hls_session = HLSSession(key="download:1", source_path=Path(source), directory=hls_dir)
 
             session = _session_for(_make_download(source), folder)
             with patch("api.downloads.settings") as mock_cfg, \

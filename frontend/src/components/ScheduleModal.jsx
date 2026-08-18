@@ -102,7 +102,7 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
           program: program,
         })
         .then((data) => {
-          setFilename(data.filename.replace('.ts', ''))
+          setFilename(data.filename.replace(/\.ts$/, ''))
           setDetectedType(data.detected_type)
         })
         .catch((err) => {

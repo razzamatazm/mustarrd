@@ -36,6 +36,36 @@ export function pickEngine(path, { tsSupported = mpegtsSupported() } = {}) {
   return 'hls'
 }
 
+// Whether a channel needs a Converted preview is a property of this browser,
+// not of the channel: the same stream plays in Chrome and fails in Firefox,
+// and iOS Safari fails on everything. So the answer is remembered per browser
+// rather than on the channel record, where it would push Chrome users onto a
+// needless FFmpeg process. Losing it costs one wasted Direct attempt.
+const CONVERTED_PREVIEW_PREFIX = 'mustarrd.preview.converted'
+
+function convertedPreviewKey(accountId, channelId) {
+  return `${CONVERTED_PREVIEW_PREFIX}.${accountId}.${channelId}`
+}
+
+export function previewNeedsConversion(accountId, channelId) {
+  if (accountId == null || channelId == null) return false
+  try {
+    return window.localStorage.getItem(convertedPreviewKey(accountId, channelId)) === '1'
+  } catch {
+    // Private browsing / storage disabled: fall back to trying Direct first.
+    return false
+  }
+}
+
+export function rememberPreviewNeedsConversion(accountId, channelId) {
+  if (accountId == null || channelId == null) return
+  try {
+    window.localStorage.setItem(convertedPreviewKey(accountId, channelId), '1')
+  } catch {
+    // Nothing to do: the next preview simply retries the Direct path.
+  }
+}
+
 // Each attach* returns a destroy() that detaches the engine and releases
 // the media element, safe to call more than once.
 
@@ -68,7 +98,7 @@ export function attachHls(video, url, { onError, startPosition = -1 } = {}) {
     const hls = new Hls({ maxBufferLength: 60, startPosition })
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (data?.fatal && onError) {
-        onError(data.details || data.type || 'playback failed')
+        onError(data.details || data.type || 'playback failed', data)
       }
     })
     hls.loadSource(url)
@@ -86,8 +116,16 @@ export function attachHls(video, url, { onError, startPosition = -1 } = {}) {
   }
 
   if (nativeHlsSupported(video)) {
+    // Safari plays the playlist itself, so there is no hls.js error event and
+    // no HTTP status to read: a refused stream would otherwise sit as a blank
+    // player. The element's own error event is the only signal available.
+    const handleError = () => {
+      if (onError) onError('playback failed')
+    }
+    video.addEventListener('error', handleError)
     video.src = url
     return () => {
+      video.removeEventListener('error', handleError)
       video.removeAttribute('src')
       video.load()
     }

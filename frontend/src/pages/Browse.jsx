@@ -28,6 +28,7 @@ import {
   IconStarFilled,
   IconDownload,
   IconCalendar,
+  IconClockPlus,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 
@@ -36,6 +37,7 @@ import EPGGrid from '../components/EPGGrid'
 import DownloadModal from '../components/DownloadModal'
 import PreviewModal from '../components/PreviewModal'
 import ScheduleModal from '../components/ScheduleModal'
+import TimeSlotModal from '../components/TimeSlotModal'
 import MovieModal from '../components/VodMovieModal'
 import SeriesModal from '../components/VodSeriesModal'
 import {
@@ -249,6 +251,7 @@ export default function Browse() {
   const [downloadProgram, setDownloadProgram] = useState(null)
   const [scheduleProgram, setScheduleProgram] = useState(null)
   const [previewTarget, setPreviewTarget] = useState(null)
+  const [timeSlotOpen, setTimeSlotOpen] = useState(false)
   const [programSearch, setProgramSearch] = useState('')
   const [globalSearch, setGlobalSearch] = useState('')
   const [debouncedGlobalSearch] = useDebouncedValue(globalSearch, 400)
@@ -636,6 +639,16 @@ export default function Browse() {
                   </span>
                 )}
               </div>
+              {selectedChannelArchiveDays ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconClockPlus size={14} />}
+                  onClick={() => setTimeSlotOpen(true)}
+                >
+                  Record time slot
+                </Button>
+              ) : null}
             </div>
             <div className={classes.panelSearch} style={{ paddingTop: 10 }}>
               <TextInput
@@ -662,9 +675,30 @@ export default function Browse() {
                   archiveDays={selectedChannelArchiveDays}
                 />
               ) : (
-                <Text c="dimmed" ta="center" py="xl">
-                  No EPG data available
-                </Text>
+                <Stack align="center" gap="xs" py="xl" px="md">
+                  <Text c="dimmed" ta="center">
+                    No EPG data available
+                  </Text>
+                  {selectedChannelArchiveDays ? (
+                    <>
+                      <Text c="dimmed" ta="center" size="sm">
+                        You can still record this channel by picking the times yourself.
+                      </Text>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconClockPlus size={14} />}
+                        onClick={() => setTimeSlotOpen(true)}
+                      >
+                        Record time slot
+                      </Button>
+                    </>
+                  ) : (
+                    <Text c="dimmed" ta="center" size="sm">
+                      This channel has no catchup archive, so it cannot be recorded.
+                    </Text>
+                  )}
+                </Stack>
               )}
             </div>
           </>
@@ -1117,6 +1151,14 @@ export default function Browse() {
         channel={selectedChannel}
         accountId={selectedAccountId}
         guideOffsetHours={selectedGuideOffsetHours}
+      />
+      <TimeSlotModal
+        opened={timeSlotOpen}
+        onClose={() => setTimeSlotOpen(false)}
+        channel={selectedChannel}
+        accountId={selectedAccountId}
+        guideOffsetHours={selectedGuideOffsetHours}
+        archiveDays={selectedChannelArchiveDays}
       />
       <PreviewModal
         opened={!!previewTarget}

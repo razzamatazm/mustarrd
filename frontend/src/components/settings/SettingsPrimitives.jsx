@@ -1,5 +1,5 @@
-import { Box, Divider, Group, Stack, Text, Tooltip } from '@mantine/core'
-import { IconInfoCircle } from '@tabler/icons-react'
+import { Alert, Box, Code, Divider, Group, Stack, Text, Tooltip } from '@mantine/core'
+import { IconAlertCircle, IconInfoCircle } from '@tabler/icons-react'
 
 import NumberStepper from './NumberStepper'
 import classes from './SettingsPrimitives.module.css'
@@ -9,6 +9,14 @@ export function SectionHeader({ title, description }) {
     <Stack gap={2}>
       <Text fw={700} size="lg">{title}</Text>
       {description && <Text size="sm" c="dimmed">{description}</Text>}
+      {title === 'File Naming' && (
+        <Alert color="blue" variant="light" icon={<IconAlertCircle size={16} />} mt="sm">
+          A forward slash in a template creates a folder. For example{' '}
+          <Code>{'TV Shows/{show}/Season {season:02d}/{show} - S{season:02d}E{episode:02d}'}</Code> files the
+          recording into nested folders inside your completed folder. Slashes that come from the guide itself
+          (a show called &quot;AC/DC&quot;, say) stay part of the name and don&apos;t create folders.
+        </Alert>
+      )}
     </Stack>
   )
 }

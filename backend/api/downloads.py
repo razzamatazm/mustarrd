@@ -22,11 +22,11 @@ from database import get_session
 from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
 from services.disk_space import check_disk_space
 from services.download_manager import download_manager
+from api.hls_common import hls_asset_response, hls_http_error, hls_playlist_response
 from services.hls_streamer import (
     HLS_ASSET_PATTERN,
     HLSError,
-    HLSLimitError,
-    HLSUnavailableError,
+    download_session_key,
     hls_streamer,
 )
 from services.file_namer import file_namer
@@ -583,38 +583,21 @@ async def get_download_hls_asset(
         raise HTTPException(status_code=404, detail="Unknown stream asset")
 
     file_path = await _resolve_completed_download_file(download_id, auth, session)
+    key = download_session_key(download_id)
 
     if asset == "playlist.m3u8":
         try:
-            hls_session = await hls_streamer.get_or_create(download_id, file_path, start)
+            hls_session = await hls_streamer.get_or_create_file(key, file_path, start)
             await hls_streamer.wait_for_playlist(hls_session)
-        except HLSLimitError as exc:
-            raise HTTPException(status_code=429, detail=str(exc))
-        except HLSUnavailableError as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
         except HLSError as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
-        return FileResponse(
-            path=str(hls_session.playlist_path),
-            media_type="application/vnd.apple.mpegurl",
-            headers={"Cache-Control": "no-store"},
-        )
+            raise hls_http_error(exc)
+        return hls_playlist_response(hls_session)
 
-    hls_session = hls_streamer.get_active(download_id)
+    hls_session = hls_streamer.get_active(key)
     if not hls_session:
         raise HTTPException(status_code=409, detail="No active playback session for this download")
     hls_streamer.touch(hls_session)
-
-    # Asset name is regex-validated above, so it cannot escape the session dir.
-    asset_path = hls_session.directory / asset
-    if not asset_path.is_file():
-        raise HTTPException(status_code=404, detail="Stream segment not found")
-    media_type = "video/mp4" if asset.endswith(".mp4") else "video/iso.segment"
-    return FileResponse(
-        path=str(asset_path),
-        media_type=media_type,
-        headers={"Cache-Control": "no-store"},
-    )
+    return hls_asset_response(hls_session, asset)
 
 
 @router.delete("/{download_id}")
