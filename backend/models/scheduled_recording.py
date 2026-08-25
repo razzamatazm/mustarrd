@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 
@@ -18,6 +18,13 @@ class ScheduledStatus(str, Enum):
 
 class ScheduledRecording(Base):
     __tablename__ = "scheduled_recordings"
+    __table_args__ = (
+        Index(
+            "ux_scheduled_recordings_rule_airing_key",
+            "rule_airing_key",
+            unique=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("xtream_accounts.id"))
@@ -50,6 +57,12 @@ class ScheduledRecording(Base):
     download_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requested_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     request_source: Mapped[str] = mapped_column(String(32), default="admin")
+    recording_rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recording_rules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Only rule-created schedules receive this stable identity. Keeping it
+    # nullable preserves existing one-off cancellation/re-scheduling behavior.
+    rule_airing_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -92,6 +105,7 @@ class ScheduledRecording(Base):
             "download_id": self.download_id,
             "requested_by_user_id": self.requested_by_user_id,
             "request_source": self.request_source,
+            "recording_rule_id": self.recording_rule_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "available_at": available_at.isoformat() if available_at else None,

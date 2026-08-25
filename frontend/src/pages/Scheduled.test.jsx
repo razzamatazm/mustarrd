@@ -26,6 +26,11 @@ vi.mock('../api', () => ({
     exportAll: vi.fn(),
     importDoc: vi.fn(),
   },
+  recordingRulesApi: {
+    list: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
   accountsApi: { publicList: vi.fn() },
   authApi: { status: vi.fn() },
   settingsApi: { get: vi.fn(), update: vi.fn() },
@@ -68,9 +73,10 @@ const failedSchedule = {
   download_error_message: 'Stream unavailable',
 }
 
-async function renderScheduled({ schedules = [], isAdmin = true, initialEntries = ['/scheduled'] } = {}) {
-  const { schedulesApi, accountsApi, authApi, settingsApi } = await import('../api')
+async function renderScheduled({ schedules = [], rules = [], isAdmin = true, initialEntries = ['/scheduled'] } = {}) {
+  const { schedulesApi, recordingRulesApi, accountsApi, authApi, settingsApi } = await import('../api')
   schedulesApi.list.mockResolvedValue(schedules)
+  recordingRulesApi.list.mockResolvedValue(rules)
   accountsApi.publicList.mockResolvedValue([{ id: 1, name: 'Main', guide_offset_hours: 0 }])
   authApi.status.mockResolvedValue({ is_admin: isAdmin })
   settingsApi.get.mockResolvedValue({ auto_retry_failed_downloads: true })
@@ -141,5 +147,70 @@ describe('Scheduled page', () => {
   it('shows the auto-retry switch to admins only', async () => {
     await renderScheduled({ schedules: [], isAdmin: false })
     expect(screen.queryByLabelText('Auto-retry failed downloads')).not.toBeInTheDocument()
+  })
+
+  it('lists, disables, and deletes recurring recording rules', async () => {
+    const { recordingRulesApi } = await import('../api')
+    recordingRulesApi.update.mockResolvedValue({})
+    recordingRulesApi.delete.mockResolvedValue({ status: 'deleted' })
+    await renderScheduled({
+      rules: [{
+        id: 7,
+        account_id: 1,
+        channel_name: 'Game Network',
+        title_match: 'Evening Quiz',
+        enabled: true,
+        delete_after_days: 14,
+      }],
+      initialEntries: ['/scheduled?tab=rules'],
+    })
+
+    expect(await screen.findByText('Evening Quiz')).toBeInTheDocument()
+    expect(screen.getByText(/Deletes recordings after 14 days/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Evening Quiz' }))
+    await waitFor(() => {
+      expect(recordingRulesApi.update).toHaveBeenCalledWith(7, { enabled: false })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule Evening Quiz' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete' }))
+    await waitFor(() => {
+      expect(recordingRulesApi.delete).toHaveBeenCalledWith(7)
+    })
+  })
+
+  it('edits recurring matching, padding, days, and deletion retention', async () => {
+    const { recordingRulesApi } = await import('../api')
+    recordingRulesApi.update.mockResolvedValue({ scheduled_count: 0 })
+    await renderScheduled({
+      rules: [{
+        id: 8,
+        account_id: 1,
+        channel_name: 'Game Network',
+        title_match: 'Evening Quiz',
+        match_mode: 'exact',
+        enabled: true,
+        days_of_week: null,
+        delete_after_days: null,
+        pre_padding_minutes: 1,
+        post_padding_minutes: 5,
+      }],
+      initialEntries: ['/scheduled?tab=rules'],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit rule Evening Quiz' }))
+    fireEvent.change(screen.getByLabelText('Title match'), { target: { value: 'Quiz' } })
+    fireEvent.change(screen.getByLabelText('Delete completed recordings after'), { target: { value: '14' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+
+    await waitFor(() => {
+      expect(recordingRulesApi.update).toHaveBeenCalledWith(8, expect.objectContaining({
+        title_match: 'Quiz',
+        match_mode: 'exact',
+        delete_after_days: 14,
+        pre_padding_minutes: 1,
+        post_padding_minutes: 5,
+      }))
+    })
   })
 })

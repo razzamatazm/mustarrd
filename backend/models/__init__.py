@@ -3,6 +3,7 @@ from .download import Download, DownloadStatus
 from .epg_program import EPGProgram
 from .settings import AppSettings
 from .scheduled_recording import ScheduledRecording, ScheduledStatus
+from .recording_rule import RecordingRule
 from .starred_channel import StarredChannel
 from .user import User, UserIdentity, UserSetupToken, PlexServer
 
@@ -14,6 +15,7 @@ __all__ = [
     "AppSettings",
     "ScheduledRecording",
     "ScheduledStatus",
+    "RecordingRule",
     "StarredChannel",
     "User",
     "UserIdentity",

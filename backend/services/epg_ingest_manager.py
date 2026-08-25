@@ -548,6 +548,38 @@ class EPGIngestManager:
             f"EPG refresh complete. Parsed {processed:,} entries; inserted {inserted:,} new rows.",
             account=account
         )
+        try:
+            from services.recording_rule_service import recording_rule_service
+
+            async with async_session_maker() as session:
+                created = await recording_rule_service.evaluate(
+                    session, account_id=account.id
+                )
+                deleted = await recording_rule_service.delete_expired_downloads(
+                    session, account_id=account.id
+                )
+            if created:
+                await self._log(
+                    f"Recording rules added {created:,} future schedule(s).",
+                    account=account,
+                )
+            if deleted:
+                await self._log(
+                    f"Recording rule retention deleted {deleted:,} expired recording(s).",
+                    account=account,
+                )
+        except Exception as exc:
+            # The guide import itself succeeded. Keep it successful and retry
+            # rule evaluation after the next import instead of rolling it back.
+            logger.exception(
+                "Recording rule evaluation failed after EPG refresh for account %s",
+                account.id,
+            )
+            await self._log(
+                f"Recording rule evaluation failed: {exc}",
+                level="error",
+                account=account,
+            )
 
     async def _update_connection_status(self, account_id: int, ok: bool, error: str | None = None) -> None:
         try:
