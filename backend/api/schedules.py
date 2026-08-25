@@ -166,6 +166,9 @@ async def _create_schedule_record(
     data: ScheduleCreate,
     auth: AuthContext,
     session: AsyncSession,
+    *,
+    recording_rule_id: int | None = None,
+    rule_airing_key: str | None = None,
 ) -> ScheduledRecording:
     """Validate and persist a new schedule (shared by create and import).
 
@@ -261,6 +264,8 @@ async def _create_schedule_record(
         status=ScheduledStatus.SCHEDULED.value,
         requested_by_user_id=auth.user_id,
         request_source=auth.provider or "admin_local",
+        recording_rule_id=recording_rule_id,
+        rule_airing_key=rule_airing_key,
     )
 
     session.add(schedule)
