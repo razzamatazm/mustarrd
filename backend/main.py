@@ -69,6 +69,13 @@ async def lifespan(app: FastAPI):
     from services.download_manager import download_manager
     from services.scheduled_manager import scheduled_manager
     from services.epg_ingest_manager import epg_ingest_manager
+    from services.recording_events import recording_events
+
+    # Drains the recording lifecycle event queue. Started before recovery so
+    # the events recovery publishes are delivered rather than sitting in the
+    # queue until the first download. Ships with no subscribers: #431
+    # (webhooks) and #430 (notifications) register here.
+    recording_event_task = asyncio.create_task(recording_events.run())
     await download_manager.recover_incomplete_downloads()
     download_task = asyncio.create_task(download_manager.process_queue())
     post_process_task = asyncio.create_task(download_manager.process_post_queue())
@@ -85,7 +92,15 @@ async def lifespan(app: FastAPI):
     post_process_task.cancel()
     schedule_task.cancel()
     epg_task.cancel()
-    await asyncio.gather(download_task, post_process_task, schedule_task, epg_task, return_exceptions=True)
+    recording_event_task.cancel()
+    await asyncio.gather(
+        download_task,
+        post_process_task,
+        schedule_task,
+        epg_task,
+        recording_event_task,
+        return_exceptions=True,
+    )
 
 
 app = FastAPI(
