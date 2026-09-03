@@ -179,6 +179,23 @@ describe('Scheduled page', () => {
     })
   })
 
+  it('toggles the global rule retention setting', async () => {
+    const { settingsApi } = await import('../api')
+    settingsApi.update.mockResolvedValue({})
+    await renderScheduled({ rules: [], initialEntries: ['/scheduled?tab=rules'] })
+
+    fireEvent.click(await screen.findByLabelText('Enable rule-based retention cleanup'))
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalledWith({ recording_rule_retention_enabled: true })
+    })
+  })
+
+  it('hides the retention toggle from non-admins', async () => {
+    await renderScheduled({ rules: [], isAdmin: false, initialEntries: ['/scheduled?tab=rules'] })
+    await screen.findByText(/No recurring recording rules yet/)
+    expect(screen.queryByLabelText('Enable rule-based retention cleanup')).not.toBeInTheDocument()
+  })
+
   it('edits recurring matching, padding, days, and deletion retention', async () => {
     const { recordingRulesApi } = await import('../api')
     recordingRulesApi.update.mockResolvedValue({ scheduled_count: 0 })
@@ -199,7 +216,7 @@ describe('Scheduled page', () => {
     })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit rule Evening Quiz' }))
-    fireEvent.change(screen.getByLabelText('Title match'), { target: { value: 'Quiz' } })
+    fireEvent.change(await screen.findByLabelText('Title match'), { target: { value: 'Quiz' } })
     fireEvent.change(screen.getByLabelText('Delete completed recordings after'), { target: { value: '14' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
 
