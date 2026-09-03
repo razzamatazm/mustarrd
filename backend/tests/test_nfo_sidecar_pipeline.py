@@ -159,6 +159,7 @@ class SidecarPipelineTests(unittest.TestCase):
         self.assertEqual(root.findtext("episode"), "4")
         self.assertEqual(root.findtext("plot"), "Two men sweep a field.")
         self.assertEqual(root.findtext("aired"), "2026-02-01")
+        self.assertEqual(root.findtext("runtime"), "30")
         self.assertEqual(
             [(el.get("type"), el.get("default")) for el in root.findall("uniqueid")],
             [("tvdb", "true"), ("imdb", None)],
@@ -207,6 +208,81 @@ class SidecarPipelineTests(unittest.TestCase):
             self._run_post_process(download, _make_settings())
 
         self.assertEqual(download.status, DownloadStatus.COMPLETED.value)
+
+
+def _recovery_session(downloads, settings):
+    settings_result = MagicMock()
+    settings_result.scalar_one_or_none.return_value = settings
+    downloads_result = MagicMock()
+    downloads_result.scalars.return_value.all.return_value = downloads
+    calls = [0]
+
+    async def execute(_statement):
+        calls[0] += 1
+        return settings_result if calls[0] == 1 else downloads_result
+
+    session = AsyncMock()
+    session.execute = execute
+    session.commit = AsyncMock()
+
+    @asynccontextmanager
+    async def ctx():
+        yield session
+
+    return ctx
+
+
+class RestartRecoverySidecarTests(unittest.IsolatedAsyncioTestCase):
+    """A recording finalized by restart recovery gets its sidecar too.
+
+    recover_incomplete_downloads finishes downloads that were in flight when
+    the app was killed. Those never pass through _execute_post_process, so the
+    sidecar has to be written here as well or a restart silently costs the
+    user the .nfo.
+    """
+
+    async def asyncSetUp(self):
+        self.manager = DownloadManager()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.download_folder = root / "downloads"
+        self.completed_folder = root / "completed"
+        self.download_folder.mkdir()
+        self.completed_folder.mkdir()
+
+    async def test_recovered_download_gets_a_sidecar(self):
+        source = self.download_folder / "Detectorists - S02E04.ts"
+        source.write_bytes(b"\x00" * 256)
+
+        download = _make_download(str(source))
+        download.status = DownloadStatus.DOWNLOADING.value
+        download.file_size = 256
+        download.downloaded_bytes = 256
+
+        async def fake_move(path, completed_folder, download_folder):
+            target = Path(completed_folder) / Path(path).name
+            shutil.move(path, target)
+            return str(target)
+
+        with (
+            patch(
+                "services.download_manager.async_session_maker",
+                _recovery_session([download], _make_settings()),
+            ),
+            patch.object(self.manager, "_needs_post_processing", return_value=False),
+            patch.object(self.manager, "_move_to_completed_async", fake_move),
+            patch.object(self.manager, "_resolve_completed_folder", return_value=str(self.completed_folder)),
+            patch.object(self.manager, "_resolve_download_folder", return_value=str(self.download_folder)),
+            patch.object(self.manager, "_broadcast_log", AsyncMock()),
+            patch.object(self.manager, "_broadcast_progress", AsyncMock()),
+        ):
+            await self.manager.recover_incomplete_downloads()
+
+        self.assertEqual(download.status, DownloadStatus.COMPLETED.value)
+        sidecar = self.completed_folder / "Detectorists - S02E04.nfo"
+        self.assertTrue(sidecar.is_file(), sorted(os.listdir(self.completed_folder)))
+        self.assertEqual(ET.fromstring(sidecar.read_text()).tag, "episodedetails")
 
 
 class QueueTimeCaptureTests(unittest.TestCase):
