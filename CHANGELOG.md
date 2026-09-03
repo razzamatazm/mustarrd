@@ -4,6 +4,16 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-09-04
+
+### Fixed: A brief database hiccup no longer loses a scheduled recording
+
+**What you would notice:** If the database was momentarily busy at the exact moment a scheduled recording was due to start, that recording used to be marked Failed straight away with a cryptic technical message, and it was never tried again even though the programme was still available. Now Mustarrd retries within a second or so, and if it still cannot start, the recording stays scheduled with a note saying it will retry, so the next check picks it up. Recordings that fail for a real reason (the program cannot be built, the provider refuses it) still fail immediately, and the reason now reads as a sentence instead of a raw error.
+
+**What changed:** Schedule dispatch classifies its errors. Infrastructure-level database failures get a small number of retries with a short backoff inside the same poll, and leave the schedule dispatchable if they all fail; everything else stays terminal on the first attempt. The download row is still staged and committed with the schedule update, so a retried attempt cannot leave a duplicate recording behind.
+
+---
+
 ## 2026-09-03
 
 ### Fixed: Your chosen GPU is used when commercial skip is on

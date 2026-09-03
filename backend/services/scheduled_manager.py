@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy import exc as sa_exc
 from database import async_session_maker
 from models import ScheduledRecording, ScheduledStatus, AppSettings, Download, DownloadStatus
 from services.download_builder import build_download_from_program
@@ -26,6 +27,40 @@ ESTIMATED_RECORDING_GB_PER_HOUR = 3.0
 # archive (catchup) window.
 AUTO_RETRY_MAX_ATTEMPTS = 3
 AUTO_RETRY_MIN_INTERVAL_MINUTES = 10
+
+# Dispatching a due schedule (build the download row, commit it with the
+# schedule update) can fail for two very different reasons. Infrastructure
+# failures - SQLite "database is locked", a dropped connection, a pool timeout
+# - are transient: the same work succeeds moments later. Everything else
+# (unusable program data, a builder ValueError) fails the same way every time.
+# Transient failures get a few quick in-tick retries, and if they all fail the
+# schedule stays dispatchable so the next poll picks it up again. There is
+# deliberately no cross-tick attempt limit: counting attempts across ticks
+# would mean a new column on scheduled_recordings, and a schedule whose
+# database is down for good stops being retried anyway once its program falls
+# out of the catchup window (which fails it with a clear message). Each failed
+# attempt is logged, and the schedule carries a "will retry" status_message in
+# the meantime.
+DISPATCH_MAX_ATTEMPTS = 3
+DISPATCH_RETRY_BACKOFF_SECONDS = 0.2  # base delay, multiplied by attempt number
+
+_TRANSIENT_DISPATCH_ERRORS = (
+    sa_exc.OperationalError,
+    sa_exc.InterfaceError,
+    sa_exc.InternalError,
+    sa_exc.TimeoutError,
+    sa_exc.DisconnectionError,
+    ConnectionError,
+)
+
+
+def _is_transient_dispatch_error(exc: BaseException) -> bool:
+    """True when a dispatch failure is infrastructure, not this schedule.
+
+    Deterministic errors must stay terminal on the first attempt - retrying
+    them only delays a failure the user needs to see.
+    """
+    return isinstance(exc, _TRANSIENT_DISPATCH_ERRORS)
 
 
 class ScheduledManager:
@@ -153,6 +188,7 @@ class ScheduledManager:
             ready_data = [
                 {
                     "schedule": s,
+                    "schedule_id": s.id,
                     "account_id": s.account_id,
                     "channel_id": s.channel_id,
                     "channel_name": s.channel_name,
@@ -201,76 +237,146 @@ class ScheduledManager:
                     schedule.updated_at = datetime.utcnow()
                     continue
 
-                try:
-                    program = {
-                        "title": snap["program_title"],
-                        "description": snap["program_description"] or "",
-                        "start_time": snap["program_start"].isoformat() if snap["program_start"] else None,
-                        "end_time": snap["program_end"].isoformat() if snap["program_end"] else None,
-                        "start_timestamp": snap["start_timestamp"],
-                        "stop_timestamp": snap["stop_timestamp"],
-                        "provider_start": snap["provider_start"],
-                        "provider_stop": snap["provider_stop"],
-                        "duration_minutes": snap["duration_minutes"],
-                        "epg_id": snap["epg_id"],
-                        "id": snap["program_id"],
-                        "channel_id": snap["channel_id"],
-                        "category": snap["channel_category_name"] or "",
-                    }
+                # Attempt dispatch a bounded number of times within this tick.
+                # A transient infrastructure error is worth an immediate retry;
+                # anything else is this schedule's own fault and fails now.
+                dispatched = False
+                pending_transient: Exception | None = None
+                for attempt in range(1, DISPATCH_MAX_ATTEMPTS + 1):
+                    try:
+                        dispatched = await self._dispatch_schedule(session, snap, schedule)
+                        pending_transient = None
+                        break
+                    except Exception as exc:
+                        # Discard the staged download row and whatever else the
+                        # failed attempt left on the session, so a retry (or
+                        # the next tick) starts clean.
+                        await session.rollback()
 
-                    # The snapshot saved when the schedule was created carries
-                    # no structured metadata, so the recording would be named
-                    # from title text alone. The stored guide entry for this
-                    # exact airing still has the season and episode.
-                    await epg_service.fill_gaps_from_stored(
-                        session, snap["account_id"], [program]
-                    )
+                        if not _is_transient_dispatch_error(exc):
+                            # A deterministic failure ends it, even if an
+                            # earlier attempt in this tick failed transiently.
+                            pending_transient = None
+                            schedule.status = ScheduledStatus.FAILED.value
+                            schedule.status_message = (
+                                f"Could not start this recording: {exc}"
+                            )
+                            schedule.updated_at = datetime.utcnow()
+                            await session.commit()
+                            break
 
-                    download = await build_download_from_program(
-                        session,
-                        account_id=snap["account_id"],
-                        channel_id=snap["channel_id"],
-                        channel_name=snap["channel_name"],
-                        program=program,
-                        custom_filename=snap["custom_filename"],
-                        pre_padding_minutes=snap["pre_padding_minutes"],
-                        post_padding_minutes=snap["post_padding_minutes"],
-                        requested_by_user_id=snap["requested_by_user_id"],
-                        request_source=snap["request_source"] or "admin",
-                    )
+                        pending_transient = exc
+                        logger.warning(
+                            "Transient error dispatching schedule %s (attempt %s/%s): %s",
+                            snap["schedule_id"], attempt, DISPATCH_MAX_ATTEMPTS, exc,
+                        )
+                        if attempt < DISPATCH_MAX_ATTEMPTS:
+                            await asyncio.sleep(DISPATCH_RETRY_BACKOFF_SECONDS * attempt)
 
-                    # Stage the download row on this session so it commits
-                    # atomically with the schedule update below. A commit
-                    # failure leaves neither row behind, so the next tick can
-                    # retry without producing a duplicate download.
-                    download = await download_manager.queue_download(download, session=session)
-
-                    # Re-read status: user may have cancelled while we were
-                    # awaiting build_download_from_program or queue_download.
+                if pending_transient is not None:
+                    # Every attempt hit infrastructure trouble. Leave the
+                    # schedule dispatchable so the next poll tries again
+                    # instead of burying a recoverable recording in FAILED.
+                    # Re-read first: the user may have cancelled meanwhile,
+                    # and a cancelled schedule must not be resurrected.
                     await session.refresh(schedule)
                     if schedule.status not in (
                         ScheduledStatus.SCHEDULED.value,
                         ScheduledStatus.PAUSED_LOW_SPACE.value,
                     ):
-                        # Discard the staged (uncommitted) download row.
-                        await session.rollback()
                         continue
+                    schedule.status = ScheduledStatus.SCHEDULED.value
+                    schedule.status_message = (
+                        "Temporary problem starting this recording "
+                        f"({type(pending_transient).__name__}). Will retry shortly."
+                    )
+                    schedule.updated_at = datetime.utcnow()
+                    await session.commit()
 
-                    schedule.download_id = download.id
-                    schedule.status = ScheduledStatus.QUEUED.value
-                    schedule.status_message = None
-                    schedule.updated_at = datetime.utcnow()
-                    await session.commit()
-                    await download_manager.enqueue_persisted(download)
+                if dispatched:
                     projected_used_gb += self._estimate_recording_gb(schedule)
-                except Exception as exc:
-                    await session.rollback()
-                    schedule.status = ScheduledStatus.FAILED.value
-                    schedule.status_message = str(exc)
-                    schedule.updated_at = datetime.utcnow()
-                    await session.commit()
 
             await session.commit()
+
+    async def _dispatch_schedule(self, session, snap, schedule) -> bool:
+        """Build, stage and commit one due schedule's download, then enqueue it.
+
+        Returns True when the recording was dispatched, False when the schedule
+        was cancelled (or otherwise moved on) while we were building it. Raises
+        on failure, leaving the caller to classify the error; the session is
+        rolled back by the caller, so a failed attempt stages nothing.
+        """
+        program = {
+            "title": snap["program_title"],
+            "description": snap["program_description"] or "",
+            "start_time": snap["program_start"].isoformat() if snap["program_start"] else None,
+            "end_time": snap["program_end"].isoformat() if snap["program_end"] else None,
+            "start_timestamp": snap["start_timestamp"],
+            "stop_timestamp": snap["stop_timestamp"],
+            "provider_start": snap["provider_start"],
+            "provider_stop": snap["provider_stop"],
+            "duration_minutes": snap["duration_minutes"],
+            "epg_id": snap["epg_id"],
+            "id": snap["program_id"],
+            "channel_id": snap["channel_id"],
+            "category": snap["channel_category_name"] or "",
+        }
+
+        # The snapshot saved when the schedule was created carries no
+        # structured metadata, so the recording would be named from title text
+        # alone. The stored guide entry for this exact airing still has the
+        # season and episode.
+        await epg_service.fill_gaps_from_stored(
+            session, snap["account_id"], [program]
+        )
+
+        download = await build_download_from_program(
+            session,
+            account_id=snap["account_id"],
+            channel_id=snap["channel_id"],
+            channel_name=snap["channel_name"],
+            program=program,
+            custom_filename=snap["custom_filename"],
+            pre_padding_minutes=snap["pre_padding_minutes"],
+            post_padding_minutes=snap["post_padding_minutes"],
+            requested_by_user_id=snap["requested_by_user_id"],
+            request_source=snap["request_source"] or "admin",
+        )
+
+        # Stage the download row on this session so it commits atomically with
+        # the schedule update below. A commit failure leaves neither row
+        # behind, so a retry cannot produce a duplicate download.
+        download = await download_manager.queue_download(download, session=session)
+
+        # Re-read status: user may have cancelled while we were awaiting
+        # build_download_from_program or queue_download.
+        await session.refresh(schedule)
+        if schedule.status not in (
+            ScheduledStatus.SCHEDULED.value,
+            ScheduledStatus.PAUSED_LOW_SPACE.value,
+        ):
+            # Discard the staged (uncommitted) download row.
+            await session.rollback()
+            return False
+
+        schedule.download_id = download.id
+        schedule.status = ScheduledStatus.QUEUED.value
+        schedule.status_message = None
+        schedule.updated_at = datetime.utcnow()
+        await session.commit()
+        # Past the commit the recording exists. Nothing here may raise back
+        # into the retry loop: a retry would rebuild and commit a second
+        # download row for the same schedule. A queue hand-off that fails is
+        # recovered on the next restart instead.
+        try:
+            await download_manager.enqueue_persisted(download)
+        except Exception:
+            logger.exception(
+                "Schedule %s was dispatched but its download could not be "
+                "put on the queue; startup recovery will pick it up",
+                snap["schedule_id"],
+            )
+        return True
 
     async def _get_archive_days_raw(self, session, account_id: int, channel_id: str) -> int:
         """Channel's archive window in days; 0 when the provider reports none.
