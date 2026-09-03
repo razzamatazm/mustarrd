@@ -12,6 +12,10 @@ class DownloadStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Capture stopped early but left a file ffprobe can open. The recording is
+    # kept, post-processed and moved to the completed folder like a completed
+    # one; the status records that it is short.
+    INTERRUPTED = "interrupted"
 
 
 class Download(Base):
@@ -46,6 +50,10 @@ class Download(Base):
     # Actual duration of the recorded file (ffprobe), as opposed to the EPG
     # program duration in duration_minutes. Null when probing was unavailable.
     recorded_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Why the capture stopped early. Non-null marks the recording as interrupted
+    # and is kept separate from error_message so an interruption and a
+    # "Completed with warnings" integrity note can coexist without clobbering.
+    interruption_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Automatic retry bookkeeping (auto_retry_failed_downloads setting)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -77,6 +85,7 @@ class Download(Base):
             "error_message": self.error_message,
             "is_vod": self.is_vod,
             "recorded_duration_seconds": self.recorded_duration_seconds,
+            "interruption_reason": self.interruption_reason,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

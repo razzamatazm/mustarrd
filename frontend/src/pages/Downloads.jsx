@@ -32,6 +32,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconDatabase,
+  IconAlertTriangle,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -84,6 +85,16 @@ function getFileName(filePath) {
   return parts[parts.length - 1] || 'file'
 }
 
+// "54 min of 60 min" for an interrupted recording, so the user can see how
+// much of the program was actually captured. Null when we have no probed
+// duration to compare against.
+function formatRecordedVsExpected(download) {
+  const recorded = download?.recorded_duration_seconds
+  const expected = download?.duration_minutes
+  if (!recorded || recorded <= 0 || !expected || expected <= 0) return null
+  return `${Math.round(recorded / 60)} min of ${expected} min`
+}
+
 function getStatusBadge(status) {
   const statusConfig = {
     pending: { color: 'gray', icon: IconClock, label: 'Pending' },
@@ -92,6 +103,7 @@ function getStatusBadge(status) {
     completed: { color: 'green', icon: IconCheck, label: 'Completed' },
     failed: { color: 'red', icon: IconX, label: 'Failed' },
     cancelled: { color: 'orange', icon: IconX, label: 'Cancelled' },
+    interrupted: { color: 'grape', icon: IconAlertTriangle, label: 'Interrupted' },
   }
 
   const config = statusConfig[status] || statusConfig.pending
@@ -295,7 +307,7 @@ export default function Downloads() {
           },
         }))
 
-        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(data.status)) {
           queryClient.invalidateQueries({ queryKey: ['downloads'] })
         }
       } else if (data.type === 'log') {
@@ -427,7 +439,7 @@ export default function Downloads() {
   ) || []
 
   const historyDownloads = enhancedDownloads?.filter((d) =>
-    ['completed', 'failed', 'cancelled'].includes(d.status)
+    ['completed', 'failed', 'cancelled', 'interrupted'].includes(d.status)
   ) || []
 
   const filteredHistoryDownloads = historyFilter === 'all'
@@ -438,14 +450,14 @@ export default function Downloads() {
   )
 
   const renderHistoryActions = (download) => {
-    const canRetry = ['failed', 'cancelled'].includes(download.status)
+    const canRetry = ['failed', 'cancelled', 'interrupted'].includes(download.status)
     const retryLabel = download.status === 'cancelled' ? 'Download again' : 'Retry'
     const downloadHref = `/api/downloads/${download.id}/file?action=download`
     const playHref = `/downloads/${download.id}/play`
 
     return (
       <>
-        {download.status === 'completed' && (
+        {['completed', 'interrupted'].includes(download.status) && (
           isDesktop ? (
             <>
               <ActionIcon
@@ -635,6 +647,7 @@ export default function Downloads() {
                     { value: 'completed', label: 'Completed' },
                     { value: 'failed', label: 'Failed' },
                     { value: 'cancelled', label: 'Cancelled' },
+                    { value: 'interrupted', label: 'Interrupted' },
                   ]}
                 />
                 <Button
@@ -658,8 +671,17 @@ export default function Downloads() {
                     const guideOffset = accountGuideOffsets[Number(download.account_id)] || 0
                     const aired = formatAirDateTime(download, 'start', guideOffset)
                     const subtitleParts = [download.channel_name, aired]
-                    if (download.status === 'completed' && download.output_path) {
+                    if (
+                      ['completed', 'interrupted'].includes(download.status) &&
+                      download.output_path
+                    ) {
                       subtitleParts.push(getFileName(download.output_path))
+                    }
+                    if (download.status === 'interrupted') {
+                      const captured = formatRecordedVsExpected(download)
+                      subtitleParts.unshift(
+                        captured ? `Interrupted - ${captured}` : 'Interrupted'
+                      )
                     }
                     return (
                       <HistoryRow
@@ -667,8 +689,13 @@ export default function Downloads() {
                         status={download.status}
                         title={download.program_title}
                         subtitle={subtitleParts.filter(Boolean).join(' · ')}
-                        error={download.error_message ? renderErrorMessage(download.error_message) : null}
-                        size={download.status === 'completed' && download.file_size > 0 ? formatBytes(download.file_size) : null}
+                        error={
+                          [download.interruption_reason, download.error_message]
+                            .filter(Boolean)
+                            .map((msg, i) => <div key={i}>{renderErrorMessage(msg)}</div>)
+                            .slice(0, 2)
+                        }
+                        size={['completed', 'interrupted'].includes(download.status) && download.file_size > 0 ? formatBytes(download.file_size) : null}
                         actions={renderHistoryActions(download)}
                       />
                     )

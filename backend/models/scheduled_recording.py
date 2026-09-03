@@ -13,6 +13,7 @@ class ScheduledStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
     PAUSED_LOW_SPACE = "paused_low_space"
 
 

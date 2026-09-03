@@ -310,7 +310,7 @@ function App() {
     if (!authStatus?.authenticated) return undefined
     const ws = createDownloadWebSocket((data) => {
       if (data.type === 'progress') {
-        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(data.status)) {
           setActiveDownloads((prev) => Math.max(0, prev - 1))
         }
       }

@@ -31,6 +31,11 @@
   color: var(--mantine-color-red-6);
 }
 
+.interrupted {
+  background: rgba(190, 75, 219, 0.12);
+  color: var(--mantine-color-grape-6);
+}
+
 .cancelled {
   background: rgba(144, 146, 150, 0.12);
   color: var(--mantine-color-dimmed);

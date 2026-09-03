@@ -123,6 +123,9 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "downloads", "recorded_duration_seconds"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN recorded_duration_seconds INTEGER"))
 
+    if not await _column_exists(conn, "downloads", "interruption_reason"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN interruption_reason TEXT"))
+
     if not await _column_exists(conn, "app_settings", "integrity_check_enabled"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN integrity_check_enabled BOOLEAN DEFAULT 1")

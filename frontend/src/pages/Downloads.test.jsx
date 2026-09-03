@@ -62,6 +62,21 @@ const failedDownload = {
   error_message: 'Provider returned 404',
 }
 
+const interruptedDownload = {
+  id: 4,
+  status: 'interrupted',
+  program_title: 'Championship Final',
+  channel_name: 'Sports HD',
+  account_id: 1,
+  duration_minutes: 60,
+  recorded_duration_seconds: 3240,
+  start_time: dayjs().subtract(3, 'day').toISOString(),
+  end_time: dayjs().subtract(3, 'day').add(60, 'minute').toISOString(),
+  output_path: '/completed/championship-final.mkv',
+  file_size: 1024 * 1024 * 900,
+  interruption_reason: 'Connection to the provider was lost.',
+}
+
 async function renderDownloads({ downloads = [], initialEntries = ['/downloads'] } = {}) {
   const { downloadsApi, authApi, accountsApi } = await import('../api')
   downloadsApi.list.mockResolvedValue(downloads)
@@ -122,6 +137,33 @@ describe('Downloads page', () => {
     expect(screen.getByText('42%')).toBeInTheDocument()
     expect(screen.getByText('500.0 MB / 1000.0 MB')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel download' })).toBeInTheDocument()
+  })
+
+  it('shows an interrupted recording in history with recorded versus expected duration', async () => {
+    await renderDownloads({
+      downloads: [interruptedDownload],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    expect(await screen.findByText('Championship Final')).toBeInTheDocument()
+    expect(screen.getByText(/Interrupted - 54 min of 60 min/)).toBeInTheDocument()
+    expect(screen.getByText(/Connection to the provider was lost/)).toBeInTheDocument()
+  })
+
+  it('offers a filter and a retry for interrupted recordings', async () => {
+    await renderDownloads({
+      downloads: [completedDownload, interruptedDownload],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    await screen.findByText('Championship Final')
+
+    const filter = screen.getByRole('radio', { name: 'Interrupted' })
+    fireEvent.click(filter)
+
+    await waitFor(() => {
+      expect(screen.queryByText('Nature Documentary')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('Championship Final')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
   it('shows compact history rows with a segmented status filter', async () => {

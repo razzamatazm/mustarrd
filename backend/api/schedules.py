@@ -125,6 +125,8 @@ def _map_download_status(status: str) -> str:
         return ScheduledStatus.FAILED.value
     if status == "cancelled":
         return ScheduledStatus.CANCELLED.value
+    if status == "interrupted":
+        return ScheduledStatus.INTERRUPTED.value
     return ScheduledStatus.QUEUED.value
 
 

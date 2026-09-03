@@ -1,10 +1,11 @@
-import { IconCheck, IconX } from '@tabler/icons-react'
+import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react'
 import classes from './HistoryRow.module.css'
 
 // Compact history row shared by Downloads History and Scheduled History.
 // `actions` is a node of icon buttons (ActionIcon) built by the caller.
 export default function HistoryRow({ status, title, subtitle, error, size, actions }) {
-  const Icon = status === 'completed' ? IconCheck : IconX
+  const Icon =
+    status === 'completed' ? IconCheck : status === 'interrupted' ? IconAlertTriangle : IconX
   const iconClass = classes[status] || classes.cancelled
 
   return (

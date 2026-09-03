@@ -415,9 +415,13 @@ async def clear_finished_downloads(
     auth: AuthContext = Depends(require_admin_or_download_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Delete all completed and failed download entries."""
+    """Delete all completed, interrupted and failed download entries."""
     query = sql_delete(Download).where(
-        Download.status.in_([DownloadStatus.COMPLETED.value, DownloadStatus.FAILED.value])
+        Download.status.in_([
+            DownloadStatus.COMPLETED.value,
+            DownloadStatus.FAILED.value,
+            DownloadStatus.INTERRUPTED.value,
+        ])
     )
     if not auth.is_admin:
         query = query.where(Download.requested_by_user_id == auth.user_id)
@@ -461,7 +465,12 @@ async def _resolve_completed_download_file(
     if not download:
         raise HTTPException(status_code=404, detail="Download not found")
 
-    if download.status != DownloadStatus.COMPLETED.value:
+    # An interrupted recording is a short but real file sitting in the
+    # completed folder, so it is playable and downloadable like a completed one.
+    if download.status not in (
+        DownloadStatus.COMPLETED.value,
+        DownloadStatus.INTERRUPTED.value,
+    ):
         raise HTTPException(status_code=409, detail="Download is not completed yet")
 
     if not download.output_path:
@@ -647,8 +656,15 @@ async def retry_download(
     if not download:
         raise HTTPException(status_code=404, detail="Download not found")
 
-    if download.status not in [DownloadStatus.FAILED.value, DownloadStatus.CANCELLED.value]:
-        raise HTTPException(status_code=400, detail="Can only retry failed or cancelled downloads")
+    if download.status not in [
+        DownloadStatus.FAILED.value,
+        DownloadStatus.CANCELLED.value,
+        DownloadStatus.INTERRUPTED.value,
+    ]:
+        raise HTTPException(
+            status_code=400,
+            detail="Can only retry failed, cancelled or interrupted downloads",
+        )
 
     await check_disk_space(session)
 

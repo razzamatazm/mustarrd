@@ -6,6 +6,16 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-09-03
 
+### Added: Recordings that cut off early are kept instead of thrown away
+
+**What you would notice:** If a recording loses its connection partway through and cannot be resumed, Mustarrd now keeps what it captured instead of deleting it. You recorded 54 minutes of a 60 minute program, you keep those 54 minutes. The recording shows up in History as **Interrupted** with the amount captured next to the scheduled length ("Interrupted - 54 min of 60 min"), sits in your completed recordings folder like any other, and can be played, downloaded or retried. Retrying re-records the program from scratch and leaves the partial you already have alone.
+
+Commercial skip and re-encoding still run on an interrupted recording, and Plex is still told to refresh, so the file lands in your library the same way a full recording does.
+
+Nothing is kept if there is nothing worth keeping: if the file is empty, or the app cannot open it at all, it is deleted and the recording is marked Failed exactly as before.
+
+**What changed:** A seventh download status, `interrupted`, was added. When the downloader exhausts its retries it now probes the partial file with ffprobe and only deletes it when ffprobe cannot open it. The reason the capture stopped is stored in a new `interruption_reason` column so it can sit alongside an existing "Completed with warnings" integrity note without either message overwriting the other. Post-processing, the move to the completed folder and restart recovery all preserve the interrupted status instead of promoting it to completed.
+
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
 **What you would notice:** If you picked a specific GPU under **Settings > Post-Processing** and also have Commercial Skip enabled, Mustarrd now actually encodes on the GPU you chose. Previously your choice was used for an ordinary recording but silently dropped whenever commercial detection ran, and the encode fell back to whichever graphics card the app found first. On a machine with onboard graphics alongside a discrete card, that could mean every recording with commercial skip was processed on the weaker of the two, with nothing in the interface to tell you.
