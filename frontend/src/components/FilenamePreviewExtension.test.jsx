@@ -12,6 +12,9 @@ vi.mock('../api', () => ({
   schedulesApi: {
     create: vi.fn(),
   },
+  recordingRulesApi: {
+    create: vi.fn(),
+  },
   settingsApi: {
     getPublic: vi.fn().mockResolvedValue({
       default_pre_padding_minutes: 1,
@@ -59,5 +62,6 @@ describe('recording filename previews', () => {
     )
 
     expect(await screen.findByDisplayValue('TV.ts/Breaking Bad/Episode')).toBeTruthy()
+    expect(screen.getByLabelText('Recurring recording retention')).toHaveValue('Keep recordings forever')
   })
 })

@@ -147,6 +147,14 @@ export const schedulesApi = {
   importDoc: (doc) => request('/schedules/import', { method: 'POST', body: doc }),
 }
 
+// Recurring recording rules
+export const recordingRulesApi = {
+  list: () => request('/recording-rules'),
+  create: (data) => request('/recording-rules', { method: 'POST', body: data }),
+  update: (id, data) => request(`/recording-rules/${id}`, { method: 'PATCH', body: data }),
+  delete: (id) => request(`/recording-rules/${id}`, { method: 'DELETE' }),
+}
+
 // Time slots (hand-picked channel + start + end, no EPG program)
 export const timeSlotsApi = {
   create: (data) => request('/time-slots', { method: 'POST', body: data }),

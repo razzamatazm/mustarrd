@@ -96,6 +96,27 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "scheduled_recordings", "provider_stop"):
         await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN provider_stop VARCHAR(255)"))
 
+    if not await _column_exists(conn, "scheduled_recordings", "recording_rule_id"):
+        await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN recording_rule_id INTEGER"))
+
+    if not await _column_exists(conn, "scheduled_recordings", "rule_airing_key"):
+        await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN rule_airing_key VARCHAR(255)"))
+
+    if not await _column_exists(conn, "recording_rules", "delete_after_days"):
+        await conn.execute(text("ALTER TABLE recording_rules ADD COLUMN delete_after_days INTEGER"))
+
+    if not await _column_exists(conn, "recording_rules", "match_mode"):
+        await conn.execute(
+            text("ALTER TABLE recording_rules ADD COLUMN match_mode VARCHAR(32) DEFAULT 'exact'")
+        )
+
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_scheduled_recordings_rule_airing_key "
+            "ON scheduled_recordings (rule_airing_key)"
+        )
+    )
+
     if not await _column_exists(conn, "downloads", "start_timestamp"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN start_timestamp INTEGER DEFAULT 0"))
 
