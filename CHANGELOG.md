@@ -14,6 +14,14 @@ Optionally, a rule can delete its recordings a set number of days after they fin
 
 **What changed:** A new `recording_rules` table and `/api/recording-rules` endpoints back the feature. Rule evaluation builds a stable per-airing key from the provider's channel and unpadded start/stop times and enforces it with a unique index, so re-running evaluation on every refresh cannot create duplicates. The day-of-week test uses the guide's wall clock (UTC plus the account guide offset plus the global EPG offset). Retention is gated behind a global setting, runs at most once per day per account, and preserves the `Download` row.
 
+### Added: Configurable retry delays and steadier FFmpeg post-processing
+
+**What you would notice:** The Scheduled page's **Configure retry delays** control lets you set your own sequence of wait times between automatic retries of a failed recording (default 5, 10, 15, then 60 minutes). The number of delays is the number of retries. When a fast remux has to fall back to a full re-encode, the status message now names the encoder doing the work (CPU, VideoToolbox, NVENC, AMF, or VA-API) instead of a generic note.
+
+Recordings from providers whose streams contain timestamp resets no longer show a stuck progress bar or get their commercial cuts placed far past the end of the show. FFprobe sometimes reports such a one-hour file as roughly 26 hours long; Mustarrd now falls back to the scheduled programme length when the probed duration is missing or implausible.
+
+**What changed:** `auto_retry_backoff_minutes` replaces the fixed `AUTO_RETRY_MAX_ATTEMPTS` / `AUTO_RETRY_MIN_INTERVAL_MINUTES` constants, stored as CSV and validated on every write. `post_processor._resolve_duration` compares the FFprobe duration against the scheduled length and substitutes the latter when the probe is absent or more than roughly double the expectation.
+
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
 **What you would notice:** If you picked a specific GPU under **Settings > Post-Processing** and also have Commercial Skip enabled, Mustarrd now actually encodes on the GPU you chose. Previously your choice was used for an ordinary recording but silently dropped whenever commercial detection ran, and the encode fell back to whichever graphics card the app found first. On a machine with onboard graphics alongside a discrete card, that could mean every recording with commercial skip was processed on the weaker of the two, with nothing in the interface to tell you.
