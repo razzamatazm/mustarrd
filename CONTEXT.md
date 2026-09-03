@@ -116,3 +116,23 @@ or has failed. Costs the server real work, so it is entered by fallback rather
 than by default.
 _Avoid_: transcoded preview (it usually only converts the audio), compatibility
 mode (that's the user-facing wording, not the concept), server-side preview
+
+### Integrations
+
+**Recording event**:
+Something that happened to one recording, announced once from a single seam so
+anything that wants to react does not have to find every place a status is
+written. Five of them: **recording started**, **recording completed**,
+**recording failed**, **recording cancelled**, and **post-processing
+completed**. An event is an announcement, not a request: nothing it reaches can
+change, delay or fail the recording it describes.
+_Avoid_: status change, notification (that's a message shown to a person), hook
+
+**Webhook**:
+An address the user gives Mustarrd so it can POST a JSON message there when a
+particular recording event happens. One address per event; leaving it empty
+turns that one off. A webhook is fire-and-forget - it is not retried, and a
+receiver that is down, slow or unhappy is logged and forgotten. Usually points
+at something on the same network, such as a Plex or Jellyfin library refresh.
+_Avoid_: callback, hook, script (Mustarrd never runs a user-supplied script),
+integration
