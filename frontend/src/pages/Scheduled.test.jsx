@@ -79,7 +79,10 @@ async function renderScheduled({ schedules = [], rules = [], isAdmin = true, ini
   recordingRulesApi.list.mockResolvedValue(rules)
   accountsApi.publicList.mockResolvedValue([{ id: 1, name: 'Main', guide_offset_hours: 0 }])
   authApi.status.mockResolvedValue({ is_admin: isAdmin })
-  settingsApi.get.mockResolvedValue({ auto_retry_failed_downloads: true })
+  settingsApi.get.mockResolvedValue({
+    auto_retry_failed_downloads: true,
+    auto_retry_backoff_minutes: [5, 10, 15, 60],
+  })
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
@@ -147,6 +150,27 @@ describe('Scheduled page', () => {
   it('shows the auto-retry switch to admins only', async () => {
     await renderScheduled({ schedules: [], isAdmin: false })
     expect(screen.queryByLabelText('Auto-retry failed downloads')).not.toBeInTheDocument()
+  })
+
+  it('edits the automatic retry backoff schedule', async () => {
+    const { settingsApi } = await import('../api')
+    settingsApi.update.mockResolvedValue({
+      auto_retry_failed_downloads: true,
+      auto_retry_backoff_minutes: [2, 8, 30],
+    })
+    await renderScheduled({ schedules: [] })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure retry delays' }))
+    const input = await screen.findByLabelText('Retry delays (minutes)')
+    expect(input).toHaveValue('5, 10, 15, 60')
+    fireEvent.change(input, { target: { value: '2, 8, 30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save retry schedule' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalledWith({
+        auto_retry_backoff_minutes: [2, 8, 30],
+      })
+    })
   })
 
   it('lists, disables, and deletes recurring recording rules', async () => {

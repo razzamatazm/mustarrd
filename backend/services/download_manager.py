@@ -1059,7 +1059,8 @@ class DownloadManager:
                     original_path,
                     download_id,
                     session,
-                    settings
+                    settings,
+                    expected_duration_seconds=max(int(download.duration_minutes or 0), 0) * 60 or None,
                 )
 
                 final_path = self._select_final_path(original_path, final_path)
@@ -1953,7 +1954,8 @@ class DownloadManager:
         file_path: str,
         download_id: int,
         session: AsyncSession,
-        settings: Optional[AppSettings] = None
+        settings: Optional[AppSettings] = None,
+        expected_duration_seconds: Optional[float] = None,
     ) -> tuple[str, list[str]]:
         """Run post-processing on downloaded file (transcoding, commercial removal)."""
         from services.post_processor import post_processor, OutputFormat, HardwareAccel
@@ -2028,6 +2030,7 @@ class DownloadManager:
         transcode_progress: Optional[float] = None
         comskip_indeterminate = False
         transcode_indeterminate = False
+        remux_fell_back = False
 
         async def broadcast_processing(progress: float, message: Optional[str], indeterminate: bool = False):
             await self._update_processing(
@@ -2055,6 +2058,17 @@ class DownloadManager:
                 last_progress = p
                 transcode_progress = p
                 await broadcast_processing(p, current_message, indeterminate=transcode_indeterminate)
+
+        async def processing_status_callback(message: str):
+            nonlocal current_message, remux_fell_back
+            current_message = message
+            if message.startswith("Remux failed;"):
+                remux_fell_back = True
+            await broadcast_processing(
+                transcode_progress or 0.0,
+                current_message,
+                indeterminate=transcode_indeterminate,
+            )
 
         # log_callback defined above to also persist logs
 
@@ -2147,7 +2161,9 @@ class DownloadManager:
                         progress_callback=transcode_progress_callback,
                         log_callback=log_callback,
                         remux_only=remux_only,
-                        render_device=render_device
+                        render_device=render_device,
+                        expected_duration_seconds=expected_duration_seconds,
+                        status_callback=processing_status_callback,
                     )
                     commercials_removed = True
                     await log_callback(f"Commercial removal complete: {current_path}")
@@ -2183,9 +2199,16 @@ class DownloadManager:
                     log_callback=log_callback,
                     remove_original=settings.delete_original_after_transcode,
                     remux_only=remux_only,
-                    render_device=render_device
+                    render_device=render_device,
+                    expected_duration_seconds=expected_duration_seconds,
+                    status_callback=processing_status_callback,
                 )
-                await log_callback(f"{'Remux' if remux_only else 'Transcode'} complete: {current_path}")
+                completed_operation = (
+                    "Re-encode" if remux_fell_back
+                    else "Remux" if remux_only
+                    else "Transcode"
+                )
+                await log_callback(f"{completed_operation} complete: {current_path}")
             except Exception as e:
                 await log_callback(f"Transcode error: {e}")
                 warnings.append(f"Transcode failed: {e}")

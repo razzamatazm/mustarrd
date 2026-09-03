@@ -140,6 +140,18 @@ class SettingsUpdate(BaseModel):
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
     recording_rule_retention_enabled: Optional[bool] = None
+    auto_retry_backoff_minutes: Optional[list[int]] = None
+
+    @field_validator("auto_retry_backoff_minutes")
+    @classmethod
+    def _validate_auto_retry_backoff(cls, value: Optional[list[int]]) -> Optional[list[int]]:
+        if value is None:
+            return None
+        if not 1 <= len(value) <= 10:
+            raise ValueError("Retry backoff must contain between 1 and 10 delays")
+        if any(delay < 1 or delay > 1440 for delay in value):
+            raise ValueError("Each retry delay must be between 1 and 1440 minutes")
+        return value
 
 
 NON_NULLABLE_FIELDS = {
@@ -181,6 +193,7 @@ NON_NULLABLE_FIELDS = {
     "launch_on_startup",
     "auto_retry_failed_downloads",
     "recording_rule_retention_enabled",
+    "auto_retry_backoff_minutes",
 }
 
 
@@ -330,6 +343,8 @@ async def update_settings(
             value = max(1, min(16, int(value)))
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
+        if field == "auto_retry_backoff_minutes" and value is not None:
+            value = ",".join(str(delay) for delay in value)
         setattr(settings, field, value)
 
     # Enforce ComSkip constraint on the final stored state: the cut needs

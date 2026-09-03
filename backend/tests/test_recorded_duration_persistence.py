@@ -130,7 +130,7 @@ class RecordedDurationPostProcessPathTests(unittest.TestCase):
             mock_download.error_message = None
             mock_download.recorded_duration_seconds = None
 
-            async def fake_post_process(path, dl_id, ses, settings):
+            async def fake_post_process(path, dl_id, ses, settings, **kwargs):
                 return path, []
 
             with (

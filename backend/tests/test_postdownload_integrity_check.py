@@ -260,7 +260,7 @@ class IntegrityCheckPostProcessPathTests(unittest.TestCase):
             mock_download.progress = 0.0
             mock_download.error_message = None
 
-            async def fake_post_process(path, dl_id, ses, settings):
+            async def fake_post_process(path, dl_id, ses, settings, **kwargs):
                 return path, []
 
             probe = AsyncMock(return_value={
