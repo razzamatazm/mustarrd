@@ -26,6 +26,11 @@ from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from services.webhook_dispatcher import (
+    WEBHOOK_SETTING_FIELDS,
+    WebhookUrlError,
+    validate_webhook_url,
+)
 
 
 router = APIRouter()
@@ -144,8 +149,27 @@ class SettingsUpdate(BaseModel):
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
 
+    # Webhooks: one URL per recording lifecycle event. Empty clears it.
+    webhook_url_recording_started: Optional[str] = None
+    webhook_url_recording_completed: Optional[str] = None
+    webhook_url_recording_failed: Optional[str] = None
+    webhook_url_recording_cancelled: Optional[str] = None
+    webhook_url_postprocessing_completed: Optional[str] = None
+
+    @field_validator(*WEBHOOK_SETTING_FIELDS)
+    @classmethod
+    def _validate_webhook_url(cls, value: Optional[str]) -> Optional[str]:
+        """Empty turns the webhook off; anything else must be a URL we will send to."""
+        if value is None:
+            return None
+        try:
+            return validate_webhook_url(value)
+        except WebhookUrlError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 NON_NULLABLE_FIELDS = {
+    *WEBHOOK_SETTING_FIELDS,
     "download_folder",
     "completed_folder",
     "tv_template",
