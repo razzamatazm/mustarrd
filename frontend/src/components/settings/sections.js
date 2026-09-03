@@ -10,6 +10,7 @@ import {
   IconServer,
   IconUsers,
   IconWand,
+  IconWebhook,
 } from '@tabler/icons-react'
 
 // The settings IA: 3 groups, order matters.
@@ -20,6 +21,7 @@ export const SECTION_GROUPS = [
       { id: 'accounts', label: 'Accounts', icon: IconServer },
       { id: 'plex', label: 'Plex Integration', icon: IconDeviceTv },
       { id: 'users', label: 'Users', icon: IconUsers },
+      { id: 'webhooks', label: 'Webhooks', icon: IconWebhook },
     ],
   },
   {
@@ -85,4 +87,9 @@ export const SEARCH_INDEX = [
   { label: 'Theme (dark / light)', section: 'appearance', kw: 'mode color' },
   { label: 'Admin password', section: 'security', kw: 'change credentials login' },
   { label: 'Application logs', section: 'logs', kw: 'errors warnings activity debug' },
+  { label: 'Recording started webhook', section: 'webhooks', kw: 'webhook notify http post json event start' },
+  { label: 'Recording finished webhook', section: 'webhooks', kw: 'webhook notify http post json event completed done plex jellyfin scan' },
+  { label: 'Recording failed webhook', section: 'webhooks', kw: 'webhook notify http post json event error alert' },
+  { label: 'Recording cancelled webhook', section: 'webhooks', kw: 'webhook notify http post json event stopped' },
+  { label: 'Processing finished webhook', section: 'webhooks', kw: 'webhook notify http post json event postprocessing comskip transcode plex jellyfin scan' },
 ]

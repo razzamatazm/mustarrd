@@ -171,6 +171,23 @@ async def _apply_lightweight_migrations(conn) -> None:
                 text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_spec}")
             )
 
+    # One webhook URL per recording lifecycle event; empty means off.
+    webhook_url_columns = (
+        "webhook_url_recording_started",
+        "webhook_url_recording_completed",
+        "webhook_url_recording_failed",
+        "webhook_url_recording_cancelled",
+        "webhook_url_postprocessing_completed",
+    )
+    for column_name in webhook_url_columns:
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(
+                    f"ALTER TABLE app_settings ADD COLUMN {column_name} "
+                    "VARCHAR(1000) DEFAULT ''"
+                )
+            )
+
     if not await _column_exists(conn, "app_settings", "vaapi_render_device"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN vaapi_render_device VARCHAR(255) DEFAULT ''")

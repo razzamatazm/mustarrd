@@ -6,6 +6,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-09-04
 
+### Added: Mustarrd can now tell other apps when a recording happens
+
+**What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
+
+**What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
+
 ### Fixed: A brief database hiccup no longer loses a scheduled recording
 
 **What you would notice:** If the database was momentarily busy at the exact moment a scheduled recording was due to start, that recording used to be marked Failed straight away with a cryptic technical message, and it was never tried again even though the programme was still available. Now Mustarrd retries within a second or so, and if it still cannot start, the recording stays scheduled with a note saying it will retry, so the next check picks it up. Recordings that fail for a real reason (the program cannot be built, the provider refuses it) still fail immediately, and the reason now reads as a sentence instead of a raw error.
