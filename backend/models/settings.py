@@ -84,6 +84,8 @@ class AppSettings(Base):
     comskip_connect_blocks_with_logo: Mapped[bool] = mapped_column(Boolean, default=True)
     comskip_dynamic_ticker_tape: Mapped[bool] = mapped_column(Boolean, default=False)
     comskip_thread_count: Mapped[int] = mapped_column(Integer, default=1)
+    # none | hwassist | nvidia - how Comskip decodes video while detecting commercials
+    comskip_hw_decode_mode: Mapped[str] = mapped_column(String(20), default="none")
     admin_password_hash: Mapped[str | None] = mapped_column(String(500), nullable=True)
     admin_username_bootstrap_required: Mapped[bool] = mapped_column(Boolean, default=False)
     onboarding_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -135,6 +137,7 @@ class AppSettings(Base):
             "comskip_connect_blocks_with_logo": self.comskip_connect_blocks_with_logo,
             "comskip_dynamic_ticker_tape": self.comskip_dynamic_ticker_tape,
             "comskip_thread_count": self.comskip_thread_count,
+            "comskip_hw_decode_mode": self.comskip_hw_decode_mode or "none",
             "admin_username_bootstrap_required": self.admin_username_bootstrap_required,
             "epg_offset_minutes": self.epg_offset_minutes,
             "show_future_programs": self.show_future_programs,

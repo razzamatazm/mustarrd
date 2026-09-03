@@ -17,6 +17,45 @@ from services.process_runner import ProcessRunner
 logger = logging.getLogger(__name__)
 
 
+# Comskip hardware-decode modes. The fancybits Comskip build registers exactly
+# two relevant options: --hwassist (generic hardware assisted decoding) and
+# --cuvid (NVIDIA). There is deliberately no Intel Quick Sync specific mode.
+COMSKIP_HW_DECODE_FLAGS: Dict[str, Optional[str]] = {
+    "none": None,
+    "hwassist": "--hwassist",
+    "nvidia": "--cuvid",
+}
+
+COMSKIP_HW_DECODE_MODES = (
+    {
+        "id": "none",
+        "name": "None (software)",
+        "description": "Comskip decodes on the CPU. Always works.",
+    },
+    {
+        "id": "hwassist",
+        "name": "Hardware assist",
+        "description": "Generic hardware assisted decoding (Intel, AMD, VA-API).",
+    },
+    {
+        "id": "nvidia",
+        "name": "NVIDIA (CUVID)",
+        "description": "NVIDIA video decoder, for NVIDIA GPUs.",
+    },
+)
+
+
+def normalize_comskip_hw_decode_mode(mode: Optional[str]) -> str:
+    """Coerce anything unrecognised to 'none' rather than failing."""
+    candidate = (mode or "").strip().lower()
+    return candidate if candidate in COMSKIP_HW_DECODE_FLAGS else "none"
+
+
+def comskip_hw_decode_flag(mode: Optional[str]) -> Optional[str]:
+    """Translate a stored mode into the Comskip CLI flag, or None."""
+    return COMSKIP_HW_DECODE_FLAGS[normalize_comskip_hw_decode_mode(mode)]
+
+
 def _is_no_commercials_result(returncode: int, output: str) -> bool:
     return (
         returncode == 1
@@ -527,6 +566,36 @@ class PostProcessor:
             })
 
         return available
+
+    def get_comskip_hw_decode_modes(self) -> List[Dict]:
+        """Best-effort availability for the Comskip hardware-decode modes.
+
+        Reuses the encoder probe: Comskip has no way to report its own decoder
+        support, so an NVIDIA or VA-API capable FFmpeg stack is taken as a hint
+        that the matching Comskip decoder is worth offering. Unavailable modes
+        are still listed (shown disabled in Settings) rather than hidden, and
+        picking one is never fatal - detection falls back to software decode.
+        """
+        available_ids = {
+            accel.get("id")
+            for accel in self.get_available_hardware_accels()
+            if accel.get("available")
+        }
+        availability = {
+            "none": True,
+            "hwassist": bool(
+                available_ids & {
+                    HardwareAccel.VAAPI.value,
+                    HardwareAccel.AMD.value,
+                    HardwareAccel.APPLE_SILICON.value,
+                }
+            ),
+            "nvidia": HardwareAccel.NVIDIA.value in available_ids,
+        }
+        return [
+            {**mode, "available": availability[mode["id"]]}
+            for mode in COMSKIP_HW_DECODE_MODES
+        ]
 
     def resolve_hw_accel(self, hw_accel: HardwareAccel) -> tuple[HardwareAccel, Optional[str]]:
         """Fall back to CPU when the selected hardware encoder is unavailable.
@@ -1118,7 +1187,8 @@ class PostProcessor:
         input_path: str,
         ini_path: Optional[str] = None,
         log_callback: Optional[Callable[[str], None]] = None,
-        progress_callback: Optional[Callable[[float], None]] = None
+        progress_callback: Optional[Callable[[float], None]] = None,
+        hw_decode_mode: Optional[str] = None
     ) -> Optional[str]:
         """
         Run Comskip to detect commercials and generate EDL file.
@@ -1127,6 +1197,10 @@ class PostProcessor:
             input_path: Path to video file
             ini_path: Optional path to comskip.ini config file
             progress_callback: Optional callback for progress updates
+            hw_decode_mode: Hardware decode mode ('none', 'hwassist', 'nvidia').
+                Unknown values are treated as 'none'. If Comskip fails while a
+                hardware flag is set, it is retried once with software decode so
+                an unsupported flag can never lose a recording.
 
         Returns:
             Path to the EDL file, or None if no commercials detected
@@ -1137,8 +1211,17 @@ class PostProcessor:
         input_file = Path(input_path)
         output_dir = input_file.parent
 
-        async def run_comskip_once(source_path: str, progress_prefix: str = "Comskip") -> tuple[int, str]:
+        requested_hw_mode = normalize_comskip_hw_decode_mode(hw_decode_mode)
+        hw_flag = comskip_hw_decode_flag(requested_hw_mode)
+
+        async def run_comskip_once(
+            source_path: str,
+            progress_prefix: str = "Comskip",
+            hardware_flag: Optional[str] = None
+        ) -> tuple[int, str]:
             cmd = [self._comskip_path]
+            if hardware_flag:
+                cmd.append(hardware_flag)
             if ini_path:
                 ini_file = Path(ini_path)
                 if not ini_file.is_file():
@@ -1159,9 +1242,14 @@ class PostProcessor:
                 str(source_path)
             ])
 
+            mode_note = (
+                f" [hardware decode: {requested_hw_mode}]"
+                if hardware_flag
+                else " [hardware decode: none]"
+            )
             await self._notify_log(
                 log_callback,
-                f"{progress_prefix} cmd: {' '.join(str(c) for c in cmd)}"
+                f"{progress_prefix} cmd:{mode_note} {' '.join(str(c) for c in cmd)}"
             )
 
             process = await asyncio.create_subprocess_exec(
@@ -1250,7 +1338,29 @@ class PostProcessor:
             prep_returncode = prep_process.returncode if prep_process.returncode is not None else -1
             return prep_returncode, prep_stderr or b""
 
-        returncode, combined_output = await run_comskip_once(input_path)
+        returncode, combined_output = await run_comskip_once(
+            input_path, hardware_flag=hw_flag
+        )
+
+        # Safety net: a hardware flag this build or machine does not support must
+        # never cost a recording. One silent retry on software decode first.
+        if (
+            hw_flag
+            and returncode != 0
+            and not _is_no_commercials_result(returncode, combined_output)
+        ):
+            await self._notify_log(
+                log_callback,
+                f"Comskip failed (exit {returncode}) with hardware decode "
+                f"'{requested_hw_mode}' ({hw_flag}); retrying with software decode."
+            )
+            hw_flag = None
+            returncode, combined_output = await run_comskip_once(
+                input_path,
+                progress_prefix="Comskip retry (software decode)",
+                hardware_flag=None
+            )
+
         active_input_file = input_file
         temp_probe_file: Optional[Path] = None
 

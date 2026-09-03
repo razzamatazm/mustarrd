@@ -1667,6 +1667,7 @@ export default function Settings() {
       formData={formData}
       onChange={handleChange}
       onNavigateToProcessing={() => selectSection('processing')}
+      hwDecodeModes={toolsStatus?.comskip_hw_decode_modes}
       onResetDefaults={() => {
         applyChanges({ ...COMSKIP_DEFAULTS })
       }}

@@ -25,7 +25,7 @@ from models import AppSettings, XtreamAccount
 from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
-from services.post_processor import post_processor
+from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
 
 
 router = APIRouter()
@@ -135,6 +135,9 @@ class SettingsUpdate(BaseModel):
     comskip_dynamic_ticker_tape: Optional[bool] = None
     # Clamped to 1..16 in update_settings rather than rejected.
     comskip_thread_count: Optional[int] = None
+    # Anything unrecognised is coerced to "none" in update_settings rather than
+    # rejected, so a stale client can never 500 the settings save.
+    comskip_hw_decode_mode: Optional[str] = None
     epg_offset_minutes: Optional[int] = None
     show_future_programs: Optional[bool] = None
     launch_on_startup: Optional[bool] = None
@@ -175,6 +178,7 @@ NON_NULLABLE_FIELDS = {
     "comskip_connect_blocks_with_logo",
     "comskip_dynamic_ticker_tape",
     "comskip_thread_count",
+    "comskip_hw_decode_mode",
     "epg_offset_minutes",
     "show_future_programs",
     "launch_on_startup",
@@ -326,6 +330,8 @@ async def update_settings(
             value = int(value)
         if field == "comskip_thread_count" and value is not None:
             value = max(1, min(16, int(value)))
+        if field == "comskip_hw_decode_mode" and value is not None:
+            value = normalize_comskip_hw_decode_mode(value)
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
         setattr(settings, field, value)
@@ -497,6 +503,7 @@ async def get_tools_status(
         },
         "transcode_formats": ["ts", "mp4", "mkv"],
         "hardware_accels": post_processor.get_available_hardware_accels(),
+        "comskip_hw_decode_modes": post_processor.get_comskip_hw_decode_modes(),
         "vaapi": vaapi_status,
     }
 

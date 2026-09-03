@@ -236,6 +236,7 @@ describe('Settings page', () => {
       comskip_use_custom_ini: false,
       comskip_custom_ini_path: null,
       comskip_connect_blocks_with_logo: true,
+      comskip_hw_decode_mode: 'none',
     })
   })
 

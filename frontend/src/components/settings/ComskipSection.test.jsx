@@ -132,6 +132,42 @@ describe('ComskipSection', () => {
     expect(onChange).toHaveBeenCalledWith('comskip_connect_blocks_with_logo', false)
   })
 
+  it('renders the hardware decode picker defaulting to none', () => {
+    renderSection()
+
+    expect(screen.getByRole('textbox', { name: 'Hardware decoding' })).toHaveValue('None (software)')
+  })
+
+  it('persists the chosen hardware decode mode', async () => {
+    const { onChange } = renderSection({}, {
+      hwDecodeModes: [
+        { id: 'none', name: 'None (software)', available: true },
+        { id: 'hwassist', name: 'Hardware assist', available: true },
+        { id: 'nvidia', name: 'NVIDIA (CUVID)', available: true },
+      ],
+    })
+
+    fireEvent.click(screen.getByRole('textbox', { name: 'Hardware decoding' }))
+    fireEvent.click(await screen.findByText('NVIDIA (CUVID)'))
+
+    expect(onChange).toHaveBeenCalledWith('comskip_hw_decode_mode', 'nvidia')
+  })
+
+  it('shows unavailable hardware decode modes rather than hiding them', async () => {
+    renderSection({}, {
+      hwDecodeModes: [
+        { id: 'none', name: 'None (software)', available: true },
+        { id: 'hwassist', name: 'Hardware assist', available: false },
+        { id: 'nvidia', name: 'NVIDIA (CUVID)', available: false },
+      ],
+    })
+
+    fireEvent.click(screen.getByRole('textbox', { name: 'Hardware decoding' }))
+
+    expect(await screen.findByText('Hardware assist (not detected)')).toBeInTheDocument()
+    expect(screen.getByText('NVIDIA (CUVID) (not detected)')).toBeInTheDocument()
+  })
+
   it('warns that multiple processing threads can change detection', () => {
     renderSection({ comskip_thread_count: 4 })
 

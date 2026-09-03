@@ -26,6 +26,16 @@ Nothing is kept if there is nothing worth keeping: if the file is empty, or the 
 
 **What changed:** A seventh download status, `interrupted`, was added. When the downloader exhausts its retries it now probes the partial file with ffprobe and only deletes it when ffprobe cannot open it. The reason the capture stopped is stored in a new `interruption_reason` column so it can sit alongside an existing "Completed with warnings" integrity note without either message overwriting the other. Post-processing, the move to the completed folder and restart recovery all preserve the interrupted status instead of promoting it to completed. Retrying an interrupted recording rewinds its output path to a fresh `.ts` capture in the download folder, so the new attempt is neither appended to the post-processed file nor mistaken for one that has already been converted.
 
+### Added: Comskip can use your GPU to speed up commercial detection
+
+**What you would notice:** **Settings > Comskip > Advanced** has a new **Hardware decoding** option. Leave it on **None (software)** and nothing changes. Pick **Hardware assist** or **NVIDIA (CUVID)** and Mustarrd asks Comskip to decode video on the graphics hardware instead of the CPU, which can cut a noticeable chunk off detection time on long recordings.
+
+Options your machine does not appear to support are still listed, greyed with "(not detected)", because Comskip cannot reliably say up front which decoders it has. Choosing one is safe either way: if Comskip fails with the hardware option, detection re-runs automatically on the CPU and the recording still completes. The download log shows which mode was used and says so when it falls back.
+
+There is deliberately no separate Intel Quick Sync option. Hardware assist covers Intel and other non-NVIDIA hardware.
+
+**What changed:** A new `comskip_hw_decode_mode` setting (default `none`) adds `--hwassist` or `--cuvid` to the Comskip command line. A non-zero exit with a hardware flag present triggers exactly one retry without it before the failure is treated as real. Existing installs migrate to `none`.
+
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
 **What you would notice:** If you picked a specific GPU under **Settings > Post-Processing** and also have Commercial Skip enabled, Mustarrd now actually encodes on the GPU you chose. Previously your choice was used for an ordinary recording but silently dropped whenever commercial detection ran, and the encode fell back to whichever graphics card the app found first. On a machine with onboard graphics alongside a discrete card, that could mean every recording with commercial skip was processed on the weaker of the two, with nothing in the interface to tell you.

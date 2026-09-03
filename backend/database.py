@@ -155,6 +155,7 @@ async def _apply_lightweight_migrations(conn) -> None:
         ("comskip_connect_blocks_with_logo", "BOOLEAN DEFAULT 1"),
         ("comskip_dynamic_ticker_tape", "BOOLEAN DEFAULT 0"),
         ("comskip_thread_count", "INTEGER DEFAULT 1"),
+        ("comskip_hw_decode_mode", "VARCHAR(20) DEFAULT 'none'"),
     )
     for column_name, column_spec in comskip_tunable_columns:
         if not await _column_exists(conn, "app_settings", column_name):
