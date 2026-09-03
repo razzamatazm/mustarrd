@@ -202,6 +202,15 @@ async def _apply_lightweight_migrations(conn) -> None:
             text("ALTER TABLE app_settings ADD COLUMN comskip_cut BOOLEAN DEFAULT 1")
         )
 
+    # Guide metadata captured when a recording is queued, for the NFO sidecar.
+    if not await _column_exists(conn, "downloads", "guide_metadata_json"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN guide_metadata_json TEXT"))
+
+    if not await _column_exists(conn, "app_settings", "write_nfo_files"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN write_nfo_files BOOLEAN DEFAULT 1")
+        )
+
 
 async def _carry_over_legacy_comskip_ini(conn) -> None:
     """Preserve a pre-editor custom comskip INI choice.

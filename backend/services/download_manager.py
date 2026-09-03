@@ -18,6 +18,7 @@ from database import async_session_maker
 from services.log_stream import backend_log_stream
 from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
+from services import nfo_writer
 from services.plex_service import plex_service
 from services.xtream_client import (
     other_timeshift_style,
@@ -619,6 +620,7 @@ class DownloadManager:
                         else:
                             completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
+                            await self._write_nfo_sidecar(download, completed_path, settings)
                             terminal_status = self._terminal_status_for(download)
                             download.status = terminal_status
                             download.progress = 100.0
@@ -654,6 +656,7 @@ class DownloadManager:
                         and self._path_is_under(str(input_file), completed_folder)
                         and not (folders_equal and self._needs_post_processing(download, settings))
                     ):
+                        await self._write_nfo_sidecar(download, str(input_file), settings)
                         terminal_status = self._terminal_status_for(download)
                         download.status = terminal_status
                         download.progress = 100.0
@@ -679,6 +682,7 @@ class DownloadManager:
                         else:
                             completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
+                            await self._write_nfo_sidecar(download, completed_path, settings)
                             terminal_status = self._terminal_status_for(download)
                             download.status = terminal_status
                             download.progress = 100.0
@@ -694,6 +698,7 @@ class DownloadManager:
                     if processed_found:
                         completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
                         download.output_path = completed_path
+                        await self._write_nfo_sidecar(download, completed_path, settings)
                         terminal_status = self._terminal_status_for(download)
                         download.status = terminal_status
                         download.progress = 100.0
@@ -878,6 +883,7 @@ class DownloadManager:
                 moved_completed_path = completed_path
 
                 await self._store_recorded_duration(download, completed_path)
+                await self._write_nfo_sidecar(download, completed_path, settings)
                 integrity_warning = await self._integrity_check_warning(completed_path, settings)
                 terminal_status = self._terminal_status_for(download)
                 download.status = terminal_status
@@ -1066,6 +1072,7 @@ class DownloadManager:
                         moved_completed_path = completed_path
                         download.output_path = completed_path
                         await self._store_recorded_duration(download, completed_path)
+                        await self._write_nfo_sidecar(download, completed_path, settings)
                         integrity_warning = await self._integrity_check_warning(completed_path, settings)
                         terminal_status = self._terminal_status_for(download)
                         download.status = terminal_status
@@ -1088,6 +1095,7 @@ class DownloadManager:
                     moved_completed_path = completed_path
                     download.output_path = completed_path
                     await self._store_recorded_duration(download, completed_path)
+                    await self._write_nfo_sidecar(download, completed_path, settings)
                     integrity_warning = await self._integrity_check_warning(completed_path, settings)
                     terminal_status = self._terminal_status_for(download)
                     download.status = terminal_status
@@ -1124,6 +1132,7 @@ class DownloadManager:
                 )
                 download.output_path = completed_path
                 await self._store_recorded_duration(download, completed_path)
+                await self._write_nfo_sidecar(download, completed_path, settings)
                 integrity_warning = await self._integrity_check_warning(completed_path, settings)
                 if integrity_warning:
                     warnings.append(integrity_warning)
@@ -1301,6 +1310,32 @@ class DownloadManager:
         if duration and duration > 0:
             download.recorded_duration_seconds = int(round(duration))
 
+    async def _write_nfo_sidecar(
+        self,
+        download: Download,
+        file_path: str,
+        settings: Optional[AppSettings],
+    ) -> None:
+        """Write the Kodi .nfo sidecar next to a finished recording.
+
+        Best-effort, like the integrity check: an unwritable completed folder
+        must not turn a finished recording into a failed one, so every failure
+        is logged and swallowed. Disabled via AppSettings.write_nfo_files
+        (default on). VOD downloads are skipped - their rows carry no guide
+        metadata to write.
+        """
+        try:
+            if settings is not None and settings.write_nfo_files is False:
+                return
+            if getattr(download, "is_vod", False):
+                return
+            if not file_path:
+                return
+            details = nfo_writer.details_from_download(download)
+            await asyncio.to_thread(nfo_writer.write_sidecar, file_path, details)
+        except Exception as exc:
+            logger.warning("NFO sidecar step failed for %s: %s", file_path, exc)
+
     async def _integrity_check_warning(
         self,
         file_path: str,
@@ -1470,6 +1505,7 @@ class DownloadManager:
         download.output_path = completed_path
 
         await self._store_recorded_duration(download, completed_path)
+        await self._write_nfo_sidecar(download, completed_path, settings)
         integrity_warning = await self._integrity_check_warning(completed_path, settings)
         download.status = DownloadStatus.INTERRUPTED.value
         if not download.completed_at:

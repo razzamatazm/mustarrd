@@ -116,6 +116,7 @@ class SettingsUpdate(BaseModel):
     delete_original_after_transcode: Optional[bool] = None
     remux_only: Optional[bool] = None
     integrity_check_enabled: Optional[bool] = None
+    write_nfo_files: Optional[bool] = None
     comskip_enabled: Optional[bool] = None
     comskip_cut: Optional[bool] = None
     comskip_path: Optional[str] = None
@@ -163,6 +164,7 @@ NON_NULLABLE_FIELDS = {
     "delete_original_after_transcode",
     "remux_only",
     "integrity_check_enabled",
+    "write_nfo_files",
     "comskip_enabled",
     "comskip_cut",
     "comskip_use_custom_ini",

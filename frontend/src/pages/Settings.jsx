@@ -1162,6 +1162,17 @@ export default function Settings() {
                 />
               </SettingRow>
             )}
+            <SettingRow
+              label="Write .nfo files"
+              description="Save a Kodi-style .nfo next to each finished recording so Plex and Jellyfin match it to the right show"
+            >
+              <Switch
+                size={switchSize}
+                aria-label="Write .nfo files"
+                checked={formData.write_nfo_files !== false}
+                onChange={(e) => handleChange('write_nfo_files', e.currentTarget.checked)}
+              />
+            </SettingRow>
           </Stack>
 
           {(formData.max_concurrent_post_processing ?? 1) > 1 && (

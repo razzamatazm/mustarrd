@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import json
 import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from guide_metadata import GuideMetadata
 from models import Download, DownloadStatus, AppSettings, XtreamAccount
 from services.account_credentials import resolve_account_password_with_migration
 from services.epg_service import epg_service
@@ -18,6 +20,34 @@ def _coerce_ts(value) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def capture_guide_metadata(program: dict) -> Optional[str]:
+    """Freeze the guide's metadata for this program as JSON.
+
+    Guide ingest overwrites and prunes epg_programs rows, so re-reading the
+    guide when post-processing finishes is lossy: the row may describe a
+    different program by then, or be gone. Anything downstream that needs the
+    program's structured metadata - the NFO sidecar, today - reads this
+    snapshot instead. Returns None when the guide told us nothing worth
+    keeping, so an empty snapshot is a null column rather than "{}".
+    """
+    payload = GuideMetadata.from_guide_entry(program or {}).to_api()
+    description = _clean_description(program)
+    if description:
+        payload["description"] = description
+    # Season 0 is a real season, so emptiness is not falsiness.
+    if not any(value is not None and value != [] and value != "" for value in payload.values()):
+        return None
+    return json.dumps(payload)
+
+
+def _clean_description(program: dict) -> Optional[str]:
+    for key in ("description", "plot", "desc"):
+        value = (program or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _parse_program_times(program: dict) -> tuple[datetime, datetime, int, datetime, datetime]:
@@ -208,4 +238,5 @@ async def build_download_from_program(
         status=DownloadStatus.PENDING.value,
         requested_by_user_id=requested_by_user_id,
         request_source=request_source,
+        guide_metadata_json=capture_guide_metadata(program),
     )

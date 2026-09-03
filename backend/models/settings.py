@@ -59,6 +59,10 @@ class AppSettings(Base):
     # "Completed with warnings" without failing the recording.
     integrity_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Write a Kodi-format .nfo sidecar next to each finished recording so Plex
+    # and Jellyfin match it against the right show.
+    write_nfo_files: Mapped[bool] = mapped_column(Boolean, default=True)
+
     comskip_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Cut vs Mark. True = Cut (physically remove commercials, the pre-existing
     # behaviour, forces a re-encode). False = Mark (detect only; write an EDL
@@ -119,6 +123,7 @@ class AppSettings(Base):
             "delete_original_after_transcode": self.delete_original_after_transcode,
             "remux_only": self.remux_only,
             "integrity_check_enabled": self.integrity_check_enabled,
+            "write_nfo_files": self.write_nfo_files,
             "comskip_enabled": self.comskip_enabled,
             "comskip_cut": self.comskip_cut,
             "comskip_path": self.comskip_path,

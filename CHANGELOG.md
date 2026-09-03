@@ -16,6 +16,16 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-09-03
 
+### Added: Recordings now come with a .nfo file so Plex and Jellyfin match them properly
+
+**What you would notice:** Every finished recording now gets a small `.nfo` file saved next to it, with the same name. Plex and Jellyfin read that file to work out what the recording actually is, so a show whose provider name is slightly off - "Detectorists S2" instead of "Detectorists" - stops landing in your library unmatched or attached to the wrong series. Where your guide supplies them, the file also carries the season and episode numbers, the episode title, the description, and the TMDB / TVDB / IMDb ids that pin the match exactly.
+
+The details are captured the moment you press record, so a guide refresh between the recording starting and finishing cannot scramble them.
+
+You can switch this off under **Settings > Post-Processing > Pipeline > Write .nfo files**. It is on by default. If a `.nfo` cannot be written - a read-only completed folder, say - the recording still finishes normally and the problem is logged.
+
+This covers catchup and scheduled recordings. Downloaded movies and series episodes from your provider's on-demand library do not get one yet.
+
 ### Added: Catchup works with providers that use the other URL format
 
 **What you would notice:** If your provider is one of the ones where every catchup recording failed, recordings should now simply work. Xtream providers hand out catchup links in one of two shapes, and Mustarrd only ever asked for the first one. It now tries the first shape, and if the provider turns it down, immediately asks again in the second shape and remembers the answer, so the rest of your recordings go straight to the one that works.

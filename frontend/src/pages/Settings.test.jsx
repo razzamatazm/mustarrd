@@ -323,6 +323,25 @@ describe('Settings page', () => {
     ).toBeInTheDocument()
   })
 
+  it('turns .nfo sidecars off and saves only that field', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Post-Processing'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Write .nfo files' })
+    // Defaults to on: the fixture has no write_nfo_files key at all.
+    expect(toggle).toBeChecked()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ write_nfo_files: false })
+  })
+
   it('maps the two-step format picker onto the transcode fields', async () => {
     renderSettings()
     await screen.findByText('Connections')
