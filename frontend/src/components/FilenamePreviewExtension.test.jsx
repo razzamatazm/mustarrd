@@ -62,6 +62,8 @@ describe('recording filename previews', () => {
     )
 
     expect(await screen.findByDisplayValue('TV.ts/Breaking Bad/Episode')).toBeTruthy()
-    expect(screen.getByLabelText('Recurring recording retention')).toHaveValue('Keep recordings forever')
+    // Mantine's Select renders a hidden input alongside the visible one, so
+    // match the visible field by its displayed value rather than the label.
+    expect(screen.getByDisplayValue('Keep recordings forever')).toBeInTheDocument()
   })
 })
