@@ -605,6 +605,21 @@ export default function Scheduled() {
     },
   })
 
+  const retentionMutation = useMutation({
+    mutationFn: (enabled) => settingsApi.update({ recording_rule_retention_enabled: enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (error) => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      notifications.show({
+        title: 'Error',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
   const importMutation = useMutation({
     mutationFn: (doc) => schedulesApi.importDoc(doc),
     onSuccess: (result) => {
@@ -991,6 +1006,22 @@ export default function Scheduled() {
         </Tabs.Panel>
 
         <Tabs.Panel value="rules" pt="md">
+          {isAdmin && (
+            <Tooltip
+              label="When on, recordings made by a rule with a retention period set are deleted that many days after they finish. The download stays in history; only the file is removed."
+              multiline
+              w={300}
+            >
+              <Switch
+                size="sm"
+                mb="md"
+                label="Enable rule-based retention cleanup"
+                checked={Boolean(appSettings?.recording_rule_retention_enabled)}
+                onChange={(event) => retentionMutation.mutate(event.currentTarget.checked)}
+                disabled={retentionMutation.isPending || !appSettings}
+              />
+            </Tooltip>
+          )}
           {rulesLoading ? (
             <Stack align="center" py="xl"><Loader /></Stack>
           ) : rulesError ? (

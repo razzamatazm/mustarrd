@@ -6,6 +6,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-09-03
 
+### Added: Recurring recording rules
+
+**What you would notice:** Opening a programme in Browse now offers **Record every airing** alongside the one-off options. A rule can match a show's title exactly, by "contains", or by a regular expression, and can be limited to certain days of the week and given its own padding. The new **Recurring** tab on the Scheduled page lists your rules and lets you enable, edit, or delete each one. Rules are checked when you create or edit them and after every guide refresh, so future episodes are scheduled automatically. If a rule is created while an episode is already on air, that airing is still captured as long as it is inside the channel's catchup window. The same episode is never scheduled twice, even across a guide refresh.
+
+Optionally, a rule can delete its recordings a set number of days after they finish. This is off by default: nothing is deleted until an admin turns on **Enable rule-based retention cleanup** on the Recurring tab. When it runs, only the media file is removed — the entry stays in your download history, marked with the date its file was deleted.
+
+**What changed:** A new `recording_rules` table and `/api/recording-rules` endpoints back the feature. Rule evaluation builds a stable per-airing key from the provider's channel and unpadded start/stop times and enforces it with a unique index, so re-running evaluation on every refresh cannot create duplicates. The day-of-week test uses the guide's wall clock (UTC plus the account guide offset plus the global EPG offset). Retention is gated behind a global setting, runs at most once per day per account, and preserves the `Download` row.
+
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
 **What you would notice:** If you picked a specific GPU under **Settings > Post-Processing** and also have Commercial Skip enabled, Mustarrd now actually encodes on the GPU you chose. Previously your choice was used for an ordinary recording but silently dropped whenever commercial detection ran, and the encode fell back to whichever graphics card the app found first. On a machine with onboard graphics alongside a discrete card, that could mean every recording with commercial skip was processed on the weaker of the two, with nothing in the interface to tell you.
