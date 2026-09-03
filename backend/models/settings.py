@@ -4,6 +4,9 @@ from database import Base
 from config import settings as app_settings
 
 
+DEFAULT_AUTO_RETRY_BACKOFF_MINUTES = (5, 10, 15, 60)
+
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
 
@@ -58,6 +61,12 @@ class AppSettings(Base):
     # rules. Off by default: a rule's delete_after_days does nothing until an
     # admin turns this on.
     recording_rule_retention_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Stored as CSV for SQLite compatibility. The settings API exposes this as
+    # a list of minute values and validates all writes.
+    auto_retry_backoff_minutes: Mapped[str] = mapped_column(
+        String(255),
+        default=",".join(str(value) for value in DEFAULT_AUTO_RETRY_BACKOFF_MINUTES),
+    )
 
     # Post-download ffprobe sanity check; flags suspect files as
     # "Completed with warnings" without failing the recording.
@@ -98,6 +107,20 @@ class AppSettings(Base):
         String(64),
         default="resource_connections_only",
     )
+
+    def get_auto_retry_backoff_minutes(self) -> list[int]:
+        """Return the stored retry sequence, falling back if it is invalid."""
+        try:
+            values = [
+                int(value.strip())
+                for value in (self.auto_retry_backoff_minutes or "").split(",")
+                if value.strip()
+            ]
+        except (TypeError, ValueError):
+            values = []
+        if not values or len(values) > 10 or any(value < 1 or value > 1440 for value in values):
+            return list(DEFAULT_AUTO_RETRY_BACKOFF_MINUTES)
+        return values
 
     def to_dict(self):
         return {
@@ -145,6 +168,7 @@ class AppSettings(Base):
             "launch_on_startup": self.launch_on_startup,
             "auto_retry_failed_downloads": self.auto_retry_failed_downloads,
             "recording_rule_retention_enabled": self.recording_rule_retention_enabled,
+            "auto_retry_backoff_minutes": self.get_auto_retry_backoff_minutes(),
             "onboarding_dismissed": self.onboarding_dismissed,
             "onboarding_processing_confirmed": self.onboarding_processing_confirmed,
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,

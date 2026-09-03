@@ -4,8 +4,8 @@ Tests for the auto-retry sweep for failed catchup downloads.
 The scheduled manager's `_auto_retry_failed_downloads` sweep re-queues FAILED
 catchup downloads (via download_manager.retry_download) when:
   - the auto_retry_failed_downloads app setting is enabled (default off),
-  - the download has fewer than AUTO_RETRY_MAX_ATTEMPTS automatic retries,
-  - at least AUTO_RETRY_MIN_INTERVAL_MINUTES passed since the last attempt,
+  - the download has a remaining delay in the configured backoff sequence,
+  - that delay has passed since the latest attempt or failure,
   - the program is still inside the channel's archive (catchup) window
     (unknown windows are treated conservatively: no retry),
   - the linked schedule was not CANCELLED or COMPLETED by the user (#330).
@@ -34,7 +34,7 @@ from models import (
 )
 from services.download_manager import DownloadManager
 from services.epg_service import NoCatchupSupportError
-from services.scheduled_manager import AUTO_RETRY_MAX_ATTEMPTS, ScheduledManager
+from services.scheduled_manager import ScheduledManager
 
 
 def _failed_download(**overrides):
@@ -104,6 +104,13 @@ class AutoRetryFailedDownloadsTests(unittest.IsolatedAsyncioTestCase):
             settings.auto_retry_failed_downloads = enabled
             await session.commit()
 
+    async def _set_backoff(self, delays):
+        async with self.session_factory() as session:
+            result = await session.execute(select(AppSettings))
+            settings = result.scalar_one()
+            settings.auto_retry_backoff_minutes = ",".join(str(delay) for delay in delays)
+            await session.commit()
+
     async def _run_sweep(self, archive_days=7, archive_side_effect=None):
         manager = ScheduledManager()
         dm = DownloadManager()
@@ -149,11 +156,11 @@ class AutoRetryFailedDownloadsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dm._queue.qsize(), 1, "Retry must enqueue the download.")
 
     async def test_retry_count_capped(self):
-        """Once AUTO_RETRY_MAX_ATTEMPTS automatic retries are spent, the
-        download stays FAILED."""
+        """Once every configured automatic retry is spent, the download stays FAILED."""
         now = datetime.now(timezone.utc)
+        max_attempts = 4
         (download,) = await self._add(_failed_download(
-            retry_count=AUTO_RETRY_MAX_ATTEMPTS,
+            retry_count=max_attempts,
             last_retry_at=(now - timedelta(hours=1)).replace(tzinfo=None),
         ))
 
@@ -161,7 +168,98 @@ class AutoRetryFailedDownloadsTests(unittest.IsolatedAsyncioTestCase):
 
         refreshed = await self._get_download(download.id)
         self.assertEqual(refreshed.status, DownloadStatus.FAILED.value)
-        self.assertEqual(refreshed.retry_count, AUTO_RETRY_MAX_ATTEMPTS)
+        self.assertEqual(refreshed.retry_count, max_attempts)
+        self.assertEqual(dm._queue.qsize(), 0)
+
+    async def test_default_backoff_sequence_is_used_for_each_attempt(self):
+        """The default four attempts wait 5, 10, 15, then 60 minutes."""
+        now = datetime.now(timezone.utc)
+        elapsed_minutes = (6, 11, 16, 61)
+        downloads = []
+        for retry_count, elapsed in enumerate(elapsed_minutes):
+            downloads.append(_failed_download(
+                channel_id=f"ch{retry_count}",
+                retry_count=retry_count,
+                last_retry_at=(now - timedelta(minutes=elapsed)).replace(tzinfo=None)
+                if retry_count else None,
+                completed_at=(now - timedelta(minutes=elapsed)).replace(tzinfo=None),
+            ))
+        await self._add(*downloads)
+
+        dm, _ = await self._run_sweep(archive_days=7)
+
+        self.assertEqual(dm._queue.qsize(), 4)
+        for retry_count, download in enumerate(downloads, start=1):
+            refreshed = await self._get_download(download.id)
+            self.assertEqual(refreshed.status, DownloadStatus.PENDING.value)
+            self.assertEqual(refreshed.retry_count, retry_count)
+
+    async def test_each_backoff_delay_must_fully_elapse(self):
+        """No attempt runs just before its configured delay expires."""
+        now = datetime.now(timezone.utc)
+        elapsed_minutes = (4, 9, 14, 59)
+        downloads = []
+        for retry_count, elapsed in enumerate(elapsed_minutes):
+            downloads.append(_failed_download(
+                channel_id=f"wait{retry_count}",
+                retry_count=retry_count,
+                last_retry_at=(now - timedelta(minutes=elapsed)).replace(tzinfo=None)
+                if retry_count else None,
+                completed_at=(now - timedelta(minutes=elapsed)).replace(tzinfo=None),
+            ))
+        await self._add(*downloads)
+
+        dm, archive_mock = await self._run_sweep(archive_days=7)
+
+        self.assertEqual(dm._queue.qsize(), 0)
+        self.assertEqual(archive_mock.await_count, 0)
+        for retry_count, download in enumerate(downloads):
+            refreshed = await self._get_download(download.id)
+            self.assertEqual(refreshed.status, DownloadStatus.FAILED.value)
+            self.assertEqual(refreshed.retry_count, retry_count)
+
+    async def test_custom_backoff_changes_delays_and_attempt_limit(self):
+        """A custom sequence controls both timing and the total retry count."""
+        await self._set_backoff([2, 7])
+        now = datetime.now(timezone.utc)
+        eligible, waiting, exhausted = await self._add(
+            _failed_download(
+                channel_id="eligible",
+                completed_at=(now - timedelta(minutes=3)).replace(tzinfo=None),
+            ),
+            _failed_download(
+                channel_id="waiting",
+                retry_count=1,
+                last_retry_at=(now - timedelta(minutes=6)).replace(tzinfo=None),
+            ),
+            _failed_download(
+                channel_id="exhausted",
+                retry_count=2,
+                last_retry_at=(now - timedelta(hours=1)).replace(tzinfo=None),
+            ),
+        )
+
+        dm, _ = await self._run_sweep(archive_days=7)
+
+        self.assertEqual(dm._queue.qsize(), 1)
+        self.assertEqual((await self._get_download(eligible.id)).status, DownloadStatus.PENDING.value)
+        self.assertEqual((await self._get_download(waiting.id)).status, DownloadStatus.FAILED.value)
+        self.assertEqual((await self._get_download(exhausted.id)).status, DownloadStatus.FAILED.value)
+
+    async def test_latest_failure_time_starts_the_next_backoff(self):
+        """A fast failed retry waits from its failure, not from when it was queued."""
+        now = datetime.now(timezone.utc)
+        (download,) = await self._add(_failed_download(
+            retry_count=1,
+            last_retry_at=(now - timedelta(minutes=20)).replace(tzinfo=None),
+            completed_at=(now - timedelta(minutes=2)).replace(tzinfo=None),
+        ))
+
+        dm, _ = await self._run_sweep(archive_days=7)
+
+        refreshed = await self._get_download(download.id)
+        self.assertEqual(refreshed.status, DownloadStatus.FAILED.value)
+        self.assertEqual(refreshed.retry_count, 1)
         self.assertEqual(dm._queue.qsize(), 0)
 
     async def test_outside_archive_window_not_retried(self):
@@ -251,7 +349,7 @@ class AutoRetryFailedDownloadsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dm._queue.qsize(), 0)
 
     async def test_recent_failure_waits_for_interval(self):
-        """Attempts must be spaced at least AUTO_RETRY_MIN_INTERVAL_MINUTES apart."""
+        """The first attempt waits for its configured five-minute delay."""
         now = datetime.now(timezone.utc)
         (download,) = await self._add(_failed_download(
             completed_at=(now - timedelta(minutes=2)).replace(tzinfo=None),

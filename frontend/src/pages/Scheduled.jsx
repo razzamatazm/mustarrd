@@ -52,6 +52,7 @@ import classes from './Scheduled.module.css'
 dayjs.extend(duration)
 
 const ACCOUNT_SETTINGS_SUFFIX = 'your account settings.'
+const DEFAULT_RETRY_BACKOFF_MINUTES = [5, 10, 15, 60]
 
 function renderErrorMessage(msg) {
   if (!msg) return null
@@ -461,6 +462,9 @@ export default function Scheduled() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [localItems, setLocalItems] = useState([])
   const [historyFilter, setHistoryFilter] = useState('all')
+  const [retrySettingsOpened, setRetrySettingsOpened] = useState(false)
+  const [retryBackoffInput, setRetryBackoffInput] = useState('5, 10, 15, 60')
+  const [retryBackoffError, setRetryBackoffError] = useState('')
   const importInputRef = useRef(null)
   const desktopApi = typeof window !== 'undefined' ? window.mustarrdDesktop : null
   const isDesktop = Boolean(desktopApi?.openFileLocation && desktopApi?.playFile)
@@ -502,6 +506,11 @@ export default function Scheduled() {
       setLocalItems(schedules)
     }
   }, [schedules])
+
+  useEffect(() => {
+    const delays = appSettings?.auto_retry_backoff_minutes || DEFAULT_RETRY_BACKOFF_MINUTES
+    setRetryBackoffInput(delays.join(', '))
+  }, [appSettings?.auto_retry_backoff_minutes])
 
   const cancelMutation = useMutation({
     mutationFn: (schedule) => schedulesApi.cancel(schedule.id),
@@ -619,6 +628,38 @@ export default function Scheduled() {
       })
     },
   })
+
+  const retryBackoffMutation = useMutation({
+    mutationFn: (delays) => settingsApi.update({ auto_retry_backoff_minutes: delays }),
+    onSuccess: (updatedSettings) => {
+      queryClient.setQueryData(['settings'], updatedSettings)
+      setRetrySettingsOpened(false)
+      notifications.show({
+        title: 'Retry Schedule Saved',
+        message: 'The new delays will be used for future retry attempts.',
+        color: 'green',
+      })
+    },
+    onError: (error) => {
+      notifications.show({ title: 'Error', message: error.message, color: 'red' })
+    },
+  })
+
+  const saveRetryBackoff = () => {
+    const parts = retryBackoffInput.split(',').map((value) => value.trim())
+    const delays = parts.map(Number)
+    if (
+      parts.some((value) => !value)
+      || delays.length < 1
+      || delays.length > 10
+      || delays.some((value) => !Number.isInteger(value) || value < 1 || value > 1440)
+    ) {
+      setRetryBackoffError('Enter 1 to 10 whole-minute delays from 1 to 1440, separated by commas.')
+      return
+    }
+    setRetryBackoffError('')
+    retryBackoffMutation.mutate(delays)
+  }
 
   const importMutation = useMutation({
     mutationFn: (doc) => schedulesApi.importDoc(doc),
@@ -895,19 +936,32 @@ export default function Scheduled() {
         <Title order={2}>Scheduled</Title>
         <Group gap="sm">
           {isAdmin && (
-            <Tooltip
-              label="Automatically retry failed downloads while the program is still inside the channel's catchup window"
-              multiline
-              w={280}
-            >
-              <Switch
-                size="sm"
-                label="Auto-retry failed downloads"
-                checked={Boolean(appSettings?.auto_retry_failed_downloads)}
-                onChange={(event) => autoRetryMutation.mutate(event.currentTarget.checked)}
-                disabled={autoRetryMutation.isPending || !appSettings}
-              />
-            </Tooltip>
+            <Group gap={4} wrap="nowrap">
+              <Tooltip
+                label="Automatically retry failed downloads while the program is still inside the channel's catchup window"
+                multiline
+                w={280}
+              >
+                <Switch
+                  size="sm"
+                  label="Auto-retry failed downloads"
+                  checked={Boolean(appSettings?.auto_retry_failed_downloads)}
+                  onChange={(event) => autoRetryMutation.mutate(event.currentTarget.checked)}
+                  disabled={autoRetryMutation.isPending || !appSettings}
+                />
+              </Tooltip>
+              <Tooltip label="Configure retry delays">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Configure retry delays"
+                  onClick={() => setRetrySettingsOpened(true)}
+                  disabled={!appSettings}
+                >
+                  <IconSettings size={17} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           )}
           <Group gap="xs" wrap="nowrap">
             <Button
@@ -937,6 +991,44 @@ export default function Scheduled() {
           />
         </Group>
       </Group>
+
+      <Modal
+        opened={retrySettingsOpened}
+        onClose={() => setRetrySettingsOpened(false)}
+        title="Automatic retry settings"
+        centered
+      >
+        <Stack>
+          <Text size="sm" c="dimmed">
+            Enter one delay for each retry. For example, 5, 10, 15, 60 retries four times,
+            waiting that many minutes after each failed attempt. After the last retry, the
+            download stays failed.
+          </Text>
+          <TextInput
+            label="Retry delays (minutes)"
+            description="Use commas between delays. The maximum delay is 1440 minutes."
+            value={retryBackoffInput}
+            onChange={(event) => {
+              setRetryBackoffInput(event.currentTarget.value)
+              setRetryBackoffError('')
+            }}
+            error={retryBackoffError}
+            placeholder="5, 10, 15, 60"
+          />
+          <Text size="xs" c="dimmed">
+            Retries are checked about every 30 seconds and only run while the programme is
+            still available from your provider.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setRetrySettingsOpened(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveRetryBackoff} loading={retryBackoffMutation.isPending}>
+              Save retry schedule
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Tabs
         value={['upcoming', 'rules', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'upcoming'}

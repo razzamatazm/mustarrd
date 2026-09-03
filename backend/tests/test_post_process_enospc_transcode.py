@@ -97,7 +97,7 @@ class PostProcessENOSPCTranscodeTests(unittest.IsolatedAsyncioTestCase):
 
         download_id = await self._seed_db(ts_path)
 
-        async def fake_post_process(file_path, download_id, session, settings):
+        async def fake_post_process(file_path, download_id, session, settings, **kwargs):
             # Simulate transcode: delete .ts, create .mkv (delete_original_after_transcode=True)
             Path(file_path).unlink(missing_ok=True)
             Path(mkv_path).write_bytes(b"\x00" * 1024)

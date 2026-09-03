@@ -19,15 +19,6 @@ logger = logging.getLogger(__name__)
 # errs on the side of pausing instead of filling the disk.
 ESTIMATED_RECORDING_GB_PER_HOUR = 3.0
 
-# Automatic retry of FAILED catchup downloads (gated by the
-# auto_retry_failed_downloads app setting, default off). Each download gets a
-# bounded number of automatic attempts, spaced out so a struggling provider is
-# not hammered, and only while the program is still inside the channel's
-# archive (catchup) window.
-AUTO_RETRY_MAX_ATTEMPTS = 3
-AUTO_RETRY_MIN_INTERVAL_MINUTES = 10
-
-
 class ScheduledManager:
     def __init__(self):
         self._running = False
@@ -313,9 +304,8 @@ class ScheduledManager:
         """Re-queue FAILED catchup downloads still inside the archive window.
 
         Gated by the auto_retry_failed_downloads setting (default off). Each
-        download gets at most AUTO_RETRY_MAX_ATTEMPTS automatic retries spaced
-        at least AUTO_RETRY_MIN_INTERVAL_MINUTES apart, and only while
-        now < program end + the channel's archive window. Unknown or
+        configured delay represents one retry attempt. Retries only happen
+        while now < program end + the channel's archive window. Unknown or
         unreachable archive windows are treated conservatively: no retry.
         Downloads whose linked schedule was cancelled or completed are left
         alone so user-set terminal states are never revived (#330).
@@ -327,6 +317,7 @@ class ScheduledManager:
             settings = settings_result.scalar_one_or_none()
             if not settings or not getattr(settings, "auto_retry_failed_downloads", False):
                 return
+            retry_backoff_minutes = settings.get_auto_retry_backoff_minutes()
 
             result = await session.execute(
                 select(Download).where(
@@ -336,7 +327,7 @@ class ScheduledManager:
             )
             failed = [
                 d for d in result.scalars().all()
-                if int(d.retry_count or 0) < AUTO_RETRY_MAX_ATTEMPTS
+                if int(d.retry_count or 0) < len(retry_backoff_minutes)
             ]
             if not failed:
                 return
@@ -367,11 +358,18 @@ class ScheduledManager:
                 ):
                     continue
 
-                last_attempt = download.last_retry_at or download.completed_at
+                retry_number = int(download.retry_count or 0)
+                retry_delay = retry_backoff_minutes[retry_number]
+                attempt_times = []
+                for value in (download.last_retry_at, download.completed_at):
+                    if value is None:
+                        continue
+                    if value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    attempt_times.append(value)
+                last_attempt = max(attempt_times) if attempt_times else None
                 if last_attempt is not None:
-                    if last_attempt.tzinfo is None:
-                        last_attempt = last_attempt.replace(tzinfo=timezone.utc)
-                    if now_utc - last_attempt < timedelta(minutes=AUTO_RETRY_MIN_INTERVAL_MINUTES):
+                    if now_utc - last_attempt < timedelta(minutes=retry_delay):
                         continue
 
                 program_end = self._download_program_end_utc(download)
