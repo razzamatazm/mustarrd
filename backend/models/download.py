@@ -51,6 +51,10 @@ class Download(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Set when recurring-rule retention removes the media file. The row is kept
+    # as history; output_path still points at where the file used to be.
+    file_deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -79,6 +83,7 @@ class Download(Base):
             "recorded_duration_seconds": self.recorded_duration_seconds,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
+            "file_deleted_at": self.file_deleted_at.isoformat() if self.file_deleted_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

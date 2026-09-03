@@ -113,6 +113,7 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         enabled=True,
         delete_after_days=None,
         match_mode="exact",
+        days_of_week=None,
     ):
         async with self.session_factory() as session:
             return await create_recording_rule(
@@ -124,10 +125,29 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
                     enabled=enabled,
                     delete_after_days=delete_after_days,
                     match_mode=match_mode,
+                    days_of_week=days_of_week,
                 ),
                 auth=self.auth,
                 session=session,
             )
+
+    async def _enable_retention(self):
+        async with self.session_factory() as session:
+            settings = (await session.execute(select(AppSettings))).scalar_one()
+            settings.recording_rule_retention_enabled = True
+            await session.commit()
+
+    async def _set_offsets(self, *, guide_offset_hours=0, epg_offset_minutes=0):
+        async with self.session_factory() as session:
+            account = (
+                await session.execute(
+                    select(XtreamAccount).where(XtreamAccount.id == 1)
+                )
+            ).scalar_one()
+            account.guide_offset_hours = guide_offset_hours
+            settings = (await session.execute(select(AppSettings))).scalar_one()
+            settings.epg_offset_minutes = epg_offset_minutes
+            await session.commit()
 
     async def _count(self, model):
         async with self.session_factory() as session:
@@ -179,6 +199,70 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["scheduled_count"], 1)
         self.assertEqual(await self._count(RecordingRule), 1)
         self.assertEqual(await self._count(ScheduledRecording), 1)
+
+    async def test_rule_schedules_a_currently_airing_programme(self):
+        # Airing started 30 minutes ago and runs for another 30.
+        await self._add_program(hours_from_now=-0.5, suffix="on-air-now")
+
+        result = await self._create_rule()
+
+        self.assertEqual(result["scheduled_count"], 1)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+
+    async def test_rule_ignores_programme_past_the_archive_window(self):
+        async with self.session_factory() as session:
+            account = (
+                await session.execute(
+                    select(XtreamAccount).where(XtreamAccount.id == 1)
+                )
+            ).scalar_one()
+            account.catchup_max_archive_days = 7
+            await session.commit()
+        # Finished 10 days ago: outside a 7-day archive window.
+        await self._add_program(hours_from_now=-24 * 10, suffix="too-old")
+
+        result = await self._create_rule()
+
+        self.assertEqual(result["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    async def _add_program_at(self, start_utc, *, suffix):
+        end = start_utc + timedelta(hours=1)
+        async with self.session_factory() as session:
+            session.add(
+                EPGProgram(
+                    account_id=1,
+                    channel_id="101",
+                    channel_name="Example TV",
+                    epg_id=f"epg-{suffix}",
+                    title="The Example Show",
+                    start_time=start_utc,
+                    end_time=end,
+                    start_timestamp=int(start_utc.timestamp()),
+                    stop_timestamp=int(end.timestamp()),
+                    duration_minutes=60,
+                    has_archive=True,
+                )
+            )
+            await session.commit()
+
+    async def test_weekday_filter_uses_the_global_epg_offset(self):
+        # Airing at 01:00 UTC tomorrow; a -2h global offset puts its guide
+        # wall clock on the previous calendar day, so the weekday differs.
+        start_utc = (
+            datetime.now(timezone.utc) + timedelta(days=1)
+        ).replace(hour=1, minute=0, second=0, microsecond=0)
+        local_weekday = (start_utc - timedelta(hours=2)).weekday()
+        utc_weekday = start_utc.weekday()
+        self.assertNotEqual(local_weekday, utc_weekday)
+        await self._set_offsets(epg_offset_minutes=-120)
+
+        await self._add_program_at(start_utc, suffix="weekday-utc-day")
+        wrong_day = await self._create_rule(days_of_week=[utc_weekday])
+        self.assertEqual(wrong_day["scheduled_count"], 0)
+
+        right_day = await self._create_rule(days_of_week=[local_weekday])
+        self.assertEqual(right_day["scheduled_count"], 1)
 
     async def test_wrong_channel_does_not_match(self):
         await self._add_program(channel_id="202", suffix="wrong-channel")
@@ -321,12 +405,15 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(schedule.recording_rule_id)
             self.assertIsNotNone(schedule.rule_airing_key)
 
-    async def test_optional_retention_deletes_only_expired_rule_download(self):
+    async def test_optional_retention_removes_file_but_keeps_history(self):
+        await self._enable_retention()
         await self._add_program(suffix="retention")
         rule = await self._create_rule(delete_after_days=7)
         recording = Path(self.recording_dir.name) / "expired.ts"
         recording.write_bytes(b"recording")
-        await self._link_completed_download(rule["id"], recording, age_days=8)
+        download_id = await self._link_completed_download(
+            rule["id"], recording, age_days=8
+        )
 
         async with self.session_factory() as session:
             deleted = await recording_rule_service.delete_expired_downloads(
@@ -337,15 +424,52 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(deleted, 1)
         self.assertFalse(recording.exists())
-        self.assertEqual(await self._count(Download), 0)
         async with self.session_factory() as session:
+            download = await session.get(Download, download_id)
+            self.assertIsNotNone(download)
+            self.assertIsNotNone(download.file_deleted_at)
             schedule = (
                 await session.execute(select(ScheduledRecording))
             ).scalar_one()
-            self.assertIsNone(schedule.download_id)
+            self.assertEqual(schedule.download_id, download_id)
             self.assertIn("deleted after 7 days", schedule.status_message)
 
+    async def test_retention_is_a_no_op_until_enabled(self):
+        await self._add_program(suffix="retention-off")
+        rule = await self._create_rule(delete_after_days=7)
+        recording = Path(self.recording_dir.name) / "kept-until-enabled.ts"
+        recording.write_bytes(b"recording")
+        await self._link_completed_download(rule["id"], recording, age_days=30)
+
+        async with self.session_factory() as session:
+            deleted = await recording_rule_service.delete_expired_downloads(
+                session, rule_id=rule["id"]
+            )
+
+        self.assertEqual(deleted, 0)
+        self.assertTrue(recording.exists())
+
+    async def test_retention_sweep_is_idempotent(self):
+        await self._enable_retention()
+        await self._add_program(suffix="retention-twice")
+        rule = await self._create_rule(delete_after_days=7)
+        recording = Path(self.recording_dir.name) / "expired-twice.ts"
+        recording.write_bytes(b"recording")
+        await self._link_completed_download(rule["id"], recording, age_days=8)
+
+        async with self.session_factory() as session:
+            first = await recording_rule_service.delete_expired_downloads(
+                session, rule_id=rule["id"]
+            )
+            second = await recording_rule_service.delete_expired_downloads(
+                session, rule_id=rule["id"]
+            )
+
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+
     async def test_keep_forever_does_not_delete_completed_download(self):
+        await self._enable_retention()
         await self._add_program(suffix="keep-forever")
         rule = await self._create_rule()
         recording = Path(self.recording_dir.name) / "kept.ts"
@@ -362,6 +486,7 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._count(Download), 1)
 
     async def test_retention_refuses_file_outside_configured_roots(self):
+        await self._enable_retention()
         outside_dir = tempfile.TemporaryDirectory()
         self.addCleanup(outside_dir.cleanup)
         await self._add_program(suffix="unsafe-retention")

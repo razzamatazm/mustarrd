@@ -54,6 +54,10 @@ class AppSettings(Base):
     show_future_programs: Mapped[bool] = mapped_column(Boolean, default=False)
     launch_on_startup: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_retry_failed_downloads: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Master switch for age-based cleanup of recordings made by recurring
+    # rules. Off by default: a rule's delete_after_days does nothing until an
+    # admin turns this on.
+    recording_rule_retention_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Post-download ffprobe sanity check; flags suspect files as
     # "Completed with warnings" without failing the recording.
@@ -140,6 +144,7 @@ class AppSettings(Base):
             "show_future_programs": self.show_future_programs,
             "launch_on_startup": self.launch_on_startup,
             "auto_retry_failed_downloads": self.auto_retry_failed_downloads,
+            "recording_rule_retention_enabled": self.recording_rule_retention_enabled,
             "onboarding_dismissed": self.onboarding_dismissed,
             "onboarding_processing_confirmed": self.onboarding_processing_confirmed,
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,

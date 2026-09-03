@@ -139,6 +139,7 @@ class SettingsUpdate(BaseModel):
     show_future_programs: Optional[bool] = None
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
+    recording_rule_retention_enabled: Optional[bool] = None
 
 
 NON_NULLABLE_FIELDS = {
@@ -179,6 +180,7 @@ NON_NULLABLE_FIELDS = {
     "show_future_programs",
     "launch_on_startup",
     "auto_retry_failed_downloads",
+    "recording_rule_retention_enabled",
 }
 
 

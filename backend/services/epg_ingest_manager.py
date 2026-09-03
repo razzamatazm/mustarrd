@@ -134,6 +134,9 @@ class EPGIngestManager:
         self._pending_task: Optional["asyncio.Task"] = None
         self._interval = max(1, int(app_settings.epg_refresh_interval_hours)) * 3600
         self._backfill_cooldown_seconds = max(self._interval, 6 * 3600)
+        # Retention is a daily sweep, not something to run on every guide
+        # refresh. Tracked per account; a restart re-runs once.
+        self._last_retention_sweep: dict[int, datetime] = {}
         self._status = {
             "running": False,
             "account_id": None,
@@ -551,13 +554,19 @@ class EPGIngestManager:
         try:
             from services.recording_rule_service import recording_rule_service
 
+            now = datetime.now(timezone.utc)
+            last_sweep = self._last_retention_sweep.get(account.id)
+            run_retention = last_sweep is None or now - last_sweep >= timedelta(days=1)
             async with async_session_maker() as session:
                 created = await recording_rule_service.evaluate(
                     session, account_id=account.id
                 )
-                deleted = await recording_rule_service.delete_expired_downloads(
-                    session, account_id=account.id
-                )
+                deleted = 0
+                if run_retention:
+                    deleted = await recording_rule_service.delete_expired_downloads(
+                        session, account_id=account.id
+                    )
+                    self._last_retention_sweep[account.id] = now
             if created:
                 await self._log(
                     f"Recording rules added {created:,} future schedule(s).",
@@ -565,7 +574,7 @@ class EPGIngestManager:
                 )
             if deleted:
                 await self._log(
-                    f"Recording rule retention deleted {deleted:,} expired recording(s).",
+                    f"Recording rule retention removed {deleted:,} expired recording file(s).",
                     account=account,
                 )
         except Exception as exc:

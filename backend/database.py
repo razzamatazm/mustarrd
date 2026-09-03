@@ -112,6 +112,17 @@ async def _apply_lightweight_migrations(conn) -> None:
         )
     )
 
+    if not await _column_exists(conn, "app_settings", "recording_rule_retention_enabled"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings ADD COLUMN "
+                "recording_rule_retention_enabled BOOLEAN DEFAULT 0"
+            )
+        )
+
+    if not await _column_exists(conn, "downloads", "file_deleted_at"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN file_deleted_at DATETIME"))
+
     if not await _column_exists(conn, "downloads", "start_timestamp"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN start_timestamp INTEGER DEFAULT 0"))
 

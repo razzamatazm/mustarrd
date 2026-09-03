@@ -33,7 +33,6 @@ class RecordingRuleCreate(BaseModel):
     match_mode: MatchMode = "exact"
     enabled: bool = True
     days_of_week: Optional[list[conint(ge=0, le=6)]] = None
-    keep_count: Optional[conint(ge=1)] = None
     delete_after_days: Optional[conint(ge=1, le=3650)] = None
     pre_padding_minutes: conint(ge=0, le=120) = 0
     post_padding_minutes: conint(ge=0, le=120) = 0
@@ -57,7 +56,6 @@ class RecordingRuleUpdate(BaseModel):
     title_match: Optional[str] = None
     match_mode: Optional[MatchMode] = None
     days_of_week: Optional[list[conint(ge=0, le=6)]] = None
-    keep_count: Optional[conint(ge=1)] = None
     delete_after_days: Optional[conint(ge=1, le=3650)] = None
     pre_padding_minutes: Optional[conint(ge=0, le=120)] = None
     post_padding_minutes: Optional[conint(ge=0, le=120)] = None
@@ -128,7 +126,6 @@ async def create_recording_rule(
         title_match=data.title_match,
         match_mode=data.match_mode,
         enabled=data.enabled,
-        keep_count=data.keep_count,
         delete_after_days=data.delete_after_days,
         pre_padding_minutes=data.pre_padding_minutes,
         post_padding_minutes=data.post_padding_minutes,
@@ -172,7 +169,6 @@ async def update_recording_rule(
         "enabled",
         "title_match",
         "match_mode",
-        "keep_count",
         "delete_after_days",
         "pre_padding_minutes",
         "post_padding_minutes",

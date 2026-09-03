@@ -24,7 +24,6 @@ class RecordingRule(Base):
 
     # JSON array using Python's weekday convention (Monday=0, Sunday=6).
     days_of_week: Mapped[str | None] = mapped_column(Text, nullable=True)
-    keep_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Null means recordings are retained indefinitely. When set, only completed
     # downloads created by this rule are eligible for age-based cleanup.
     delete_after_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -64,7 +63,6 @@ class RecordingRule(Base):
             "match_mode": self.match_mode or "exact",
             "enabled": bool(self.enabled),
             "days_of_week": self.parsed_days_of_week,
-            "keep_count": self.keep_count,
             "delete_after_days": self.delete_after_days,
             "pre_padding_minutes": self.pre_padding_minutes,
             "post_padding_minutes": self.post_padding_minutes,
