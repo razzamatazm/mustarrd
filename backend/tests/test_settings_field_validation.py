@@ -160,6 +160,24 @@ class DefaultPaddingValidationTests(unittest.TestCase):
         self.assertIsNone(m.default_post_padding_minutes)
 
 
+class ScheduledDownloadDelayValidationTests(unittest.TestCase):
+    def test_zero_disables_the_delay(self):
+        model = SettingsUpdate(scheduled_download_delay_minutes=0)
+        self.assertEqual(model.scheduled_download_delay_minutes, 0)
+
+    def test_five_minute_delay_is_accepted(self):
+        model = SettingsUpdate(scheduled_download_delay_minutes=5)
+        self.assertEqual(model.scheduled_download_delay_minutes, 5)
+
+    def test_delay_above_two_hours_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(scheduled_download_delay_minutes=121)
+
+    def test_negative_delay_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            SettingsUpdate(scheduled_download_delay_minutes=-1)
+
+
 class DefaultPaddingNormalizationTests(unittest.IsolatedAsyncioTestCase):
     """Stored negative padding must be coerced to the default at GET time.
 
@@ -232,6 +250,17 @@ class DefaultPaddingNormalizationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["default_pre_padding_minutes"], 0)
         self.assertEqual(result["default_post_padding_minutes"], 0)
+
+    async def test_invalid_scheduled_download_delay_normalizes_to_five(self):
+        settings = AppSettings()
+        settings.download_folder = "/downloads"
+        settings.completed_folder = "/completed"
+        settings.scheduled_download_delay_minutes = -1
+
+        result = await self._call_get_settings(settings)
+
+        self.assertEqual(settings.scheduled_download_delay_minutes, 5)
+        self.assertEqual(result["scheduled_download_delay_minutes"], 5)
 
 
 class MaxConcurrentValidationTests(unittest.TestCase):

@@ -144,6 +144,14 @@ async def _apply_lightweight_migrations(conn) -> None:
             text("ALTER TABLE app_settings ADD COLUMN auto_retry_failed_downloads BOOLEAN DEFAULT 0")
         )
 
+    if not await _column_exists(conn, "app_settings", "scheduled_download_delay_minutes"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN scheduled_download_delay_minutes INTEGER DEFAULT 5"
+            )
+        )
+
     if not await _column_exists(conn, "downloads", "retry_count"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0"))
 

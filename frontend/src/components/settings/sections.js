@@ -62,6 +62,7 @@ export const SEARCH_INDEX = [
   { label: 'Completed folder', section: 'recording', kw: 'storage path media library output' },
   { label: 'Max concurrent downloads', section: 'recording', kw: 'simultaneous parallel limit' },
   { label: 'Minimum free space', section: 'recording', kw: 'disk gb pause low' },
+  { label: 'Scheduled download delay', section: 'recording', kw: 'wait after airing catchup provider archive minutes' },
   { label: 'Recording padding (start early / end late)', section: 'recording', kw: 'minutes before after buffer' },
   { label: 'Output container (.ts / MKV / MP4)', section: 'processing', kw: 'format remux transcode encode ffmpeg' },
   { label: 'Commercials', section: 'processing', kw: 'comskip ads skip mark cut commercials' },

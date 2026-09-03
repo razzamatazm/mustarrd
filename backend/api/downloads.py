@@ -32,6 +32,7 @@ from services.hls_streamer import (
 from services.file_namer import file_namer
 from services.epg_service import epg_service
 from services.download_builder import build_download_from_program
+from schedule_timing import get_scheduled_download_delay_minutes
 
 
 router = APIRouter()
@@ -236,7 +237,9 @@ async def get_upcoming_recordings(
     if not auth.is_admin:
         query = query.where(ScheduledRecording.requested_by_user_id == auth.user_id)
     result = await session.execute(query)
-    return [r.to_dict() for r in result.scalars().all()]
+    recordings = result.scalars().all()
+    download_delay_minutes = await get_scheduled_download_delay_minutes(session)
+    return [r.to_dict(download_delay_minutes) for r in recordings]
 
 
 @router.get("")

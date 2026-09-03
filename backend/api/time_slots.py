@@ -24,6 +24,7 @@ from services.disk_space import check_disk_space
 from services.download_builder import build_download_from_program
 from services.download_manager import download_manager
 from services.epg_service import epg_service, NoCatchupSupportError
+from schedule_timing import get_scheduled_download_delay_minutes
 
 
 router = APIRouter()
@@ -249,7 +250,11 @@ async def create_time_slot(
         auth,
         session,
     )
-    return {"kind": "schedule", "record": schedule.to_dict()}
+    download_delay_minutes = await get_scheduled_download_delay_minutes(session)
+    return {
+        "kind": "schedule",
+        "record": schedule.to_dict(download_delay_minutes),
+    }
 
 
 async def _queue_time_slot_download(

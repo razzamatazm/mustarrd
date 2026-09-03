@@ -50,6 +50,7 @@ const baseSettings = {
   min_free_space_gb: 25,
   default_pre_padding_minutes: 1,
   default_post_padding_minutes: 2,
+  scheduled_download_delay_minutes: 5,
   transcode_enabled: true,
   remux_only: true,
   transcode_format: 'mkv',
@@ -196,6 +197,19 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument()
     })
+  })
+
+  it('shows and saves the scheduled download delay', async () => {
+    renderSettings()
+    await screen.findByText('Wait after recording')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Scheduled download delay' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ scheduled_download_delay_minutes: 6 })
   })
 
   it('discards edits from the save bar', async () => {

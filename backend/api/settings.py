@@ -26,6 +26,10 @@ from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from schedule_timing import (
+    MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    resolve_scheduled_download_delay_minutes,
+)
 
 
 router = APIRouter()
@@ -92,6 +96,11 @@ class SettingsUpdate(BaseModel):
     min_free_space_gb: Optional[int] = Field(default=None, ge=1)
     default_pre_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
     default_post_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
+    scheduled_download_delay_minutes: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    )
     default_account_id: Optional[int] = None
     # Post-processing
     transcode_enabled: Optional[bool] = None
@@ -157,6 +166,7 @@ NON_NULLABLE_FIELDS = {
     "min_free_space_gb",
     "default_pre_padding_minutes",
     "default_post_padding_minutes",
+    "scheduled_download_delay_minutes",
     "transcode_enabled",
     "transcode_format",
     "hw_accel",
@@ -272,6 +282,15 @@ async def get_settings(
         await session.commit()
         await session.refresh(settings)
 
+    resolved_download_delay = resolve_scheduled_download_delay_minutes(
+        settings.scheduled_download_delay_minutes
+    )
+    if settings.scheduled_download_delay_minutes != resolved_download_delay:
+        settings.scheduled_download_delay_minutes = resolved_download_delay
+        session.add(settings)
+        await session.commit()
+        await session.refresh(settings)
+
     if settings.max_concurrent_post_processing is None:
         settings.max_concurrent_post_processing = 1
         session.add(settings)
@@ -326,7 +345,11 @@ async def update_settings(
             value = int(value)
         if field == "max_concurrent_post_processing" and value is not None:
             value = max(1, int(value))
-        if field in {"default_pre_padding_minutes", "default_post_padding_minutes"} and value is not None:
+        if field in {
+            "default_pre_padding_minutes",
+            "default_post_padding_minutes",
+            "scheduled_download_delay_minutes",
+        } and value is not None:
             value = int(value)
         if field == "min_free_space_gb" and value is not None:
             value = int(value)
@@ -533,5 +556,8 @@ async def get_public_settings(
         "show_future_programs": show_future,
         "default_pre_padding_minutes": max(0, settings.default_pre_padding_minutes) if settings.default_pre_padding_minutes is not None else 1,
         "default_post_padding_minutes": max(0, settings.default_post_padding_minutes) if settings.default_post_padding_minutes is not None else 5,
+        "scheduled_download_delay_minutes": resolve_scheduled_download_delay_minutes(
+            settings.scheduled_download_delay_minutes
+        ),
         "default_account_id": settings.default_account_id,
     }

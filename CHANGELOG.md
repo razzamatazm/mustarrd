@@ -56,6 +56,12 @@ There is deliberately no separate Intel Quick Sync option. Hardware assist cover
 
 **What changed:** A new `comskip_hw_decode_mode` setting (default `none`) adds `--hwassist` or `--cuvid` to the Comskip command line. A non-zero exit with a hardware flag present triggers exactly one retry without it before the failure is treated as real. Existing installs migrate to `none`.
 
+### Added: Scheduled recordings can wait for catchup to become ready
+
+**What you would notice:** **Settings > Recording** now has a **Wait after recording** option. It defaults to 5 minutes, giving a provider time to publish a just-finished show to its catchup archive before Mustarrd starts the download. Set it to 0 for the previous immediate behavior. The wait begins after any **End late** padding, and changing it also updates the timing of recordings that are already scheduled but have not started downloading.
+
+**What changed:** A global `scheduled_download_delay_minutes` setting (0–120) now controls scheduled-recording readiness. The scheduler reads the current value on each pass, and schedule APIs include it in `available_at` so countdowns and expected start times match the actual dispatch time. Ad-hoc downloads and already-ended time-slot downloads remain immediate.
+
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
 **What you would notice:** If you picked a specific GPU under **Settings > Post-Processing** and also have Commercial Skip enabled, Mustarrd now actually encodes on the GPU you chose. Previously your choice was used for an ordinary recording but silently dropped whenever commercial detection ran, and the encode fell back to whichever graphics card the app found first. On a machine with onboard graphics alongside a discrete card, that could mean every recording with commercial skip was processed on the weaker of the two, with nothing in the interface to tell you.

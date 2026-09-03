@@ -2,6 +2,7 @@ from sqlalchemy import String, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 from config import settings as app_settings
+from schedule_timing import DEFAULT_SCHEDULED_DOWNLOAD_DELAY_MINUTES
 
 
 class AppSettings(Base):
@@ -39,6 +40,10 @@ class AppSettings(Base):
     min_free_space_gb: Mapped[int] = mapped_column(Integer, default=25)
     default_pre_padding_minutes: Mapped[int] = mapped_column(Integer, default=1)
     default_post_padding_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    scheduled_download_delay_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=DEFAULT_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    )
     default_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_concurrent_post_processing: Mapped[int] = mapped_column(Integer, default=1)
 
@@ -114,6 +119,7 @@ class AppSettings(Base):
             "min_free_space_gb": self.min_free_space_gb,
             "default_pre_padding_minutes": self.default_pre_padding_minutes,
             "default_post_padding_minutes": self.default_post_padding_minutes,
+            "scheduled_download_delay_minutes": self.scheduled_download_delay_minutes,
             "default_account_id": self.default_account_id,
             "max_concurrent_post_processing": self.max_concurrent_post_processing,
             "transcode_enabled": self.transcode_enabled,

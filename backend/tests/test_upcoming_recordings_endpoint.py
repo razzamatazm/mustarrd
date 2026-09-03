@@ -17,7 +17,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from models import ScheduledStatus
+from models import AppSettings, ScheduledStatus
 
 
 def _make_recording(rec_id, title, channel, program_start, status="scheduled", user_id=1):
@@ -62,8 +62,12 @@ class UpcomingRecordingsTests(unittest.TestCase):
         scalars_result.all = MagicMock(return_value=recordings)
         execute_result = MagicMock()
         execute_result.scalars = MagicMock(return_value=scalars_result)
+        settings_result = MagicMock()
+        settings_result.scalar_one_or_none.return_value = AppSettings(
+            scheduled_download_delay_minutes=5
+        )
         session = AsyncMock()
-        session.execute = AsyncMock(return_value=execute_result)
+        session.execute = AsyncMock(side_effect=[execute_result, settings_result])
         return session
 
     def _capture_session(self, recordings=None):
@@ -73,10 +77,20 @@ class UpcomingRecordingsTests(unittest.TestCase):
         scalars_result.all = MagicMock(return_value=recordings)
         execute_result = MagicMock()
         execute_result.scalars = MagicMock(return_value=scalars_result)
+        settings_result = MagicMock()
+        settings_result.scalar_one_or_none.return_value = AppSettings(
+            scheduled_download_delay_minutes=5
+        )
+
+        call_count = 0
 
         async def capture_execute(query, *args, **kwargs):
-            captured["stmt"] = query
-            return execute_result
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                captured["stmt"] = query
+                return execute_result
+            return settings_result
 
         session = AsyncMock()
         session.execute = capture_execute

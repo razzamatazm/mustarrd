@@ -55,20 +55,21 @@ class ScheduledRecording(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    def available_at_utc(self) -> datetime | None:
+    def available_at_utc(self, download_delay_minutes: int = 0) -> datetime | None:
+        wait = timedelta(minutes=max(0, int(download_delay_minutes or 0)))
         if self.stop_timestamp:
             return datetime.fromtimestamp(int(self.stop_timestamp), tz=timezone.utc) + timedelta(
                 minutes=int(self.post_padding_minutes or 0)
-            )
+            ) + wait
         if self.program_end:
             end_time = self.program_end
             if end_time.tzinfo is None:
                 end_time = end_time.replace(tzinfo=timezone.utc)
-            return end_time + timedelta(minutes=int(self.post_padding_minutes or 0))
+            return end_time + timedelta(minutes=int(self.post_padding_minutes or 0)) + wait
         return None
 
-    def to_dict(self):
-        available_at = self.available_at_utc()
+    def to_dict(self, download_delay_minutes: int = 0):
+        available_at = self.available_at_utc(download_delay_minutes)
         return {
             "id": self.id,
             "account_id": self.account_id,

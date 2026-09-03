@@ -849,7 +849,7 @@ export default function Settings() {
 
   const renderRecording = () => (
     <Stack gap="xl">
-      <SectionHeader title="Recording" description="Folders, concurrency, and default timing for recordings" />
+      <SectionHeader title="Recording" description="Folders, concurrency, and timing for recordings" />
 
       <SubGroup label="Storage">
         <TextInput
@@ -908,6 +908,24 @@ export default function Settings() {
               unit="GB"
               value={formData.min_free_space_gb}
               onChange={(val) => handleChange('min_free_space_gb', val)}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
+      <SubGroup label="Scheduled downloads">
+        <Stack gap={0}>
+          <SettingRow
+            label="Wait after recording"
+            description="Wait after the scheduled end, including End late padding, before downloading from catchup. Set to 0 to start immediately."
+          >
+            <NumberStepper
+              aria-label="Scheduled download delay"
+              min={0}
+              max={120}
+              unit="min"
+              value={formData.scheduled_download_delay_minutes}
+              onChange={(val) => handleChange('scheduled_download_delay_minutes', val)}
             />
           </SettingRow>
         </Stack>

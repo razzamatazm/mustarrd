@@ -106,6 +106,7 @@ Then open **http://localhost:4177** in your browser.
 ### Schedule a Recording
 
 - Browse to an upcoming program and use the **Schedule** option to download it automatically when it airs (turn on the "view future programming" switch first)
+- By default, Mustarrd waits 5 minutes after the show ends (and after any **End late** padding) before downloading it, giving your provider time to publish the catchup recording. Change or disable this under **Settings > Recording > Wait after recording**
 - The **Scheduled** page lists everything queued as a day-by-day agenda ("TONIGHT", then future days) with the air time up front. Recordings paused for low disk space show a yellow "PAUSED (LOW SPACE)" badge
 - The **History** tab on the Scheduled page shows past scheduled runs. FAILED entries show a **Retry** button directly on the card to re-queue the download without navigating away
 
