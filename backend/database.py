@@ -102,13 +102,8 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "scheduled_recordings", "rule_airing_key"):
         await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN rule_airing_key VARCHAR(255)"))
 
-    if not await _column_exists(conn, "recording_rules", "delete_after_days"):
-        await conn.execute(text("ALTER TABLE recording_rules ADD COLUMN delete_after_days INTEGER"))
-
-    if not await _column_exists(conn, "recording_rules", "match_mode"):
-        await conn.execute(
-            text("ALTER TABLE recording_rules ADD COLUMN match_mode VARCHAR(32) DEFAULT 'exact'")
-        )
+    # recording_rules is created by create_all() on every startup with all of its
+    # current columns, so there is no legacy schema to ALTER here.
 
     await conn.execute(
         text(
