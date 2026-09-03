@@ -8,7 +8,7 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Callable, Dict, Set, Any
+from typing import Optional, Callable, Dict, List, Set, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
@@ -26,6 +26,7 @@ from services.recording_events import (
     RECORDING_COMPLETED,
     RECORDING_FAILED,
     RECORDING_STARTED,
+    RecordingEvent,
     recording_events,
 )
 from services.xtream_client import (
@@ -41,6 +42,21 @@ logger = logging.getLogger(__name__)
 # hiccup (connection reset, read timeout) should not permanently fail the
 # download; each retry resumes from the bytes already on disk via HTTP Range.
 TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
+
+# A recording that is usable but suspect is a completion, not a failure. The
+# prefix is how that is written to ``error_message``; the seam reads it back
+# out into the event payload's ``warning`` field.
+COMPLETED_WITH_WARNINGS_PREFIX = "Completed with warnings: "
+
+# The extra fields on the WebSocket frame for "queued for post-processing",
+# which four paths reach: a fresh download, an interrupted one, and two
+# restart-recovery branches.
+QUEUED_FOR_POST_PROCESSING_FRAME = {
+    "progress": 0.0,
+    "message": "Queued for post-processing...",
+    "indeterminate": False,
+    "download_progress": 100.0,
+}
 TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
 
 # Default minimum free space to preserve when the AppSettings row has no value;
@@ -130,9 +146,9 @@ class TransitionBatch:
     """
 
     def __init__(self) -> None:
-        self.events: list = []
+        self.events: List[RecordingEvent] = []
 
-    def stage(self, events) -> None:
+    def stage(self, events: List[RecordingEvent]) -> None:
         self.events.extend(events)
 
     def publish_all(self) -> None:
@@ -320,15 +336,25 @@ class DownloadManager:
         indeterminate: bool = False,
         **extra
     ):
-        """Update processing status/progress and broadcast to clients."""
-        await self._transition_processing_by_id(
+        """Re-assert PROCESSING as post-processing ticks along.
+
+        Part of the transition-helper family -- it writes ``Download.status``
+        -- but not a lifecycle transition: the row is already PROCESSING and
+        this is the progress heartbeat, so it publishes nothing. It takes an
+        id rather than an ORM instance because that is all its callers have.
+        """
+        await session.execute(
+            update(Download)
+            .where(Download.id == download_id)
+            .values(status=DownloadStatus.PROCESSING.value, progress=progress)
+        )
+        await self._finish_transition(
             session,
-            download_id,
-            progress,
-            broadcast={
-                "download_id": download_id,
+            [],
+            download_id=download_id,
+            status=DownloadStatus.PROCESSING.value,
+            frame={
                 "progress": progress,
-                "status": DownloadStatus.PROCESSING.value,
                 "message": message,
                 "indeterminate": indeterminate,
                 **extra,
@@ -354,8 +380,8 @@ class DownloadManager:
     # rows behind one commit); the events are staged and published as a unit
     # once that commit lands.
     #
-    # ``broadcast=None`` means the call site keeps its own WebSocket frame.
-    # Three error handlers broadcast whether or not there is a row left to
+    # ``frame=None`` means the call site keeps its own WebSocket frame. Three
+    # error handlers broadcast whether or not there is a row left to
     # transition, so their frame cannot move inside the helper without
     # changing what the Downloads page sees.
     # ------------------------------------------------------------------
@@ -390,16 +416,24 @@ class DownloadManager:
     async def _finish_transition(
         self,
         session: AsyncSession,
-        events: list,
+        events: List[RecordingEvent],
         *,
-        broadcast: Optional[dict] = None,
+        download_id: Optional[int] = None,
+        status: Optional[str] = None,
+        frame: Optional[dict] = None,
         batch: Optional["TransitionBatch"] = None,
         swallow_commit_errors: bool = False,
     ) -> bool:
         """Commit the staged row write, broadcast, then publish.
 
-        Returns whether the transition is persisted. Nothing is published for
-        a transition that did not commit.
+        ``frame`` holds only the parts of the WebSocket message the call site
+        knows that the helper does not -- progress and any message, error or
+        stage extras. The download id and the status come from the transition
+        itself, so no call site can broadcast a status it did not write.
+
+        Returns whether the transition survived: committed, or staged into a
+        batch whose commit the caller owns. Nothing is published for a
+        transition that did not commit.
         """
         if batch is not None:
             batch.stage(events)
@@ -413,8 +447,11 @@ class DownloadManager:
                     raise
                 committed = False
 
-        if broadcast is not None:
-            await self._broadcast_progress(**broadcast)
+        if frame is not None:
+            extras = {k: v for k, v in frame.items() if k != "progress"}
+            await self._broadcast_progress(
+                download_id, frame.get("progress", 0), status, **extras
+            )
 
         if committed and batch is None:
             for event in events:
@@ -442,11 +479,9 @@ class DownloadManager:
         return await self._finish_transition(
             session,
             events,
-            broadcast={
-                "download_id": download.id,
-                "progress": 0,
-                "status": DownloadStatus.DOWNLOADING.value,
-            },
+            download_id=download.id,
+            status=DownloadStatus.DOWNLOADING.value,
+            frame={"progress": 0},
             batch=batch,
         )
 
@@ -456,7 +491,7 @@ class DownloadManager:
         download: Download,
         *,
         progress: float = 0.0,
-        broadcast: Optional[dict] = None,
+        frame: Optional[dict] = None,
         batch: Optional["TransitionBatch"] = None,
     ) -> bool:
         """Queued for, or running, post-processing.
@@ -468,28 +503,13 @@ class DownloadManager:
         download.status = DownloadStatus.PROCESSING.value
         download.progress = progress
         return await self._finish_transition(
-            session, [], broadcast=broadcast, batch=batch
+            session,
+            [],
+            download_id=download.id,
+            status=DownloadStatus.PROCESSING.value,
+            frame=frame,
+            batch=batch,
         )
-
-    async def _transition_processing_by_id(
-        self,
-        session: AsyncSession,
-        download_id: int,
-        progress: float,
-        *,
-        broadcast: Optional[dict] = None,
-    ) -> bool:
-        """Re-assert PROCESSING while post-processing ticks along.
-
-        The progress heartbeat, which has no ORM instance to hand. Same
-        non-event as ``_transition_processing``.
-        """
-        await session.execute(
-            update(Download)
-            .where(Download.id == download_id)
-            .values(status=DownloadStatus.PROCESSING.value, progress=progress)
-        )
-        return await self._finish_transition(session, [], broadcast=broadcast)
 
     async def _transition_pending(
         self,
@@ -519,7 +539,7 @@ class DownloadManager:
         warning: Optional[str] = None,
         post_processed: bool = False,
         recovered: bool = False,
-        broadcast: Optional[dict] = None,
+        frame: Optional[dict] = None,
         batch: Optional["TransitionBatch"] = None,
     ) -> bool:
         """The recording finished with a file worth keeping.
@@ -550,7 +570,7 @@ class DownloadManager:
         if not download.completed_at:
             download.completed_at = datetime.utcnow()
         download.error_message = (
-            f"Completed with warnings: {warning}" if warning else None
+            f"{COMPLETED_WITH_WARNINGS_PREFIX}{warning}" if warning else None
         )
         await self._sync_schedule_status(session, download.id, status)
         payload = self._event_payload(
@@ -564,7 +584,12 @@ class DownloadManager:
             events.append(recording_events.build(POSTPROCESSING_COMPLETED, payload))
         events.append(recording_events.build(RECORDING_COMPLETED, payload))
         return await self._finish_transition(
-            session, events, broadcast=broadcast, batch=batch
+            session,
+            events,
+            download_id=download.id,
+            status=status,
+            frame=frame,
+            batch=batch,
         )
 
     async def _transition_failed(
@@ -574,7 +599,7 @@ class DownloadManager:
         error_message: Optional[str],
         *,
         recovered: bool = False,
-        broadcast: Optional[dict] = None,
+        frame: Optional[dict] = None,
         batch: Optional["TransitionBatch"] = None,
         swallow_commit_errors: bool = False,
     ) -> bool:
@@ -590,6 +615,7 @@ class DownloadManager:
         if not download.completed_at:
             download.completed_at = datetime.utcnow()
         download.error_message = error_message
+        self._recovered_download_ids.discard(download.id)
         await self._sync_schedule_status(
             session, download.id, DownloadStatus.FAILED.value
         )
@@ -601,7 +627,9 @@ class DownloadManager:
         return await self._finish_transition(
             session,
             events,
-            broadcast=broadcast,
+            download_id=download.id,
+            status=DownloadStatus.FAILED.value,
+            frame=frame,
             batch=batch,
             swallow_commit_errors=swallow_commit_errors,
         )
@@ -611,7 +639,7 @@ class DownloadManager:
         session: AsyncSession,
         download: Download,
         *,
-        broadcast: Optional[dict] = None,
+        frame: Optional[dict] = None,
         batch: Optional["TransitionBatch"] = None,
     ) -> bool:
         """The user stopped the recording. Publishes ``recording.cancelled``.
@@ -626,6 +654,7 @@ class DownloadManager:
         repeat is subscriber policy.
         """
         download.status = DownloadStatus.CANCELLED.value
+        self._recovered_download_ids.discard(download.id)
         await self._sync_schedule_status(
             session, download.id, DownloadStatus.CANCELLED.value
         )
@@ -633,7 +662,12 @@ class DownloadManager:
             recording_events.build(RECORDING_CANCELLED, self._event_payload(download))
         ]
         return await self._finish_transition(
-            session, events, broadcast=broadcast, batch=batch
+            session,
+            events,
+            download_id=download.id,
+            status=DownloadStatus.CANCELLED.value,
+            frame=frame,
+            batch=batch,
         )
 
     async def find_active_output_conflicts(self, session: AsyncSession, output_paths: list) -> list:
@@ -947,14 +981,7 @@ class DownloadManager:
                             await self._transition_processing(
                                 session,
                                 download,
-                                broadcast={
-                                    "download_id": download.id,
-                                    "progress": 0.0,
-                                    "status": DownloadStatus.PROCESSING.value,
-                                    "message": "Queued for post-processing...",
-                                    "indeterminate": False,
-                                    "download_progress": 100.0,
-                                },
+                                frame=QUEUED_FOR_POST_PROCESSING_FRAME,
                                 batch=batch,
                             )
                             await self._broadcast_log(download.id, "Recovered after restart: queued for post-processing.")
@@ -1004,6 +1031,9 @@ class DownloadManager:
                             session,
                             download,
                             status=terminal_status,
+                            # The row was PROCESSING and its file is already in
+                            # the completed folder, so post-processing ran.
+                            post_processed=self._needs_post_processing(download, settings),
                             recovered=True,
                             batch=batch,
                         )
@@ -1185,14 +1215,7 @@ class DownloadManager:
                     await self._transition_processing(
                         session,
                         download,
-                        broadcast={
-                            "download_id": download_id,
-                            "progress": 0.0,
-                            "status": DownloadStatus.PROCESSING.value,
-                            "message": "Queued for post-processing...",
-                            "indeterminate": False,
-                            "download_progress": 100.0,
-                        },
+                        frame=QUEUED_FOR_POST_PROCESSING_FRAME,
                     )
                     await self._broadcast_log(download_id, "Queued for post-processing.")
                     await self._post_queue.put(download_id)
@@ -1218,12 +1241,7 @@ class DownloadManager:
                         session,
                         download,
                         msg,
-                        broadcast={
-                            "download_id": download_id,
-                            "progress": download.progress,
-                            "status": DownloadStatus.FAILED.value,
-                            "error": msg,
-                        },
+                        frame={"progress": download.progress, "error": msg},
                         swallow_commit_errors=True,
                     )
                     await self._broadcast_log(download_id, f"Download failed: {msg}", level="error")
@@ -1240,11 +1258,7 @@ class DownloadManager:
                     download,
                     status=terminal_status,
                     warning=integrity_warning,
-                    broadcast={
-                        "download_id": download_id,
-                        "progress": 100,
-                        "status": terminal_status,
-                    },
+                    frame={"progress": 100},
                 )
                 await self._broadcast_log(
                     download_id,
@@ -1375,6 +1389,9 @@ class DownloadManager:
         # cancel/error handling never marks a surviving recording CANCELLED or
         # FAILED (which would expose it to later cleanup/retry deletion).
         moved_completed_path: Optional[str] = None
+        # Set once Comskip/FFmpeg has actually run, so a late failure still
+        # announces postprocessing.completed for work that really happened.
+        post_processing_ran = False
         async with async_session_maker() as session:
             download: Optional[Download] = None
             interrupted_reason: Optional[str] = None
@@ -1425,12 +1442,11 @@ class DownloadManager:
                             status=terminal_status,
                             completed_path=completed_path,
                             warning=integrity_warning,
+                            # A processed output was found on disk, so the
+                            # Comskip/FFmpeg work did happen before the crash.
+                            post_processed=True,
                             recovered=True,
-                            broadcast={
-                                "download_id": download_id,
-                                "progress": 100,
-                                "status": terminal_status,
-                            },
+                            frame={"progress": 100},
                         )
                         await self._broadcast_log(download_id, "Post-processing recovery: finalized completed output.")
                         await self._trigger_plex_refresh(completed_path)
@@ -1451,11 +1467,7 @@ class DownloadManager:
                         status=terminal_status,
                         completed_path=completed_path,
                         warning=integrity_warning,
-                        broadcast={
-                            "download_id": download_id,
-                            "progress": 100,
-                            "status": terminal_status,
-                        },
+                        frame={"progress": 100},
                     )
                     await self._broadcast_log(download_id, "Post-processing disabled; finalized completed output.")
                     await self._trigger_plex_refresh(completed_path)
@@ -1469,6 +1481,7 @@ class DownloadManager:
                     session,
                     settings
                 )
+                post_processing_ran = True
 
                 final_path = self._select_final_path(original_path, final_path)
                 post_processed_path = final_path
@@ -1510,11 +1523,7 @@ class DownloadManager:
                     status=terminal_status,
                     warning=warning_text,
                     post_processed=True,
-                    broadcast={
-                        "download_id": download_id,
-                        "progress": 100,
-                        "status": terminal_status,
-                    },
+                    frame={"progress": 100},
                 )
                 await self._broadcast_log(
                     download_id,
@@ -1533,6 +1542,7 @@ class DownloadManager:
                         download_id,
                         moved_completed_path,
                         status=self._terminal_status_for_reason(interrupted_reason),
+                        post_processed=post_processing_ran,
                     )
                     return
                 result = await session.execute(
@@ -1547,11 +1557,7 @@ class DownloadManager:
                     await self._transition_cancelled(
                         session,
                         download,
-                        broadcast={
-                            "download_id": download_id,
-                            "progress": download.progress,
-                            "status": DownloadStatus.CANCELLED.value,
-                        },
+                        frame={"progress": download.progress},
                     )
                     await self._broadcast_log(download_id, "Post-processing cancelled.", level="warning")
                 # Always clean up working files regardless of DB status: cancel_download
@@ -1576,8 +1582,9 @@ class DownloadManager:
                         session,
                         download_id,
                         moved_completed_path,
-                        error_message=f"Completed with warnings: {_friendly_error(e)}",
+                        error_message=f"{COMPLETED_WITH_WARNINGS_PREFIX}{_friendly_error(e)}",
                         status=self._terminal_status_for_reason(interrupted_reason),
+                        post_processed=post_processing_ran,
                     )
                     await self._broadcast_log(
                         download_id,
@@ -1827,14 +1834,7 @@ class DownloadManager:
             await self._transition_processing(
                 session,
                 download,
-                broadcast={
-                    "download_id": download_id,
-                    "progress": 0.0,
-                    "status": DownloadStatus.PROCESSING.value,
-                    "message": "Queued for post-processing...",
-                    "indeterminate": False,
-                    "download_progress": 100.0,
-                },
+                frame=QUEUED_FOR_POST_PROCESSING_FRAME,
             )
             await self._broadcast_log(
                 download_id,
@@ -1867,12 +1867,7 @@ class DownloadManager:
                 download,
                 status=DownloadStatus.INTERRUPTED.value,
                 warning=integrity_warning,
-                broadcast={
-                    "download_id": download_id,
-                    "progress": download.progress or 0,
-                    "status": DownloadStatus.INTERRUPTED.value,
-                    "error": reason,
-                },
+                frame={"progress": download.progress or 0, "error": reason},
             )
         except Exception:
             # Never raise back into the error handler that called us. The file
@@ -1913,6 +1908,7 @@ class DownloadManager:
         completed_path: str,
         error_message: Optional[str] = None,
         status: Optional[str] = None,
+        post_processed: bool = False,
     ) -> None:
         """Persist a terminal status for a recording whose file survived on disk.
 
@@ -1970,15 +1966,18 @@ class DownloadManager:
         # library refresh at a recording the database does not have. So this
         # publishes only when one of the two write attempts actually committed.
         if persisted:
-            await self._publish_finalized(download_id, status, error_message)
+            await self._publish_finalized(
+                download_id, error_message, post_processed=post_processed
+            )
 
     async def _publish_finalized(
         self,
         download_id: int,
-        status: str,
         error_message: Optional[str] = None,
+        *,
+        post_processed: bool = False,
     ) -> None:
-        """Announce a terminal state written by the bulk-update finalize path.
+        """Announce a completion written by the bulk-update finalize path.
 
         That path has no ORM instance to build a payload from -- it is reached
         with a session that may be unusable -- so the row is re-read on a fresh
@@ -1994,18 +1993,19 @@ class DownloadManager:
                 if download is None:
                     return
                 warning = None
-                if error_message and error_message.startswith("Completed with warnings: "):
-                    warning = error_message[len("Completed with warnings: "):]
-                payload = self._event_payload(download, warning=warning)
+                if error_message and error_message.startswith(COMPLETED_WITH_WARNINGS_PREFIX):
+                    warning = error_message[len(COMPLETED_WITH_WARNINGS_PREFIX):]
+                payload = self._event_payload(
+                    download, post_processed=post_processed, warning=warning
+                )
         except Exception:
             logger.warning(
                 "Could not build the completion event for download %s", download_id
             )
             return
-        if status == DownloadStatus.FAILED.value:
-            recording_events.publish(RECORDING_FAILED, payload)
-        else:
-            recording_events.publish(RECORDING_COMPLETED, payload)
+        if post_processed:
+            recording_events.publish(POSTPROCESSING_COMPLETED, payload)
+        recording_events.publish(RECORDING_COMPLETED, payload)
 
     async def _resolve_download_owner(self, download_id: int) -> int | None:
         if download_id in self._download_owners:

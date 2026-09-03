@@ -47,14 +47,6 @@ RECORDING_FAILED = "recording.failed"
 RECORDING_CANCELLED = "recording.cancelled"
 POSTPROCESSING_COMPLETED = "postprocessing.completed"
 
-EVENT_NAMES = (
-    RECORDING_STARTED,
-    RECORDING_COMPLETED,
-    RECORDING_FAILED,
-    RECORDING_CANCELLED,
-    POSTPROCESSING_COMPLETED,
-)
-
 DEFAULT_QUEUE_SIZE = 1000
 
 
@@ -101,10 +93,6 @@ class RecordingEventBus:
     def subscribe(self, subscriber: Subscriber) -> None:
         """Register a callable (sync or async) to receive every event."""
         self._subscribers.append(subscriber)
-
-    def unsubscribe(self, subscriber: Subscriber) -> None:
-        if subscriber in self._subscribers:
-            self._subscribers.remove(subscriber)
 
     def clear_subscribers(self) -> None:
         self._subscribers.clear()
@@ -221,5 +209,3 @@ class FakeRecordingSubscriber:
     def of(self, name: str) -> List[RecordingEvent]:
         return [event for event in self.events if event.name == name]
 
-    def payloads(self, name: str) -> List[Dict[str, Any]]:
-        return [event.recording for event in self.of(name)]

@@ -92,13 +92,15 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
         )
         status = overrides.pop("status", DownloadStatus.PENDING.value)
         async with self.session_factory() as session:
-            session.add(
-                AppSettings(
-                    download_folder=self.download_folder,
-                    completed_folder=self.completed_folder,
-                    min_free_space_gb=0,
+            existing = await session.execute(select(AppSettings))
+            if existing.scalars().first() is None:
+                session.add(
+                    AppSettings(
+                        download_folder=self.download_folder,
+                        completed_folder=self.completed_folder,
+                        min_free_space_gb=0,
+                    )
                 )
-            )
             download = Download(
                 account_id=1,
                 channel_id="1",
@@ -238,6 +240,14 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self.manager._execute_download(download_id)
 
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(Download).where(Download.id == download_id)
+            )
+            # What the scheduler's auto-retry does before it requeues.
+            result.scalar_one().retry_count = 1
+            await session.commit()
+
         with self._patched():
             await self.manager.retry_download(download_id)
 
@@ -254,10 +264,19 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
             self.subscriber.names,
             [RECORDING_STARTED, RECORDING_FAILED, RECORDING_STARTED, RECORDING_COMPLETED],
         )
+        self.assertEqual(
+            [e.recording["retry_count"] for e in self.subscriber.events],
+            [0, 0, 1, 1],
+        )
 
     # --- rollback --------------------------------------------------------
     async def test_a_commit_that_fails_at_completion_publishes_nothing(self):
-        """The rollback lie: an event must never describe a write that failed."""
+        """The rollback lie: an event must never describe a write that failed.
+
+        The completion commit is poisoned and the salvage path that would
+        otherwise persist it on a fresh session is stubbed out, so nothing
+        reaches the database and nothing may be announced.
+        """
         download_id = await self._seed()
         self._write_file(os.path.join(self.download_folder, "show.ts"))
 
@@ -275,21 +294,65 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
             _needs_post_processing=lambda *a, **k: False,
             _integrity_check_warning=AsyncMock(return_value=None),
             _sync_schedule_status=AsyncMock(side_effect=poison_first_commit),
+            _finalize_completed_after_interrupt=AsyncMock(),
         ):
             await self.manager._execute_download(download_id)
         await self.bus.drain_once()
 
-        self.assertNotIn(
-            RECORDING_COMPLETED,
-            [e.name for e in self.subscriber.events[:1]],
+        self.assertEqual(self.subscriber.names, [RECORDING_STARTED])
+        self.assertNotEqual(
+            await self._status(download_id), DownloadStatus.COMPLETED.value
         )
-        # The recording did end up persisted through the fresh-session retry,
-        # so exactly one completion is announced - not one per attempt.
-        self.assertEqual(
-            self.subscriber.names.count(RECORDING_COMPLETED),
-            1,
-            self.subscriber.names,
-        )
+
+    async def test_the_salvage_retry_announces_the_completion_exactly_once(self):
+        """A poisoned commit that the fresh-session retry rescues announces once."""
+        download_id = await self._seed()
+        self._write_file(os.path.join(self.download_folder, "show.ts"))
+
+        calls = {"n": 0}
+
+        async def poison_first_commit(session, did, status):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                obj = await session.get(Download, did)
+                obj.source_url = None
+
+        with self._patched(
+            _download_catchup_stream=AsyncMock(return_value=1024),
+            _needs_post_processing=lambda *a, **k: False,
+            _integrity_check_warning=AsyncMock(return_value=None),
+            _sync_schedule_status=AsyncMock(side_effect=poison_first_commit),
+        ):
+            await self.manager._execute_download(download_id)
+        await self.bus.drain_once()
+
+        self.assertEqual(self.subscriber.names.count(RECORDING_COMPLETED), 1)
+        self.assertEqual(await self._status(download_id), DownloadStatus.COMPLETED.value)
+
+    async def test_a_rolled_back_completion_publishes_nothing(self):
+        """The status write happened, the commit did not: silence."""
+        download_id = await self._seed()
+
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(Download).where(Download.id == download_id)
+            )
+            download = result.scalar_one()
+            with patch("services.download_manager.recording_events", self.bus):
+                with patch.object(
+                    session, "commit", side_effect=RuntimeError("disk gone")
+                ):
+                    with self.assertRaises(RuntimeError):
+                        await self.manager._transition_completed(
+                            session,
+                            download,
+                            status=DownloadStatus.COMPLETED.value,
+                        )
+                await session.rollback()
+        await self.bus.drain_once()
+
+        self.assertEqual(self.subscriber.events, [])
+        self.assertEqual(await self._status(download_id), DownloadStatus.PENDING.value)
 
     async def test_finalize_after_interrupt_publishes_nothing_when_both_writes_fail(self):
         """The pre-existing optimistic broadcast must not become an optimistic event."""
@@ -465,15 +528,24 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
         download_id = await self._seed()
         self._write_file(os.path.join(self.download_folder, "show.ts"))
 
+        second_id = await self._seed(
+            output_path=os.path.join(self.download_folder, "other.ts")
+        )
+        self._write_file(os.path.join(self.download_folder, "other.ts"))
+
         with self._patched(
             _download_catchup_stream=AsyncMock(return_value=1024),
             _needs_post_processing=lambda *a, **k: False,
             _integrity_check_warning=AsyncMock(return_value=None),
         ):
             await self.manager._execute_download(download_id)
+            # The queue keeps moving: the next recording runs to completion
+            # with the first one's subscriber still wedged.
+            await self.manager._execute_download(second_id)
 
-        # No drain: the recording finished without any subscriber running.
+        # No drain: both finished without any subscriber running.
         self.assertEqual(await self._status(download_id), DownloadStatus.COMPLETED.value)
+        self.assertEqual(await self._status(second_id), DownloadStatus.COMPLETED.value)
 
     # --- interrupted ------------------------------------------------------
     async def test_an_interrupted_recording_publishes_a_completion(self):
