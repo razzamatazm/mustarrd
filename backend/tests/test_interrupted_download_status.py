@@ -34,6 +34,7 @@ def _make_download(download_id, output_path, **overrides):
     dl.duration_minutes = 60
     dl.recorded_duration_seconds = None
     dl.interruption_reason = None
+    dl.is_vod = False
     dl.error_message = None
     dl.completed_at = None
     for key, value in overrides.items():
@@ -278,7 +279,7 @@ class InterruptedRetryTests(unittest.TestCase):
             download_folder = os.path.join(root, "downloads")
             os.makedirs(completed_folder)
             os.makedirs(download_folder)
-            kept = os.path.join(completed_folder, "Show", "show.ts")
+            kept = os.path.join(completed_folder, "Show", "show.mkv")
             os.makedirs(os.path.dirname(kept))
             with open(kept, "wb") as f:
                 f.write(b"\x00" * 16)
@@ -308,9 +309,35 @@ class InterruptedRetryTests(unittest.TestCase):
             self.assertEqual(
                 download.output_path,
                 os.path.join(download_folder, "Show", "show.ts"),
-                "Retry must re-capture into the download folder, not over the kept file",
+                "Retry must re-capture a fresh .ts into the download folder, not over "
+                "the post-processed file it kept",
             )
             self.assertTrue(os.path.exists(kept), "The kept partial must survive a retry")
+
+    def test_retry_of_interrupted_vod_keeps_the_provider_extension(self):
+        with tempfile.TemporaryDirectory() as root:
+            completed_folder = os.path.join(root, "completed")
+            download_folder = os.path.join(root, "downloads")
+            os.makedirs(completed_folder)
+            os.makedirs(download_folder)
+            kept = os.path.join(completed_folder, "Movie.mp4")
+
+            download = _make_download(
+                8, kept,
+                status=DownloadStatus.INTERRUPTED.value,
+                interruption_reason="Connection to the provider was lost.",
+                is_vod=True,
+            )
+            maker, _session = _session_ctx(download)
+
+            with patch("services.download_manager.async_session_maker", maker), \
+                    patch.object(self.manager, "_load_app_settings", AsyncMock(return_value=None)), \
+                    patch.object(self.manager, "_resolve_completed_folder", return_value=completed_folder), \
+                    patch.object(self.manager, "_resolve_download_folder", return_value=download_folder), \
+                    patch.object(self.manager, "_sync_schedule_status", AsyncMock()):
+                asyncio.run(self.manager.retry_download(8))
+
+            self.assertEqual(download.output_path, os.path.join(download_folder, "Movie.mp4"))
 
     def test_retry_of_failed_download_is_unchanged(self):
         with tempfile.TemporaryDirectory() as root:

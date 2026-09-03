@@ -25,6 +25,17 @@ archive.
 _Avoid_: manual download (ambiguous now that [[time slot]] recording exists),
 instant download
 
+**Interrupted recording**:
+A recording whose capture stopped early - the provider connection dropped and
+the bounded retries ran out - but which left a file ffprobe can open. Mustarrd
+keeps it: it is post-processed, named and moved to the completed folder like a
+completed recording, and only its status differs. A partial ffprobe cannot open,
+including a zero-byte one, is not an interrupted recording; it is deleted and
+the download is Failed. Distinct from a **completed recording with warnings**,
+which finished but probes oddly - a recording can be both.
+_Avoid_: partial recording (that's the file on disk mid-capture), aborted,
+truncated, incomplete
+
 ### Commercial Skip
 
 **Commercial Skip**:

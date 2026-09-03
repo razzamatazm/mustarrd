@@ -32,6 +32,7 @@ import Login from './pages/Login'
 import DownloadPlayer from './pages/DownloadPlayer'
 import Onboarding from './pages/Onboarding'
 import { authApi, downloadsApi, epgApi, onboardingApi, createDownloadWebSocket } from './api'
+import { TERMINAL_DOWNLOAD_STATUSES } from './constants/downloadStatus'
 
 function ProtectedRoute({ authStatus, authLoading }) {
   const location = useLocation()
@@ -310,7 +311,7 @@ function App() {
     if (!authStatus?.authenticated) return undefined
     const ws = createDownloadWebSocket((data) => {
       if (data.type === 'progress') {
-        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(data.status)) {
+        if (TERMINAL_DOWNLOAD_STATUSES.includes(data.status)) {
           setActiveDownloads((prev) => Math.max(0, prev - 1))
         }
       }

@@ -40,6 +40,11 @@ import duration from 'dayjs/plugin/duration'
 import { accountsApi, authApi, downloadsApi, createDownloadWebSocket } from '../api'
 import HistoryRow from '../components/HistoryRow'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
+import {
+  PLAYABLE_DOWNLOAD_STATUSES,
+  RETRYABLE_DOWNLOAD_STATUSES,
+  TERMINAL_DOWNLOAD_STATUSES,
+} from '../constants/downloadStatus'
 import classes from './Downloads.module.css'
 
 dayjs.extend(duration)
@@ -93,6 +98,15 @@ function formatRecordedVsExpected(download) {
   const expected = download?.duration_minutes
   if (!recorded || recorded <= 0 || !expected || expected <= 0) return null
   return `${Math.round(recorded / 60)} min of ${expected} min`
+}
+
+// An interrupted recording carries two independent messages: why the capture
+// stopped, and any "Completed with warnings" integrity note. Show both, and
+// nothing at all when there is neither.
+function renderRowMessages(download) {
+  const messages = [download.interruption_reason, download.error_message].filter(Boolean)
+  if (messages.length === 0) return null
+  return messages.map((msg, i) => <div key={i}>{renderErrorMessage(msg)}</div>)
 }
 
 function getStatusBadge(status) {
@@ -307,7 +321,7 @@ export default function Downloads() {
           },
         }))
 
-        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(data.status)) {
+        if (TERMINAL_DOWNLOAD_STATUSES.includes(data.status)) {
           queryClient.invalidateQueries({ queryKey: ['downloads'] })
         }
       } else if (data.type === 'log') {
@@ -439,7 +453,7 @@ export default function Downloads() {
   ) || []
 
   const historyDownloads = enhancedDownloads?.filter((d) =>
-    ['completed', 'failed', 'cancelled', 'interrupted'].includes(d.status)
+    TERMINAL_DOWNLOAD_STATUSES.includes(d.status)
   ) || []
 
   const filteredHistoryDownloads = historyFilter === 'all'
@@ -450,14 +464,14 @@ export default function Downloads() {
   )
 
   const renderHistoryActions = (download) => {
-    const canRetry = ['failed', 'cancelled', 'interrupted'].includes(download.status)
+    const canRetry = RETRYABLE_DOWNLOAD_STATUSES.includes(download.status)
     const retryLabel = download.status === 'cancelled' ? 'Download again' : 'Retry'
     const downloadHref = `/api/downloads/${download.id}/file?action=download`
     const playHref = `/downloads/${download.id}/play`
 
     return (
       <>
-        {['completed', 'interrupted'].includes(download.status) && (
+        {PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && (
           isDesktop ? (
             <>
               <ActionIcon
@@ -672,7 +686,7 @@ export default function Downloads() {
                     const aired = formatAirDateTime(download, 'start', guideOffset)
                     const subtitleParts = [download.channel_name, aired]
                     if (
-                      ['completed', 'interrupted'].includes(download.status) &&
+                      PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) &&
                       download.output_path
                     ) {
                       subtitleParts.push(getFileName(download.output_path))
@@ -689,13 +703,8 @@ export default function Downloads() {
                         status={download.status}
                         title={download.program_title}
                         subtitle={subtitleParts.filter(Boolean).join(' · ')}
-                        error={
-                          [download.interruption_reason, download.error_message]
-                            .filter(Boolean)
-                            .map((msg, i) => <div key={i}>{renderErrorMessage(msg)}</div>)
-                            .slice(0, 2)
-                        }
-                        size={['completed', 'interrupted'].includes(download.status) && download.file_size > 0 ? formatBytes(download.file_size) : null}
+                        error={renderRowMessages(download)}
+                        size={PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && download.file_size > 0 ? formatBytes(download.file_size) : null}
                         actions={renderHistoryActions(download)}
                       />
                     )

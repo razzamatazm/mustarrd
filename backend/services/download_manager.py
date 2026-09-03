@@ -1362,27 +1362,38 @@ class DownloadManager:
             return False
         return bool(result.get("checked")) and bool(result.get("ok"))
 
-    async def _recapture_path(self, path: Optional[str]) -> str:
-        """Where a retry of a kept interrupted recording should write.
+    async def _recapture_path(self, download: Download) -> Optional[str]:
+        """Where a retry of a kept interrupted recording should capture to.
 
-        The kept partial has already been moved into the completed folder, so
-        re-recording over it would destroy the very file this feature saved.
-        Rebase the path back onto the download folder, preserving any
-        subfolders the naming template created.
+        A kept interrupted recording has been through the whole finishing path,
+        so output_path points at a post-processed file in the completed folder.
+        Two things have to be undone before it can be re-recorded:
+
+        - the folder, so the fresh capture does not stream on top of the file
+          the user still has (subfolders from the naming template are kept);
+        - the extension, because a catchup capture is always MPEG-TS. Left as
+          the post-processed container, the new .ts bytes would carry an .mkv
+          name and post-processing would skip them as already-converted.
+
+        VOD keeps the provider's extension: it is downloaded in whatever
+        container the provider serves, not remuxed from TS.
         """
+        path = download.output_path
         if not path:
             return path
         try:
             settings = await self._load_app_settings()
             completed_folder = self._resolve_completed_folder(settings)
             download_folder = self._resolve_download_folder(settings)
-            if self._folders_equal(completed_folder, download_folder):
-                return path
-            if not self._path_is_under(path, completed_folder):
-                return path
-            return os.path.join(download_folder, os.path.relpath(path, completed_folder))
-        except Exception:
+            if self._path_is_under(path, completed_folder) and not self._folders_equal(
+                completed_folder, download_folder
+            ):
+                path = os.path.join(download_folder, os.path.relpath(path, completed_folder))
+            if not download.is_vod:
+                path = os.path.splitext(path)[0] + ".ts"
             return path
+        except Exception:
+            return download.output_path
 
     async def _finalize_interrupted(
         self,
@@ -1450,7 +1461,17 @@ class DownloadManager:
         try:
             await session.commit()
         except Exception:
-            pass
+            # Never raise back into the error handler that called us. The file
+            # is safe on disk, but a lost commit would leave the row reading
+            # DOWNLOADING with an orphan in the completed folder, so retry on a
+            # fresh session exactly as the completed path does.
+            await self._finalize_completed_after_interrupt(
+                session,
+                download_id,
+                completed_path,
+                error_message=download.error_message,
+                status=DownloadStatus.INTERRUPTED.value,
+            )
 
         await self._broadcast_progress(
             download_id,
@@ -2494,7 +2515,7 @@ class DownloadManager:
                     # The kept partial already lives in the completed folder.
                     # Re-recording writes a fresh capture into the download
                     # folder so the partial the user still has is not clobbered.
-                    download.output_path = await self._recapture_path(download.output_path)
+                    download.output_path = await self._recapture_path(download)
                     download.interruption_reason = None
                     download.recorded_duration_seconds = None
                 download.status = DownloadStatus.PENDING.value
