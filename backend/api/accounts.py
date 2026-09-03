@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -16,7 +16,7 @@ from services.account_credentials import (
     encrypt_account_password,
     resolve_account_password_with_migration,
 )
-from services.xtream_client import XtreamClient
+from services.xtream_client import XtreamClient, TIMESHIFT_STYLE_AUTO, TIMESHIFT_STYLE_SETTINGS
 
 
 router = APIRouter()
@@ -30,12 +30,27 @@ def _log_task_result(task: asyncio.Task):
         logger.exception("EPG refresh task failed: %s", exc)
 
 
+def _validate_catchup_url_style(value: str | None) -> str | None:
+    """Accept only the three styles the app knows, normalised."""
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in TIMESHIFT_STYLE_SETTINGS:
+        raise ValueError(
+            "catchup_url_style must be one of: " + ", ".join(TIMESHIFT_STYLE_SETTINGS)
+        )
+    return normalized
+
+
 class AccountCreate(BaseModel):
     name: str
     server_url: str
     username: str
     password: str
     guide_offset_hours: int = 0
+    catchup_url_style: str = TIMESHIFT_STYLE_AUTO
+
+    _check_style = field_validator("catchup_url_style")(_validate_catchup_url_style)
 
 
 class AccountUpdate(BaseModel):
@@ -45,6 +60,9 @@ class AccountUpdate(BaseModel):
     password: str | None = None
     is_active: bool | None = None
     guide_offset_hours: int | None = None
+    catchup_url_style: str | None = None
+
+    _check_style = field_validator("catchup_url_style")(_validate_catchup_url_style)
 
 
 @router.get("")
@@ -122,6 +140,7 @@ async def create_account(
         active_connections=user_info.get("active_cons"),
         expiration_date=exp_date,
         guide_offset_hours=int(account.guide_offset_hours or 0),
+        catchup_url_style=account.catchup_url_style,
     )
 
     session.add(db_account)
@@ -179,6 +198,13 @@ async def update_account(
             continue
         if field == "guide_offset_hours" and value is not None:
             value = int(value)
+        if field == "catchup_url_style":
+            if value is None:
+                continue
+            # Changing the picker also clears what probing remembered, so it
+            # doubles as the way to force a fresh probe.
+            if value != (account.catchup_url_style or "auto"):
+                account.catchup_url_style_resolved = None
         setattr(account, field, value)
 
     await session.commit()

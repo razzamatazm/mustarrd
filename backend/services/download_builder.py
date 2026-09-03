@@ -9,7 +9,7 @@ from models import Download, DownloadStatus, AppSettings, XtreamAccount
 from services.account_credentials import resolve_account_password_with_migration
 from services.epg_service import epg_service
 from services.output_path import output_path as output_path_builder
-from services.xtream_client import XtreamClient
+from services.xtream_client import XtreamClient, resolve_timeshift_style
 
 
 def _coerce_ts(value) -> int:
@@ -190,6 +190,7 @@ async def build_download_from_program(
         padded_url_start,
         padded_duration,
         provider_start=provider_start,
+        style=resolve_timeshift_style(account),
     )
 
     return Download(

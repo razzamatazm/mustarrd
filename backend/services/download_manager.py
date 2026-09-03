@@ -19,6 +19,12 @@ from services.log_stream import backend_log_stream
 from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
 from services.plex_service import plex_service
+from services.xtream_client import (
+    other_timeshift_style,
+    restyle_timeshift_url,
+    timeshift_style_is_automatic,
+    timeshift_style_of_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +50,26 @@ CHUNKED_PROGRESS_INTERVAL_BYTES = 8 * 1024 * 1024
 DOWNLOAD_READ_BUFFER_BYTES = 4 * 1024 * 1024
 
 
+class ProviderStatusError(Exception):
+    """The provider refused the request with a status we cannot stream.
+
+    Raised only where the response headers are in hand and nothing has been
+    written to disk, which is what lets the catchup URL-style fallback retry
+    the same recording in the other form. The message is deliberately identical
+    to the plain ``Exception("HTTP ...")`` it replaced.
+    """
+
+    def __init__(self, status, reason):
+        super().__init__(f"HTTP {status}: {reason}")
+        self.status = status
+        self.reason = reason
+
+
 def _is_transient_network_error(e: BaseException) -> bool:
     """True for network-level errors worth retrying (disconnects, timeouts).
 
-    HTTP status errors are raised by _download_file_once as plain
-    ``Exception("HTTP ...")`` and disk errors (e.g. ENOSPC) are plain
+    HTTP status errors are raised by _download_file_once as
+    ``ProviderStatusError`` and disk errors (e.g. ENOSPC) are plain
     ``OSError``, so neither matches here: they fail fast.
     """
     if isinstance(e, asyncio.TimeoutError):
@@ -786,9 +807,8 @@ class DownloadManager:
                 )
 
                 # Start download
-                downloaded_bytes = await self._download_file(
-                    download.source_url,
-                    download.output_path,
+                downloaded_bytes = await self._download_catchup_stream(
+                    download,
                     download_id,
                     session,
                     offset=recovery_offset,
@@ -1930,6 +1950,86 @@ class DownloadManager:
         )
         return downloaded
 
+    async def _load_download_account(self, session: AsyncSession, account_id):
+        if not account_id:
+            return None
+        result = await session.execute(
+            select(XtreamAccount).where(XtreamAccount.id == account_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def _download_catchup_stream(
+        self,
+        download: Download,
+        download_id: int,
+        session: AsyncSession,
+        offset: int = 0,
+    ):
+        """Fetch a recording, settling which catchup URL form the provider wants.
+
+        Providers serve catchup either as a path (``/timeshift/...``) or as a
+        query (``/streaming/timeshift.php?...``). With the account left on
+        "auto" we send the form we currently believe in; if the provider
+        refuses the request outright we retry the same recording once in the
+        other form and remember whichever worked, so no later recording on this
+        account has to probe again. An account pinned to "path" or "query" is
+        taken at its word and never probed. Anything that is not a catchup URL
+        (VOD, series) passes straight through.
+
+        Probing only runs on a fresh transfer. A non-zero *offset* means we are
+        resuming a recording that already streamed bytes in this style, so a
+        refusal there is the provider's problem, not the URL form's, and
+        restyling would throw away the partial file for nothing.
+        """
+        url = download.source_url
+        style = timeshift_style_of_url(url)
+        if style is None:
+            return await self._download_file(
+                url, download.output_path, download_id, session, offset=offset
+            )
+
+        account = await self._load_download_account(session, download.account_id)
+        probing = offset == 0 and account is not None and timeshift_style_is_automatic(account)
+
+        try:
+            downloaded = await self._download_file(
+                url, download.output_path, download_id, session, offset=offset
+            )
+        except ProviderStatusError as refusal:
+            alternate_style = other_timeshift_style(style)
+            alternate_url = restyle_timeshift_url(url, alternate_style) if probing else None
+            if not alternate_url:
+                raise
+            await self._broadcast_log(
+                download_id,
+                f"Provider refused the {style}-style catchup URL ({refusal}). "
+                f"Retrying with the {alternate_style}-style URL.",
+                level="warning",
+            )
+            try:
+                # The refusal happened before any bytes were written, and the
+                # other form is a different URL, so this restarts from zero.
+                downloaded = await self._download_file(
+                    alternate_url, download.output_path, download_id, session, offset=0
+                )
+            except ProviderStatusError:
+                # The provider's own complaint about the form we started with
+                # is more use than its complaint about the one we guessed.
+                raise refusal from None
+            download.source_url = alternate_url
+            account.catchup_url_style_resolved = alternate_style
+            await session.commit()
+            await self._broadcast_log(
+                download_id,
+                f"Catchup URL style for this account resolved to {alternate_style}.",
+            )
+            return downloaded
+
+        if probing and account.catchup_url_style_resolved != style:
+            account.catchup_url_style_resolved = style
+            await session.commit()
+        return downloaded
+
     async def _download_file(
         self,
         url: str,
@@ -2031,7 +2131,7 @@ class DownloadManager:
                 if needs_restart:
                     pass  # fall through to the re-request block below
                 elif response.status not in (200, 206):
-                    raise Exception(f"HTTP {response.status}: {response.reason}")
+                    raise ProviderStatusError(response.status, response.reason)
 
                 content_type = response.headers.get("Content-Type", "")
                 _ct_lower = content_type.lower()
@@ -2158,7 +2258,7 @@ class DownloadManager:
             # Only reached when needs_restart is True: re-request from byte 0.
             async with http_session.get(url) as response:
                 if response.status not in (200, 206):
-                    raise Exception(f"HTTP {response.status}: {response.reason}")
+                    raise ProviderStatusError(response.status, response.reason)
                 restart_ct = response.headers.get("Content-Type", "")
                 _rct_lower = restart_ct.lower()
                 if (

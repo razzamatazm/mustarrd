@@ -25,6 +25,10 @@ class XtreamAccount(Base):
     guide_offset_hours: Mapped[int] = mapped_column(Integer, default=0)
     catchup_resolution_mode: Mapped[str] = mapped_column(String(32), default="auto")
     catchup_fallback_offset_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    # How catchup URLs are shaped for this provider: the user's choice
+    # ("auto"/"path"/"query") and, for "auto", the style probing settled on.
+    catchup_url_style: Mapped[str] = mapped_column(String(16), default="auto")
+    catchup_url_style_resolved: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_connection_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     last_connection_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_connection_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -48,6 +52,8 @@ class XtreamAccount(Base):
             "active_connections": self.active_connections,
             "expiration_date": self.expiration_date.isoformat() if self.expiration_date else None,
             "guide_offset_hours": int(self.guide_offset_hours or 0),
+            "catchup_url_style": self.catchup_url_style or "auto",
+            "catchup_url_style_resolved": self.catchup_url_style_resolved,
             "last_connection_ok": self.last_connection_ok,
             "last_connection_checked_at": self.last_connection_checked_at.isoformat() + "Z" if self.last_connection_checked_at else None,
             "last_connection_error": self.last_connection_error,

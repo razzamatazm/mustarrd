@@ -10,6 +10,147 @@ VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
 LIST_TIMEOUT = aiohttp.ClientTimeout(total=90)
 XMLTV_TIMEOUT = aiohttp.ClientTimeout(total=300)
 
+# The two shapes Xtream Codes providers serve catchup in. TIMESHIFT_STYLE_PATH
+# is the historical form and stays the default everywhere.
+TIMESHIFT_STYLE_PATH = "path"
+TIMESHIFT_STYLE_QUERY = "query"
+# The per-account setting adds "auto", which means "probe, then remember".
+TIMESHIFT_STYLE_AUTO = "auto"
+TIMESHIFT_STYLE_SETTINGS = (TIMESHIFT_STYLE_AUTO, TIMESHIFT_STYLE_PATH, TIMESHIFT_STYLE_QUERY)
+
+_TIMESHIFT_PATH_MARKER = "/timeshift/"
+_TIMESHIFT_QUERY_MARKER = "/streaming/timeshift.php"
+
+
+def _format_timeshift_url(server_url, username, password, stream_id, start, duration, style) -> str:
+    """The single place either catchup URL shape is spelled out.
+
+    Every component arrives already percent-encoded, so this only assembles.
+    Anything other than "query" gets the path form, which keeps an unrecognised
+    style from taking an account off the historical behaviour.
+    """
+    if (style or "").strip().lower() == TIMESHIFT_STYLE_QUERY:
+        return (
+            f"{server_url}{_TIMESHIFT_QUERY_MARKER}"
+            f"?username={username}&password={password}&stream={stream_id}"
+            f"&start={start}&duration={duration}"
+        )
+    return f"{server_url}{_TIMESHIFT_PATH_MARKER}{username}/{password}/{duration}/{start}/{stream_id}.ts"
+
+
+def _known_style(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in (TIMESHIFT_STYLE_PATH, TIMESHIFT_STYLE_QUERY) else None
+
+
+def resolve_timeshift_style(account) -> str:
+    """
+    Decide which URL form to send for an account.
+
+    An explicit "path" or "query" choice always wins. "auto" (and any value we
+    do not recognise, including a missing one) uses whatever probing last
+    settled on, and falls back to the historical path form when nothing has.
+
+    Takes the account rather than its two style columns because they are never
+    meaningful apart: the choice only means anything alongside what probing
+    found.
+    """
+    return (
+        _known_style(account.catchup_url_style)
+        or _known_style(account.catchup_url_style_resolved)
+        or TIMESHIFT_STYLE_PATH
+    )
+
+
+def timeshift_style_is_automatic(account) -> bool:
+    """True when the account probes rather than being pinned to one form."""
+    return _known_style(account.catchup_url_style) is None
+
+
+def timeshift_style_of_url(url: Optional[str]) -> Optional[str]:
+    """Which form an already-built URL is in, or None if it is not catchup."""
+    if not _split_timeshift_url(url or ""):
+        return None
+    base = (url or "").partition("?")[0]
+    return (
+        TIMESHIFT_STYLE_QUERY
+        if base.endswith(_TIMESHIFT_QUERY_MARKER)
+        else TIMESHIFT_STYLE_PATH
+    )
+
+
+def other_timeshift_style(style: str) -> str:
+    """The form to try when `style` is refused."""
+    return (
+        TIMESHIFT_STYLE_PATH
+        if (style or "").strip().lower() == TIMESHIFT_STYLE_QUERY
+        else TIMESHIFT_STYLE_QUERY
+    )
+
+
+def _split_timeshift_url(url: str) -> Optional[dict]:
+    """
+    Pull an already-built catchup URL back apart, in either form.
+
+    Values come back still percent-encoded, so re-emitting them is a lossless
+    move between the two forms. Returns None for anything that is not a catchup
+    URL we recognise, which is the caller's signal to leave it alone.
+    """
+    if not url:
+        return None
+    base, _, query = url.partition("?")
+    if base.endswith(_TIMESHIFT_QUERY_MARKER):
+        params = {}
+        for pair in query.split("&"):
+            key, sep, value = pair.partition("=")
+            if sep:
+                params[key] = value
+        required = ("username", "password", "stream", "start", "duration")
+        if not all(key in params for key in required):
+            return None
+        return {
+            "server_url": base[: -len(_TIMESHIFT_QUERY_MARKER)],
+            "username": params["username"],
+            "password": params["password"],
+            "stream_id": params["stream"],
+            "start": params["start"],
+            "duration": params["duration"],
+        }
+
+    marker_at = base.rfind(_TIMESHIFT_PATH_MARKER)
+    if marker_at == -1 or query:
+        return None
+    tail = base[marker_at + len(_TIMESHIFT_PATH_MARKER):]
+    parts = tail.split("/")
+    if len(parts) != 5:
+        return None
+    username, password, duration, start, stream_file = parts
+    stream_id, dot, _extension = stream_file.rpartition(".")
+    if not dot:
+        return None
+    return {
+        "server_url": base[:marker_at],
+        "username": username,
+        "password": password,
+        "stream_id": stream_id,
+        "start": start,
+        "duration": duration,
+    }
+
+
+def restyle_timeshift_url(url: Optional[str], style: str) -> Optional[str]:
+    """
+    Re-emit an existing catchup URL in the requested form.
+
+    Used by the fallback: the download row already holds a built URL, and the
+    retry needs the same recording in the other form without rebuilding it from
+    the program. Returns None when the URL is not a catchup URL.
+    """
+    parts = _split_timeshift_url(url or "")
+    if not parts:
+        return None
+    return _format_timeshift_url(style=style, **parts)
+
 
 class XtreamClient:
     def __init__(self, server_url: str, username: str, password: str):
@@ -174,18 +315,31 @@ class XtreamClient:
         start_time: datetime,
         duration_minutes: int,
         provider_start: Optional[str] = None,
+        style: Optional[str] = None,
     ) -> str:
         """
-        Build catchup/timeshift URL.
+        Build a catchup/timeshift URL in one of the two forms providers serve.
 
-        Format: {server}/timeshift/{username}/{password}/{duration}/{YYYY-MM-DD:HH-MM}/{stream_id}.ts
+        path  (default): {server}/timeshift/{username}/{password}/{duration}/{start}/{stream_id}.ts
+        query:           {server}/streaming/timeshift.php?username=&password=&stream=&start=&duration=
+
+        Both forms carry identical start tokens and durations. Anything other
+        than "query" is treated as the path form, so an unrecognised value can
+        never take an account off the historical behaviour.
         """
         raw_provider_start = (provider_start or "").strip()
         date_str = raw_provider_start or start_time.strftime("%Y-%m-%d:%H-%M")
-        u = quote(self.username, safe="")
-        p = quote(self.password, safe="")
-        sid = quote(str(stream_id), safe="")
-        return f"{self.server_url}/timeshift/{u}/{p}/{duration_minutes}/{date_str}/{sid}.ts"
+        return _format_timeshift_url(
+            self.server_url,
+            quote(self.username, safe=""),
+            quote(self.password, safe=""),
+            quote(str(stream_id), safe=""),
+            # ":" and "-" are legal in a query value and providers expect the
+            # start token to read back exactly as they published it.
+            quote(date_str, safe=":-"),
+            duration_minutes,
+            style,
+        )
 
     def build_stream_url(self, stream_id: str, extension: str = "ts") -> str:
         """Build live stream URL."""

@@ -36,6 +36,17 @@ which finished but probes oddly - a recording can be both.
 _Avoid_: partial recording (that's the file on disk mid-capture), aborted,
 truncated, incomplete
 
+**Catchup URL style**:
+Which of the two shapes a provider serves catchup links in: the **path style**
+(`/timeshift/{user}/{pass}/{duration}/{start}/{id}.ts`) or the **query style**
+(`/streaming/timeshift.php?username=…`). A per-account setting picks one, or
+leaves it on **Automatic**, in which case the first provider refusal makes
+Mustarrd retry in the other style and remember the answer as the account's
+**resolved style**. The setting is the user's choice; the resolved style is what
+probing worked out, and the two are stored separately so probing can never
+overwrite a deliberate choice.
+_Avoid_: catchup format, timeshift mode, URL type
+
 ### Commercial Skip
 
 **Commercial Skip**:

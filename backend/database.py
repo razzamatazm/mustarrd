@@ -76,6 +76,14 @@ async def _apply_lightweight_migrations(conn) -> None:
         await conn.execute(
             text("ALTER TABLE xtream_accounts ADD COLUMN catchup_resolution_mode VARCHAR(32) DEFAULT 'auto'")
         )
+    if not await _column_exists(conn, "xtream_accounts", "catchup_url_style"):
+        await conn.execute(
+            text("ALTER TABLE xtream_accounts ADD COLUMN catchup_url_style VARCHAR(16) DEFAULT 'auto'")
+        )
+    if not await _column_exists(conn, "xtream_accounts", "catchup_url_style_resolved"):
+        await conn.execute(
+            text("ALTER TABLE xtream_accounts ADD COLUMN catchup_url_style_resolved VARCHAR(16)")
+        )
 
     if not await _column_exists(conn, "xtream_accounts", "catchup_fallback_offset_minutes"):
         await conn.execute(

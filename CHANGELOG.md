@@ -16,6 +16,16 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-09-03
 
+### Added: Catchup works with providers that use the other URL format
+
+**What you would notice:** If your provider is one of the ones where every catchup recording failed, recordings should now simply work. Xtream providers hand out catchup links in one of two shapes, and Mustarrd only ever asked for the first one. It now tries the first shape, and if the provider turns it down, immediately asks again in the second shape and remembers the answer, so the rest of your recordings go straight to the one that works.
+
+Each account in **Settings > Accounts** has a new **Catchup URL style** picker, left on **Automatic**. You only need to touch it if you want to pin an account to one shape. The account card shows which shape is actually in use, so if you are chasing a provider problem you can see what Mustarrd is asking for. Changing the picker also forgets what it worked out before, which is how you make it try again.
+
+Nothing changes for providers that already worked: the very same link is sent as before, and the fallback only ever fires after the provider has refused.
+
+**What changed:** `build_timeshift_url` can emit either the path form (`/timeshift/...`) or the query form (`/streaming/timeshift.php?...`), both carrying the same start token and duration. `XtreamAccount` gained `catchup_url_style` (the user's choice) and `catchup_url_style_resolved` (what probing settled on). A refused initial request now raises `ProviderStatusError`, which the download manager catches to retry once in the other form before any bytes hit disk; if both forms fail, the provider's original error is what surfaces.
+
 ### Added: Recordings that cut off early are kept instead of thrown away
 
 **What you would notice:** If a recording loses its connection partway through and cannot be resumed, Mustarrd now keeps what it captured instead of deleting it. You recorded 54 minutes of a 60 minute program, you keep those 54 minutes. The recording shows up in History as **Interrupted** with the amount captured next to the scheduled length ("Interrupted - 54 min of 60 min"), sits in your completed recordings folder like any other, and can be played, downloaded or retried. Retrying re-records the program from scratch rather than trying to continue the file you already have, and the partial stays on disk while the new attempt runs. If the retry succeeds it takes the partial's place in your recordings folder.

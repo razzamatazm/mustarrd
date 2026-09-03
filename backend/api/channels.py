@@ -34,7 +34,7 @@ from services.hls_streamer import (
 from services.account_credentials import resolve_account_password_with_migration
 from services.logo_cache import logo_cache
 from services.preview_budget import PREVIEW_MAX_CONCURRENT, preview_budget
-from services.xtream_client import XtreamClient
+from services.xtream_client import XtreamClient, resolve_timeshift_style
 
 
 router = APIRouter()
@@ -95,6 +95,7 @@ async def _resolve_preview_stream_url(
         start_utc,
         duration_minutes,
         provider_start=normalized_start,
+        style=resolve_timeshift_style(account),
     )
 
 
