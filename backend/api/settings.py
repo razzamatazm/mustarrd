@@ -156,17 +156,6 @@ class SettingsUpdate(BaseModel):
     webhook_url_recording_cancelled: Optional[str] = None
     webhook_url_postprocessing_completed: Optional[str] = None
 
-    @field_validator(*WEBHOOK_SETTING_FIELDS)
-    @classmethod
-    def _validate_webhook_url(cls, value: Optional[str]) -> Optional[str]:
-        """Empty turns the webhook off; anything else must be a URL we will send to."""
-        if value is None:
-            return None
-        try:
-            return validate_webhook_url(value)
-        except WebhookUrlError as exc:
-            raise ValueError(str(exc)) from exc
-
 
 NON_NULLABLE_FIELDS = {
     *WEBHOOK_SETTING_FIELDS,
@@ -360,6 +349,14 @@ async def update_settings(
             value = normalize_comskip_hw_decode_mode(value)
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
+        if field in WEBHOOK_SETTING_FIELDS and value is not None:
+            # Empty turns that webhook off; anything else must be an address we
+            # will actually send to. Raised as a 400 with a sentence rather
+            # than a schema error, because the user typed it.
+            try:
+                value = validate_webhook_url(value)
+            except WebhookUrlError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         setattr(settings, field, value)
 
     # Enforce ComSkip constraint on the final stored state: the cut needs

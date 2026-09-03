@@ -71,12 +71,13 @@ describe('WebhooksSection', () => {
     expect(screen.getByText('Web address must start with http:// or https://')).toBeInTheDocument()
   })
 
-  it('surfaces an inline error for a reserved address', () => {
+  it('leaves the address policy to the server', () => {
+    // Which ranges are refused is decided in one place, on the server, and
+    // comes back as a save error. Pre-judging it here would be a second copy
+    // of a security rule that can drift.
     renderSection({ webhook_url_recording_started: 'http://169.254.169.254/latest/meta-data' })
 
-    expect(
-      screen.getByText('That address is reserved and cannot receive a webhook.')
-    ).toBeInTheDocument()
+    expect(screen.queryByText(/reserved/)).not.toBeInTheDocument()
   })
 
   it('does not flag a LAN address', () => {
@@ -146,7 +147,9 @@ describe('getWebhookErrors', () => {
     expect(errors.webhook_url_recording_failed).toMatch(/1000 characters/)
   })
 
-  it('rejects the cloud metadata endpoint and other reserved ranges', () => {
+  it('does not duplicate the server address policy', () => {
+    // Reserved ranges are refused by the server on save, not here. This test
+    // pins that so nobody re-adds a second, drifting copy of the rule.
     const errors = getWebhookErrors({
       ...emptyFormData,
       webhook_url_recording_started: 'http://169.254.169.254/latest/meta-data',
@@ -154,12 +157,7 @@ describe('getWebhookErrors', () => {
       webhook_url_recording_failed: 'http://239.1.2.3/hook',
       webhook_url_recording_cancelled: 'http://240.0.0.1/hook',
     })
-    expect(Object.keys(errors).sort()).toEqual([
-      'webhook_url_recording_cancelled',
-      'webhook_url_recording_completed',
-      'webhook_url_recording_failed',
-      'webhook_url_recording_started',
-    ])
+    expect(errors).toEqual({})
   })
 
   it('ignores surrounding whitespace when a value is otherwise fine', () => {

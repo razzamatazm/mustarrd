@@ -38,39 +38,21 @@ export const WEBHOOK_FIELDS = [
   },
 ]
 
-function parsedHost(url) {
+function urlShapeError(url) {
   try {
     const parsed = new URL(url)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { error: 'scheme' }
-    if (!parsed.hostname) return { error: 'host' }
-    return { hostname: parsed.hostname.replace(/^\[|\]$/g, '') }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'scheme'
+    if (!parsed.hostname) return 'host'
+    return null
   } catch {
-    return { error: 'host' }
+    return 'host'
   }
 }
 
-// Mirrors the address ranges the server refuses. Private and loopback
-// addresses are deliberately fine: a box on your own network is the point.
-function isForbiddenAddress(hostname) {
-  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (ipv4) {
-    const octets = ipv4.slice(1).map(Number)
-    if (octets.some((octet) => octet > 255)) return false
-    const [a, b] = octets
-    if (octets.every((octet) => octet === 0)) return true            // unspecified
-    if (a === 169 && b === 254) return true                          // link-local
-    if (a >= 224 && a <= 239) return true                            // multicast
-    if (a >= 240) return true                                        // reserved
-    return false
-  }
-  if (!hostname.includes(':')) return false
-  const compact = hostname.toLowerCase()
-  if (compact === '::') return true                                  // unspecified
-  if (/^fe[89ab]/.test(compact)) return true                         // link-local
-  if (/^ff/.test(compact)) return true                               // multicast
-  return false
-}
-
+// Catches the shape mistakes worth catching before a round trip. The address
+// policy itself (which ranges are refused) lives on the server only, so there
+// is one copy of it to keep right; a reserved address comes back as a save
+// error rather than being pre-judged here.
 export function getWebhookErrors(formData) {
   if (!formData) return {}
   const errors = {}
@@ -86,17 +68,14 @@ export function getWebhookErrors(formData) {
       errors[field] = 'Web address cannot contain spaces.'
       return
     }
-    const { error, hostname } = parsedHost(value)
+    const error = urlShapeError(value)
     if (error === 'scheme') {
       errors[field] = 'Web address must start with http:// or https://'
       return
     }
-    if (error === 'host' || !hostname) {
+    if (error === 'host') {
       errors[field] = 'Web address must include a host, for example http://192.168.1.10:8080/hook'
       return
-    }
-    if (isForbiddenAddress(hostname)) {
-      errors[field] = 'That address is reserved and cannot receive a webhook.'
     }
   })
   return errors

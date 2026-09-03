@@ -103,10 +103,11 @@ class WebhookDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
     def dispatcher(self, **overrides):
         values = targets(**overrides)
-        return WebhookDispatcher(
-            load_targets=lambda: values,
-            sender=self.sender,
-        )
+
+        async def load():
+            return values
+
+        return WebhookDispatcher(load_targets=load, sender=self.sender)
 
     async def test_posts_configured_url_with_event_envelope(self):
         dispatcher = self.dispatcher(**{RECORDING_COMPLETED: "https://ntfy.sh/topic"})
@@ -172,9 +173,11 @@ class WebhookDispatcherTests(unittest.IsolatedAsyncioTestCase):
         """A URL that got into the database by some other route never fires."""
         values = targets()
         values[setting_field_for_event(RECORDING_COMPLETED)] = "file:///etc/passwd"
-        dispatcher = WebhookDispatcher(
-            load_targets=lambda: values, sender=self.sender
-        )
+
+        async def load():
+            return values
+
+        dispatcher = WebhookDispatcher(load_targets=load, sender=self.sender)
 
         with self.assertLogs("services.webhook_dispatcher", level="WARNING"):
             await dispatcher(RecordingEventBus().build(RECORDING_COMPLETED, {"id": 4}))
@@ -182,7 +185,7 @@ class WebhookDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sender.calls, [])
 
     async def test_settings_lookup_failure_never_reaches_the_recording(self):
-        def explode():
+        async def explode():
             raise RuntimeError("database is having a moment")
 
         dispatcher = WebhookDispatcher(load_targets=explode, sender=self.sender)
@@ -191,18 +194,6 @@ class WebhookDispatcherTests(unittest.IsolatedAsyncioTestCase):
             await dispatcher(RecordingEventBus().build(RECORDING_COMPLETED, {"id": 5}))
 
         self.assertEqual(self.sender.calls, [])
-
-    async def test_async_target_loader_is_supported(self):
-        values = targets(**{RECORDING_COMPLETED: "https://ntfy.sh/topic"})
-
-        async def load():
-            await asyncio.sleep(0)
-            return values
-
-        dispatcher = WebhookDispatcher(load_targets=load, sender=self.sender)
-        await dispatcher(RecordingEventBus().build(RECORDING_COMPLETED, {"id": 6}))
-
-        self.assertEqual(len(self.sender.calls), 1)
 
     async def test_a_wedged_webhook_does_not_stall_other_subscribers(self):
         """The bus is fire-and-forget; assert the dispatcher itself is bounded."""

@@ -2,7 +2,7 @@
 
 The settings router is called directly, the way the other settings tests do
 it (see ``test_comskip_tunables_api.py``) — no TestClient, so a 400 shows up
-as ``HTTPException`` and a schema rejection as ``ValidationError``.
+as ``HTTPException``.
 """
 
 import os
@@ -15,7 +15,6 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from fastapi import HTTPException  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from api.settings import SettingsUpdate, get_settings, update_settings  # noqa: E402
@@ -100,14 +99,49 @@ class WebhookSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_bad_scheme_is_rejected_at_save_time(self):
         for bad in ("file:///etc/passwd", "ftp://host/x", "not a url"):
             with self.subTest(bad=bad):
-                with self.assertRaises(ValidationError):
-                    SettingsUpdate(webhook_url_recording_completed=bad)
+                async with self.Session() as session:
+                    with self.assertRaises(HTTPException) as caught:
+                        await update_settings(
+                            SettingsUpdate(webhook_url_recording_completed=bad),
+                            None,
+                            session,
+                        )
+                self.assertEqual(caught.exception.status_code, 400)
 
     async def test_the_cloud_metadata_address_is_rejected(self):
-        with self.assertRaises(ValidationError):
-            SettingsUpdate(
-                webhook_url_recording_completed="http://169.254.169.254/latest/meta-data/"
+        async with self.Session() as session:
+            with self.assertRaises(HTTPException) as caught:
+                await update_settings(
+                    SettingsUpdate(
+                        webhook_url_recording_completed="http://169.254.169.254/latest/meta-data/"
+                    ),
+                    None,
+                    session,
+                )
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("reserved", caught.exception.detail)
+
+    async def test_a_rejected_url_is_not_stored(self):
+        async with self.Session() as session:
+            await update_settings(
+                SettingsUpdate(webhook_url_recording_completed="https://ntfy.sh/good"),
+                None,
+                session,
             )
+        async with self.Session() as session:
+            with self.assertRaises(HTTPException):
+                await update_settings(
+                    SettingsUpdate(webhook_url_recording_completed="ftp://host/x"),
+                    None,
+                    session,
+                )
+        async with self.Session() as session:
+            fetched = await get_settings(None, session)
+
+        self.assertEqual(
+            fetched["webhook_url_recording_completed"], "https://ntfy.sh/good"
+        )
 
     async def test_webhook_urls_are_not_in_the_public_settings_response(self):
         from types import SimpleNamespace

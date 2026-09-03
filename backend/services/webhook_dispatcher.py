@@ -33,7 +33,6 @@ multicast and reserved.
 """
 
 import asyncio
-import inspect
 import ipaddress
 import logging
 import socket
@@ -206,17 +205,17 @@ class WebhookDeliveryError(RuntimeError):
     """The receiver answered, and said no."""
 
 
-TargetLoader = Callable[[], Any]
-WebhookSender = Callable[[str, Dict[str, Any]], Optional[Awaitable[None]]]
+TargetLoader = Callable[[], Awaitable[Dict[str, Any]]]
+WebhookSender = Callable[[str, Dict[str, Any]], Awaitable[None]]
 
 
 class WebhookDispatcher:
     """Subscriber on the recording event bus that turns events into POSTs.
 
-    ``load_targets`` returns a mapping of ``app_settings`` field name to URL —
-    the settings row's ``to_dict()`` will do. It may be sync or async, and it
-    is called per event so a settings change takes effect immediately without
-    a restart.
+    ``load_targets`` is an async callable returning a mapping of
+    ``app_settings`` field name to URL — the settings row's ``to_dict()`` will
+    do. It is awaited per event, so a settings change takes effect immediately
+    without a restart.
     """
 
     def __init__(
@@ -258,9 +257,7 @@ class WebhookDispatcher:
             return
 
         try:
-            result = self._sender(url, event.to_dict())
-            if inspect.isawaitable(result):
-                await result
+            await self._sender(url, event.to_dict())
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - logged, never propagated
@@ -274,10 +271,7 @@ class WebhookDispatcher:
             logger.info("Webhook for %s delivered to %s", event.name, _redact(url))
 
     async def _resolve_targets(self) -> Dict[str, Any]:
-        result = self._load_targets()
-        if inspect.isawaitable(result):
-            result = await result
-        return result or {}
+        return await self._load_targets() or {}
 
 
 async def load_webhook_targets() -> Dict[str, Any]:
