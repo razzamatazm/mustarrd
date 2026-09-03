@@ -333,9 +333,11 @@ export default function ComskipSection({ formData, onChange, onResetDefaults, on
               description="Let the GPU decode video during commercial detection, which can cut detection time noticeably on long recordings."
               tooltip="Comskip cannot report which decoders it supports, so unavailable options stay listed. If the selected mode does not work, detection automatically re-runs on the CPU and the recording still completes."
             >
+              {/* A command-line flag, not an INI key, so a custom INI does not
+                  take this over the way it does the tunables above. */}
               <Select
                 aria-label="Hardware decoding"
-                disabled={managedDisabled}
+                disabled={!enabled}
                 allowDeselect={false}
                 value={formData?.comskip_hw_decode_mode ?? COMSKIP_DEFAULTS.comskip_hw_decode_mode}
                 onChange={(val) => onChange('comskip_hw_decode_mode', val || COMSKIP_DEFAULTS.comskip_hw_decode_mode)}

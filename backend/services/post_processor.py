@@ -583,13 +583,9 @@ class PostProcessor:
         }
         availability = {
             "none": True,
-            "hwassist": bool(
-                available_ids & {
-                    HardwareAccel.VAAPI.value,
-                    HardwareAccel.AMD.value,
-                    HardwareAccel.APPLE_SILICON.value,
-                }
-            ),
+            # fancybits --hwassist is a VA-API path, so only a Linux VA-API
+            # capable stack counts as a hint that it is worth offering.
+            "hwassist": HardwareAccel.VAAPI.value in available_ids,
             "nvidia": HardwareAccel.NVIDIA.value in available_ids,
         }
         return [
@@ -1242,10 +1238,10 @@ class PostProcessor:
                 str(source_path)
             ])
 
+            # The flag itself is in cmd, so the existing log line stays
+            # byte-for-byte unchanged for anyone who has not opted in.
             mode_note = (
-                f" [hardware decode: {requested_hw_mode}]"
-                if hardware_flag
-                else " [hardware decode: none]"
+                f" [hardware decode: {requested_hw_mode}]" if hardware_flag else ""
             )
             await self._notify_log(
                 log_callback,
@@ -1422,6 +1418,9 @@ class PostProcessor:
 
                 if prep_returncode == 0:
                     active_input_file = temp_probe_file
+                    # Deliberately software: this retry already exists because
+                    # the first attempt failed, so it must not reintroduce a
+                    # hardware flag.
                     returncode, combined_output = await run_comskip_once(
                         str(temp_probe_file),
                         progress_prefix="Comskip retry"

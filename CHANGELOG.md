@@ -26,11 +26,11 @@ Nothing is kept if there is nothing worth keeping: if the file is empty, or the 
 
 **What changed:** A seventh download status, `interrupted`, was added. When the downloader exhausts its retries it now probes the partial file with ffprobe and only deletes it when ffprobe cannot open it. The reason the capture stopped is stored in a new `interruption_reason` column so it can sit alongside an existing "Completed with warnings" integrity note without either message overwriting the other. Post-processing, the move to the completed folder and restart recovery all preserve the interrupted status instead of promoting it to completed. Retrying an interrupted recording rewinds its output path to a fresh `.ts` capture in the download folder, so the new attempt is neither appended to the post-processed file nor mistaken for one that has already been converted.
 
-### Added: Comskip can use your GPU to speed up commercial detection
+### Added: Commercial Skip can use your GPU to speed up detection
 
-**What you would notice:** **Settings > Comskip > Advanced** has a new **Hardware decoding** option. Leave it on **None (software)** and nothing changes. Pick **Hardware assist** or **NVIDIA (CUVID)** and Mustarrd asks Comskip to decode video on the graphics hardware instead of the CPU, which can cut a noticeable chunk off detection time on long recordings.
+**What you would notice:** **Settings > Commercial Skip > Advanced** has a new **Hardware decoding** option. Leave it on **None (software)** and nothing changes. Pick **Hardware assist** or **NVIDIA (CUVID)** and Mustarrd asks the detector to decode video on the graphics hardware instead of the CPU, which can cut a noticeable chunk off detection time on long recordings.
 
-Options your machine does not appear to support are still listed, greyed with "(not detected)", because Comskip cannot reliably say up front which decoders it has. Choosing one is safe either way: if Comskip fails with the hardware option, detection re-runs automatically on the CPU and the recording still completes. The download log shows which mode was used and says so when it falls back.
+Options your machine does not appear to support are still listed, marked "(not detected)", because there is no reliable way to ask up front which decoders are available. Choosing one is safe either way: if detection fails with the hardware option, it re-runs automatically on the CPU and the recording still completes. The download log shows which mode was used and says so when it falls back.
 
 There is deliberately no separate Intel Quick Sync option. Hardware assist covers Intel and other non-NVIDIA hardware.
 

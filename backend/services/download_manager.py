@@ -2336,9 +2336,7 @@ class DownloadManager:
                         comskip_ini_path,
                         log_callback=log_callback,
                         progress_callback=comskip_progress_callback,
-                        hw_decode_mode=getattr(
-                            settings, "comskip_hw_decode_mode", None
-                        )
+                        hw_decode_mode=settings.comskip_hw_decode_mode
                     )
                 if comskip_progress is None or comskip_progress < 100:
                     comskip_progress = 100.0

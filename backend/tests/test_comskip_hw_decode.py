@@ -115,6 +115,13 @@ class ComskipHwDecodeFlagTests(unittest.IsolatedAsyncioTestCase):
         cmd_lines = [line for line in self.logs if "cmd:" in line]
         self.assertTrue(any("--cuvid" in line for line in cmd_lines), self.logs)
 
+    async def test_mode_none_leaves_the_log_line_unchanged(self):
+        await self._run("none", [make_proc(0)])
+        cmd_lines = [line for line in self.logs if "cmd:" in line]
+        self.assertTrue(cmd_lines)
+        for line in cmd_lines:
+            self.assertNotIn("hardware decode", line)
+
     async def test_hardware_failure_retries_once_with_software_decode(self):
         procs = [
             make_proc(3, b"comskip: unknown option --cuvid\n"),

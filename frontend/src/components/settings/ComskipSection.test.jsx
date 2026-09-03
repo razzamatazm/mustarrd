@@ -153,6 +153,15 @@ describe('ComskipSection', () => {
     expect(onChange).toHaveBeenCalledWith('comskip_hw_decode_mode', 'nvidia')
   })
 
+  it('keeps the hardware decode picker usable with a custom INI', () => {
+    renderSection({ comskip_use_custom_ini: true, comskip_custom_ini_path: '/tmp/my.ini' })
+
+    // Hardware decoding is a command-line flag, not an INI key, so a custom INI
+    // must not take it over the way it does the managed tunables.
+    expect(screen.getByRole('textbox', { name: 'Hardware decoding' })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: 'Black frames' })).toBeDisabled()
+  })
+
   it('shows unavailable hardware decode modes rather than hiding them', async () => {
     renderSection({}, {
       hwDecodeModes: [
