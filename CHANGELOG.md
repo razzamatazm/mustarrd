@@ -6,6 +6,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-11-12
 
+### Fixed: Accounts that work in other apps no longer fail with "Provider connection failed"
+
+**What you would notice:** Some providers hang up on anything that does not introduce itself as a video player. Mustarrd was not introducing itself as one, so adding an account on those providers failed with "Provider connection failed" even though the same login worked everywhere else. Mustarrd now identifies itself as a media player on everything it asks a provider for: signing in, the guide, channel logos, previews, and the recordings themselves. If your provider insists on one particular player, you can set it with the `CATCHUP_PROVIDER_USER_AGENT` environment variable.
+
+**What changed:** Every request to a provider now sends a player-style `User-Agent` (`VLC/3.0.21 LibVLC/3.0.21` by default) instead of the HTTP library's own name. Requests to Plex and webhooks are unaffected.
+
 ### Added: Scheduled recordings can wait for catchup to become ready
 
 **What you would notice:** **Settings > Recording** now has a **Wait after recording** option. It defaults to 5 minutes, giving a provider time to publish a just-finished show to its catchup archive before Mustarrd starts the download. Set it to 0 for the previous immediate behavior. The wait begins after any **End late** padding, and changing it also updates the timing of recordings that are already scheduled but have not started downloading.

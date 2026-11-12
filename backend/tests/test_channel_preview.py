@@ -97,8 +97,9 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def _call_preview(self, http_session, mode="live", **kwargs):
+        self.http_session_factory = MagicMock(return_value=http_session)
         with (
-            patch("api.channels.aiohttp.ClientSession", return_value=http_session),
+            patch("api.channels.aiohttp.ClientSession", self.http_session_factory),
             patch(
                 "api.channels.resolve_account_password_with_migration",
                 AsyncMock(return_value=SECRET_PASSWORD),
@@ -161,6 +162,16 @@ class ChannelPreviewTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("2026-06-08:20-00", requested_url)
         finally:
             await result.body_iterator.aclose()
+
+    async def test_provider_request_identifies_as_a_media_player(self):
+        """#453: a provider that drops non-player clients must still serve us."""
+        from services.provider_http import DEFAULT_PROVIDER_USER_AGENT
+
+        http_session = _make_http_session(_make_provider_response())
+        await self._call_preview(http_session)
+
+        _, kwargs = self.http_session_factory.call_args
+        self.assertEqual(kwargs["headers"], {"User-Agent": DEFAULT_PROVIDER_USER_AGENT})
 
     async def test_live_mode_builds_live_url(self):
         response = _make_provider_response()

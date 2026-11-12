@@ -22,6 +22,7 @@ from services.disk_space import get_free_space_shortfall
 from services import nfo_writer
 from services.download_analysis import DURATION_ANALYSIS_STATUSES, DurationAnalysis, analyze_duration
 from services.plex_service import plex_service
+from services.provider_http import provider_request_headers
 from services.recording_events import (
     POSTPROCESSING_COMPLETED,
     RECORDING_CANCELLED,
@@ -2603,7 +2604,9 @@ class DownloadManager:
             request_headers["Range"] = f"bytes={offset}-"
 
         async with aiohttp.ClientSession(
-            timeout=timeout, read_bufsize=DOWNLOAD_READ_BUFFER_BYTES
+            timeout=timeout,
+            read_bufsize=DOWNLOAD_READ_BUFFER_BYTES,
+            headers=provider_request_headers(),
         ) as http_session:
             needs_restart = False
 

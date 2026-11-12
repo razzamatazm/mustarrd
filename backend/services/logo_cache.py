@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlparse
 import aiohttp
 
 from config import ensure_config_files
+from services.provider_http import provider_request_headers
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,9 @@ class LogoCache:
             self._negative[key] = time.monotonic() + NEGATIVE_CACHE_SECONDS
             return None
 
-        async with aiohttp.ClientSession(timeout=LOGO_FETCH_TIMEOUT) as http_session:
+        async with aiohttp.ClientSession(
+            timeout=LOGO_FETCH_TIMEOUT, headers=provider_request_headers()
+        ) as http_session:
             current_url = url
             for _hop in range(LOGO_MAX_REDIRECTS + 1):
                 async with http_session.get(current_url, allow_redirects=False) as response:
