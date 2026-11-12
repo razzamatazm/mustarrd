@@ -70,11 +70,14 @@ async def lifespan(app: FastAPI):
     from services.scheduled_manager import scheduled_manager
     from services.epg_ingest_manager import epg_ingest_manager
     from services.recording_events import recording_events
+    from services.webhook_dispatcher import register_webhook_subscriber
 
     # Drains the recording lifecycle event queue. Started before recovery so
     # the events recovery publishes are delivered rather than sitting in the
-    # queue until the first download. Ships with no subscribers: #431
-    # (webhooks) and #430 (notifications) register here.
+    # queue until the first download. Subscribers register before the drain
+    # starts so nothing published during recovery is missed. #430
+    # (notifications) registers here too.
+    register_webhook_subscriber(recording_events)
     recording_event_task = asyncio.create_task(recording_events.run())
     await download_manager.recover_incomplete_downloads()
     download_task = asyncio.create_task(download_manager.process_queue())
