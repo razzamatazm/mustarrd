@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urljoin, urlencode, quote
 
+from services.provider_http import provider_request_headers
+
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
 # Full channel list and per-channel EPG backfill responses are as heavy as VOD
@@ -162,7 +164,8 @@ class XtreamClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers=provider_request_headers(),
             )
         return self._session
 

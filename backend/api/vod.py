@@ -31,6 +31,7 @@ from services.hls_streamer import (
     vod_preview_session_key,
 )
 from services.preview_budget import preview_budget
+from services.provider_http import provider_request_headers
 from services.vod_preview_source import loopback_source_url, vod_preview_source_relay
 from services.xtream_client import XtreamClient
 from services.vod_service import build_movie_download, build_episode_download
@@ -498,7 +499,9 @@ async def vod_preview_source(token: str, request: Request):
     if range_header:
         request_headers["Range"] = range_header
 
-    http_session = aiohttp.ClientSession(timeout=SOURCE_RELAY_TIMEOUT)
+    http_session = aiohttp.ClientSession(
+        timeout=SOURCE_RELAY_TIMEOUT, headers=provider_request_headers()
+    )
     try:
         provider = await http_session.get(url, headers=request_headers)
     except Exception:

@@ -167,9 +167,10 @@ class SourceRelayTests(unittest.IsolatedAsyncioTestCase):
         self.provider = provider
         self.http_session = http_session
 
+        self.http_session_factory = MagicMock(return_value=http_session)
         with (
             patch("api.vod.vod_preview_source_relay", self.relay),
-            patch("api.vod.aiohttp.ClientSession", return_value=http_session),
+            patch("api.vod.aiohttp.ClientSession", self.http_session_factory),
         ):
             return await vod_preview_source(token=self.token, request=request)
 
@@ -177,6 +178,15 @@ class SourceRelayTests(unittest.IsolatedAsyncioTestCase):
         """FFmpeg has no cookie; loopback plus the token is the guard."""
         sig = inspect.signature(vod_preview_source)
         self.assertNotIn("_auth", sig.parameters)
+
+    async def test_provider_request_identifies_as_a_media_player(self):
+        """#453: a provider that drops non-player clients must still serve us."""
+        from services.provider_http import DEFAULT_PROVIDER_USER_AGENT
+
+        await self._call(_make_request())
+
+        _, kwargs = self.http_session_factory.call_args
+        self.assertEqual(kwargs["headers"], {"User-Agent": DEFAULT_PROVIDER_USER_AGENT})
 
     async def test_lan_caller_is_refused(self):
         with self.assertRaises(HTTPException) as ctx:

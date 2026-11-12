@@ -79,6 +79,7 @@ All settings use the `CATCHUP_` env prefix (see `backend/config.py`). A `.env` f
 - `CATCHUP_DATABASE_URL` — defaults to SQLite in `/app/config/` (Docker) or `data/` (local); `CATCHUP_DATA_ROOT` moves the local data dir
 - `CATCHUP_DEFAULT_DOWNLOAD_FOLDER` / `CATCHUP_DEFAULT_COMPLETED_FOLDER`
 - `CATCHUP_MAX_CONCURRENT_DOWNLOADS` (default: 2)
+- `CATCHUP_PROVIDER_USER_AGENT` — the User-Agent sent on every request to an IPTV provider (default: a VLC string; see `services/provider_http.py`). New provider request sites must pass `headers=provider_request_headers()`
 - `CATCHUP_FFMPEG_PATH`, `CATCHUP_COMSKIP_PATH` — override auto-detected tool paths (read in `post_processor.py`, not `config.py`)
 - `CATCHUP_SESSION_SECRET`, `CATCHUP_CORS_ORIGINS`, `CATCHUP_DEBUG`
 - `CATCHUP_DESKTOP_MODE=1` — desktop packaging mode (`desktop_server.py`, binds 127.0.0.1, downloads to `~/Downloads`)

@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     default_completed_folder: str = _default_completed_folder()
     max_concurrent_downloads: int = 2
 
+    # How requests to an IPTV provider identify themselves. Some providers
+    # drop anything that does not look like a media player; override with
+    # CATCHUP_PROVIDER_USER_AGENT if yours wants a specific one.
+    provider_user_agent: str = "VLC/3.0.21 LibVLC/3.0.21"
+
     # EPG Cache
     epg_cache_ttl: int = 3600  # 1 hour in seconds
     epg_refresh_interval_hours: int = 8
