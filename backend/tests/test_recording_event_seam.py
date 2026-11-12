@@ -401,7 +401,7 @@ class RecordingEventSeamTests(unittest.IsolatedAsyncioTestCase):
         self._write_file(source)
         processed = self._write_file(os.path.join(self.download_folder, "show.mkv"))
 
-        async def fake_post_process(original_path, did, session, settings):
+        async def fake_post_process(original_path, did, session, settings, **_kwargs):
             return processed, []
 
         with self._patched(
