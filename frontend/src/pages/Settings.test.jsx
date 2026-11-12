@@ -51,6 +51,7 @@ const baseSettings = {
   default_pre_padding_minutes: 1,
   default_post_padding_minutes: 2,
   scheduled_download_delay_minutes: 5,
+  download_retry_window_seconds: 30,
   transcode_enabled: true,
   remux_only: true,
   transcode_format: 'mkv',
@@ -210,6 +211,29 @@ describe('Settings page', () => {
       expect(settingsApi.update).toHaveBeenCalled()
     })
     expect(settingsApi.update.mock.calls[0][0]).toEqual({ scheduled_download_delay_minutes: 6 })
+  })
+
+  it('shows the retry window at its default and saves a longer one', async () => {
+    renderSettings()
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('30 seconds (default)')
+
+    fireEvent.click(input)
+    fireEvent.click(await screen.findByRole('option', { name: '10 minutes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ download_retry_window_seconds: 600 })
+  })
+
+  it('shows a retry window saved outside the app instead of a blank box', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, download_retry_window_seconds: 45 })
+    renderSettings()
+
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('45 seconds')
   })
 
   it('discards edits from the save bar', async () => {

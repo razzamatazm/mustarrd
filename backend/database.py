@@ -160,6 +160,16 @@ async def _apply_lightweight_migrations(conn) -> None:
             )
         )
 
+    # 30 seconds is what the hard-coded retry constants added up to, so an
+    # existing install keeps retrying exactly as it did.
+    if not await _column_exists(conn, "app_settings", "download_retry_window_seconds"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN download_retry_window_seconds INTEGER DEFAULT 30"
+            )
+        )
+
     if not await _column_exists(conn, "downloads", "retry_count"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0"))
 

@@ -47,6 +47,16 @@ probing worked out, and the two are stored separately so probing can never
 overwrite a deliberate choice.
 _Avoid_: catchup format, timeshift mode, URL type
 
+**Retry window**:
+The total time one download will spend waiting for the provider to come back
+after network errors mid-recording, before it gives up. Spent in growing waits
+between reconnect attempts, each of which resumes from the bytes already on
+disk. Counts waiting only, across the whole download, and does not reset when
+a retry succeeds. Distinct from the Auto-retry failed downloads option,
+which re-queues a download that has already failed.
+_Avoid_: retry count, retry limit, backoff (those are how the window is spent,
+not what the user sets), outage timer
+
 **Raw download duration**:
 The measured length of catchup media immediately after capture, before trimming,
 Commercial Skip or container conversion. Compared with the requested duration,

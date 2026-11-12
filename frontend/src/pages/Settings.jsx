@@ -56,6 +56,31 @@ import WebhooksSection, { getWebhookErrors } from '../components/settings/Webhoo
 import { SECTION_GROUPS, ADMIN_SECTIONS, DOWNLOAD_USER_SECTIONS } from '../components/settings/sections'
 import classes from './Settings.module.css'
 
+// 30 seconds is what Mustarrd always did before this was a setting.
+const DEFAULT_RETRY_WINDOW_SECONDS = 30
+const RETRY_WINDOW_CHOICES = [
+  { value: '30', label: '30 seconds (default)' },
+  { value: '60', label: '1 minute' },
+  { value: '120', label: '2 minutes' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+  { value: '3600', label: '1 hour' },
+]
+
+// A value saved outside the app (through the API) still has to show up as the
+// current choice rather than leaving the box blank.
+function retryWindowOptions(currentSeconds) {
+  const current = String(currentSeconds ?? DEFAULT_RETRY_WINDOW_SECONDS)
+  if (RETRY_WINDOW_CHOICES.some((choice) => choice.value === current)) return RETRY_WINDOW_CHOICES
+  const seconds = Number(current)
+  const label = seconds === 0 ? 'Do not retry' : `${seconds} seconds`
+  return [...RETRY_WINDOW_CHOICES, { value: current, label }].sort(
+    (a, b) => Number(a.value) - Number(b.value)
+  )
+}
+
 function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
 }
@@ -927,6 +952,25 @@ export default function Settings() {
               unit="min"
               value={formData.scheduled_download_delay_minutes}
               onChange={(val) => handleChange('scheduled_download_delay_minutes', val)}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
+      <SubGroup label="Provider outages">
+        <Stack gap={0}>
+          <SettingRow
+            label="Keep retrying for"
+            description="If your provider drops out partway through a recording, Mustarrd waits and reconnects, picking up where it left off. This is how long one recording will spend waiting in total before it gives up. Whatever it captured is kept if it plays."
+          >
+            <Select
+              aria-label="Keep retrying for"
+              value={String(formData.download_retry_window_seconds ?? DEFAULT_RETRY_WINDOW_SECONDS)}
+              onChange={(val) => {
+                if (val !== null) handleChange('download_retry_window_seconds', Number(val))
+              }}
+              data={retryWindowOptions(formData.download_retry_window_seconds)}
+              allowDeselect={false}
             />
           </SettingRow>
         </Stack>
