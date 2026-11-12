@@ -26,6 +26,11 @@ from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from services.webhook_dispatcher import (
+    WEBHOOK_SETTING_FIELDS,
+    WebhookUrlError,
+    validate_webhook_url,
+)
 
 
 router = APIRouter()
@@ -144,8 +149,16 @@ class SettingsUpdate(BaseModel):
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
 
+    # Webhooks: one URL per recording lifecycle event. Empty clears it.
+    webhook_url_recording_started: Optional[str] = None
+    webhook_url_recording_completed: Optional[str] = None
+    webhook_url_recording_failed: Optional[str] = None
+    webhook_url_recording_cancelled: Optional[str] = None
+    webhook_url_postprocessing_completed: Optional[str] = None
+
 
 NON_NULLABLE_FIELDS = {
+    *WEBHOOK_SETTING_FIELDS,
     "download_folder",
     "completed_folder",
     "tv_template",
@@ -336,6 +349,14 @@ async def update_settings(
             value = normalize_comskip_hw_decode_mode(value)
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
+        if field in WEBHOOK_SETTING_FIELDS and value is not None:
+            # Empty turns that webhook off; anything else must be an address we
+            # will actually send to. Raised as a 400 with a sentence rather
+            # than a schema error, because the user typed it.
+            try:
+                value = validate_webhook_url(value)
+            except WebhookUrlError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         setattr(settings, field, value)
 
     # Enforce ComSkip constraint on the final stored state: the cut needs

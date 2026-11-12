@@ -101,6 +101,16 @@ class AppSettings(Base):
         default="resource_connections_only",
     )
 
+    # Webhooks: one URL per recording lifecycle event, empty means off.
+    # Validated on save by services.webhook_dispatcher.validate_webhook_url.
+    webhook_url_recording_started: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_completed: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_failed: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_cancelled: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_postprocessing_completed: Mapped[str] = mapped_column(
+        String(1000), default=""
+    )
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -153,4 +163,10 @@ class AppSettings(Base):
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,
             "onboarding_selected_profile": self.onboarding_selected_profile,
             "plex_outbound_policy": self.plex_outbound_policy,
+            "webhook_url_recording_started": self.webhook_url_recording_started or "",
+            "webhook_url_recording_completed": self.webhook_url_recording_completed or "",
+            "webhook_url_recording_failed": self.webhook_url_recording_failed or "",
+            "webhook_url_recording_cancelled": self.webhook_url_recording_cancelled or "",
+            "webhook_url_postprocessing_completed": self.webhook_url_postprocessing_completed
+            or "",
         }

@@ -1,22 +1,20 @@
 # Changelog
 
-## 2026-10-23
-
-### Improved: Put the original length comparison beside the downloaded time
-
-**What you would notice:** History shows Longer than expected, Shorter than expected, or Matches expected length beside Downloaded before processing, rather than beside the requested length.
-
-**What changed:** Moved the existing comparison label without changing duration analysis, recording status, or playback actions.
-
 All notable changes to Mustarrd are listed here. Most recent changes are at the top.
 
 ---
 
-## 2026-10-22
+## 2026-11-12
+
+### Added: Mustarrd can now tell other apps when a recording happens
+
+**What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
+
+**What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
 
 ### Added: See the downloaded length before processing changes it
 
-**What you would notice:** Downloads History now compares a catchup recording's original downloaded length with the requested length, including your padding. It shows whether the file is shorter, longer, or within five seconds of the request. Commercial removal no longer makes that comparison use the shortened final file. If the original length cannot be measured reliably, History says so instead of guessing.
+**What you would notice:** Downloads History now compares a catchup recording's original downloaded length with the requested length, including your padding. Beside the downloaded time it says whether the file is shorter than expected, longer than expected, or matches (within five seconds of the request). Commercial removal no longer makes that comparison use the shortened final file. If the original length cannot be measured reliably, History says so instead of guessing.
 
 **What changed:** Raw catchup duration is measured with ffprobe before post-processing and saved separately from the final file duration. Missing, invalid, or implausibly large measurements are recorded as uncertain. Restart recovery preserves the original observation; retries clear it for the next capture. This change reports the measurement without trimming media or automatically retrying it. Existing completed recordings and VOD are not retrospectively analyzed.
 

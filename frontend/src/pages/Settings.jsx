@@ -52,6 +52,7 @@ import NumberStepper from '../components/settings/NumberStepper'
 import SaveBar from '../components/settings/SaveBar'
 import SettingsSearch from '../components/settings/SettingsSearch'
 import { SectionHeader, SettingRow, SubGroup } from '../components/settings/SettingsPrimitives'
+import WebhooksSection, { getWebhookErrors } from '../components/settings/WebhooksSection'
 import { SECTION_GROUPS, ADMIN_SECTIONS, DOWNLOAD_USER_SECTIONS } from '../components/settings/sections'
 import classes from './Settings.module.css'
 
@@ -1672,6 +1673,7 @@ export default function Settings() {
   )
 
   const comskipErrors = getComskipErrors(formData)
+  const webhookErrors = getWebhookErrors(formData)
 
   const renderComskip = () => (
     <ComskipSection
@@ -1685,6 +1687,10 @@ export default function Settings() {
     />
   )
 
+  const renderWebhooks = () => (
+    <WebhooksSection formData={formData} onChange={handleChange} />
+  )
+
   const sectionContent = {
     recording: renderRecording,
     processing: renderProcessing,
@@ -1695,6 +1701,7 @@ export default function Settings() {
     security: renderSecurity,
     users: renderUsers,
     plex: renderPlex,
+    webhooks: renderWebhooks,
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }
@@ -1892,7 +1899,7 @@ export default function Settings() {
         <SaveBar
           count={changedCount}
           saving={updateMutation.isPending}
-          disabled={Object.keys(comskipErrors).length > 0}
+          disabled={Object.keys(comskipErrors).length > 0 || Object.keys(webhookErrors).length > 0}
           onSave={handleSave}
           onDiscard={handleReset}
         />
