@@ -155,3 +155,16 @@ receiver that is down, slow or unhappy is logged and forgotten. Usually points
 at something on the same network, such as a Plex or Jellyfin library refresh.
 _Avoid_: callback, hook, script (Mustarrd never runs a user-supplied script),
 integration
+
+**Notification**:
+A problem shown to a person under the bell in the app shell: an account
+expiring or expired, an account the guide refresh could not connect to, or a
+recording that failed. One per problem, not one per occurrence: a guide refresh
+that keeps failing updates the same notification. It disappears on its own when
+the problem does (the account is renewed, the connection comes back, a retry
+succeeds). **Dismissing** hides it for that person only, until the problem
+comes back or gets worse. Admins see every notification; a download-only user
+sees only failures of recordings they asked for. In-app only; anything sent off
+the box is a [[webhook]].
+_Avoid_: alert, toast (that's the transient pop-up), event (that's a
+[[recording event]])

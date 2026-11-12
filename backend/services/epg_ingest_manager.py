@@ -561,8 +561,23 @@ class EPGIngestManager:
                     account.last_connection_checked_at = datetime.now(timezone.utc)
                     account.last_connection_error = error if not ok else None
                     await session.commit()
+                    await self._sync_connection_notification(session, account)
         except Exception:
             logger.exception("Failed to update connection status for account %s", account_id)
+
+    async def _sync_connection_notification(self, session, account) -> None:
+        """Raise or clear the bell's "can't connect" entry (#430).
+
+        Runs after the status commit, so a notification problem can never
+        lose the connection status itself.
+        """
+        try:
+            from services.notifications import sync_account_connection
+
+            await sync_account_connection(session, account)
+            await session.commit()
+        except Exception:
+            logger.exception("Failed to update connection notification for account %s", account.id)
 
     async def _update_provider_capabilities(
         self,

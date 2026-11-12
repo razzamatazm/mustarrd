@@ -282,6 +282,13 @@ export const onboardingApi = {
   dismiss: () => request('/onboarding/dismiss', { method: 'POST' }),
 }
 
+// Notification centre (the bell)
+export const notificationsApi = {
+  list: () => request('/notifications'),
+  dismiss: (id) => request(`/notifications/${id}/dismiss`, { method: 'POST' }),
+  dismissAll: () => request('/notifications/dismiss-all', { method: 'POST' }),
+}
+
 // Backend Logs
 export const logsApi = {
   list: (limit = 300, source = null, level = null, view = 'basic') => {

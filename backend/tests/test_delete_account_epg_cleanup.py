@@ -78,9 +78,10 @@ class DeleteAccountEPGCleanupTests(unittest.IsolatedAsyncioTestCase):
         account = _make_account()
         session, result = await self._run_delete(account)
         self.assertEqual(result, {"status": "deleted"})
-        # Fifth execute call must target epg_programs table.
+        # Fifth execute call must target epg_programs table. Calls after the
+        # commit (best-effort notification cleanup, #430) are not counted.
         calls = session.execute.await_args_list
-        self.assertEqual(len(calls), 5)
+        self.assertGreaterEqual(len(calls), 5)
         epg_stmt = calls[4].args[0]
         self.assertEqual(str(epg_stmt.table), str(EPGProgram.__table__))
 

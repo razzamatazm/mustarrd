@@ -12,6 +12,7 @@ from models import AppSettings, EPGProgram, XtreamAccount, ScheduledRecording, S
 from services.download_manager import download_manager
 from services.epg_ingest_manager import epg_ingest_manager
 from services.epg_service import epg_service
+from services import notifications as notification_service
 from services.account_credentials import (
     encrypt_account_password,
     resolve_account_password_with_migration,
@@ -95,6 +96,17 @@ async def list_accounts_public(
     ]
 
 
+async def _sync_account_notifications(session: AsyncSession, account: XtreamAccount) -> None:
+    """Re-check the bell for this account after a save. Never fails the save."""
+    try:
+        await notification_service.sync_account_expiry(session, account)
+        await notification_service.sync_account_connection(session, account)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not update notifications for account_id=%s", account.id)
+        await session.rollback()
+
+
 @router.post("")
 async def create_account(
     account: AccountCreate,
@@ -146,6 +158,7 @@ async def create_account(
     session.add(db_account)
     await session.commit()
     await session.refresh(db_account)
+    await _sync_account_notifications(session, db_account)
 
     refresh_task = asyncio.create_task(epg_ingest_manager.refresh_account_by_id(db_account.id))
     refresh_task.add_done_callback(_log_task_result)
@@ -209,6 +222,7 @@ async def update_account(
 
     await session.commit()
     await session.refresh(account)
+    await _sync_account_notifications(session, account)
 
     return account.to_dict()
 
@@ -267,9 +281,19 @@ async def delete_account(
         delete(EPGProgram).where(EPGProgram.account_id == account.id)
     )
 
+    deleted_account_id = account.id
     await session.delete(account)
     await session.commit()
     epg_service.clear_cache()
+
+    # Best effort: the hourly sweep also removes notifications whose account
+    # is gone, so a failure here only delays their disappearance.
+    try:
+        await notification_service.clear_for_account(session, deleted_account_id)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not clear notifications for deleted account_id=%s", deleted_account_id)
+        await session.rollback()
 
     for dl_id in active_dl_ids:
         await download_manager.cancel_download(dl_id)
@@ -318,6 +342,7 @@ async def test_account(
         account.last_used = datetime.utcnow()
 
         await session.commit()
+        await _sync_account_notifications(session, account)
 
         return {
             "status": "connected",
