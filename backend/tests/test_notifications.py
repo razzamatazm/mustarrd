@@ -227,6 +227,77 @@ class ConnectionFailureTests(NotificationTestCase):
         self.assertEqual(await self._visible(_admin(1)), [])
 
 
+    async def _press_test(self, account_id, *, fails=False, exp_date=None):
+        """Call the accounts Test endpoint with a stubbed provider."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from api import accounts as accounts_api
+
+        client = MagicMock()
+        client.close = AsyncMock()
+        if fails:
+            client.authenticate = AsyncMock(side_effect=Exception("Invalid credentials"))
+        else:
+            client.authenticate = AsyncMock(return_value={
+                "user_info": {"exp_date": exp_date} if exp_date else {},
+                "server_info": {},
+            })
+        async with self.Session() as session:
+            with (
+                patch.object(accounts_api, "XtreamClient", return_value=client),
+                patch.object(
+                    accounts_api,
+                    "resolve_account_password_with_migration",
+                    new=AsyncMock(return_value="pw"),
+                ),
+            ):
+                try:
+                    await accounts_api.test_account(account_id, None, session)
+                except HTTPException:
+                    pass
+
+    async def test_a_failed_test_button_raises_it(self):
+        account = await self._account()
+        await self._press_test(account.id, fails=True)
+        [item] = await self._visible(_admin(1))
+        self.assertEqual(item["kind"], svc.KIND_ACCOUNT_CONNECTION)
+        async with self.Session() as session:
+            fresh = await session.get(XtreamAccount, account.id)
+        self.assertIs(fresh.last_connection_ok, False)
+
+    async def test_a_passing_test_button_clears_it(self):
+        account = await self._account()
+        await self._sync(account.id, False, "timeout")
+        await self._press_test(account.id)
+        self.assertEqual(await self._visible(_admin(1)), [])
+        async with self.Session() as session:
+            fresh = await session.get(XtreamAccount, account.id)
+        self.assertIs(fresh.last_connection_ok, True)
+
+    async def test_a_guide_refresh_picks_up_a_renewal(self):
+        """Renewing at the provider clears the expiry warning without pressing Test."""
+        from unittest.mock import patch
+
+        from services.epg_ingest_manager import EPGIngestManager
+
+        account = await self._account(expiration_date=datetime.utcnow() + timedelta(days=2))
+        async with self.Session() as session:
+            fresh = await session.get(XtreamAccount, account.id)
+            await svc.sync_account_expiry(session, fresh)
+            await session.commit()
+        self.assertEqual(len(await self._visible(_admin(1))), 1)
+
+        renewed = int((datetime.utcnow() + timedelta(days=365)).timestamp())
+        with patch("services.epg_ingest_manager.async_session_maker", self.Session):
+            await EPGIngestManager()._update_account_info(
+                account.id, {"user_info": {"exp_date": str(renewed)}}
+            )
+        self.assertEqual(await self._visible(_admin(1)), [])
+        async with self.Session() as session:
+            fresh = await session.get(XtreamAccount, account.id)
+        self.assertGreater(fresh.expiration_date, datetime.utcnow() + timedelta(days=300))
+
+
 class RecordingFailureTests(NotificationTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
@@ -343,6 +414,19 @@ class DismissalTests(NotificationTestCase):
         async with self.Session() as session:
             await svc.dismiss(session, item["id"], _admin(1))
             await svc.dismiss(session, item["id"], _admin(1))
+        async with self.Session() as session:
+            rows = (await session.execute(select(NotificationDismissal))).scalars().all()
+        self.assertEqual(len(rows), 1)
+
+    async def test_two_dismissals_racing_do_not_error(self):
+        """Two requests that both see "not dismissed yet" must not hit the unique key."""
+        await self._raise_admin_one()
+        [item] = await self._visible(_admin(1))
+        async with self.Session() as first, self.Session() as second:
+            await svc._dismiss_ids(first, [item["id"]], 1)
+            await svc._dismiss_ids(second, [item["id"]], 1)
+            await first.commit()
+            await second.commit()
         async with self.Session() as session:
             rows = (await session.execute(select(NotificationDismissal))).scalars().all()
         self.assertEqual(len(rows), 1)

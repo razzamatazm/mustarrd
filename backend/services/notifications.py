@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import delete, exists, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import async_session_maker
@@ -328,19 +329,13 @@ async def list_for(session: AsyncSession, context) -> List[Dict[str, Any]]:
 
 
 async def _dismiss_ids(session: AsyncSession, ids, user_id: int) -> None:
-    already = set(
-        (
-            await session.execute(
-                select(NotificationDismissal.notification_id).where(
-                    NotificationDismissal.user_id == user_id,
-                    NotificationDismissal.notification_id.in_(ids),
-                )
-            )
-        ).scalars().all()
-    )
-    for notification_id in ids:
-        if notification_id not in already:
-            session.add(NotificationDismissal(notification_id=notification_id, user_id=user_id))
+    # Insert-or-ignore, so two dismiss requests racing for the same row
+    # cannot trip the (notification_id, user_id) unique key.
+    rows = [{"notification_id": notification_id, "user_id": user_id} for notification_id in ids]
+    if rows:
+        await session.execute(
+            sqlite_insert(NotificationDismissal).values(rows).on_conflict_do_nothing()
+        )
 
 
 async def dismiss(session: AsyncSession, notification_id: int, context) -> bool:
