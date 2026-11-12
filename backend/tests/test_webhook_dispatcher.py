@@ -70,6 +70,16 @@ class ValidateWebhookUrlTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(validate_webhook_url(url), url)
 
+    def test_ipv6_loopback_is_allowed(self):
+        """::1 sits inside a range Python calls reserved, but it is still loopback."""
+        for url in ("http://[::1]:8080/hook", "http://[::ffff:127.0.0.1]:8080/hook"):
+            with self.subTest(url=url):
+                self.assertEqual(validate_webhook_url(url), url)
+
+    def test_rejects_metadata_address_written_as_ipv4_mapped_ipv6(self):
+        with self.assertRaises(WebhookUrlError):
+            validate_webhook_url("http://[::ffff:169.254.169.254]/latest/meta-data/")
+
     def test_rejects_non_http_schemes(self):
         for url in ("file:///etc/passwd", "ftp://host/x", "gopher://host", "/relative"):
             with self.subTest(url=url):
@@ -262,8 +272,10 @@ class AiohttpWebhookSenderTests(unittest.IsolatedAsyncioTestCase):
 
         recorder = _RequestRecorder(status=status)
 
+        addresses = [resolves_to] if isinstance(resolves_to, str) else list(resolves_to)
+
         async def fake_getaddrinfo(host, port, **kwargs):
-            return [(2, 1, 6, "", (resolves_to, 0))]
+            return [(2, 1, 6, "", (address, 0)) for address in addresses]
 
         loop = asyncio.get_running_loop()
         with patch.object(loop, "getaddrinfo", fake_getaddrinfo):
@@ -277,6 +289,19 @@ class AiohttpWebhookSenderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(recorder.calls[0][0], "http://plex.local:32400/hook")
+
+    async def test_localhost_resolving_to_both_loopbacks_is_sent_to(self):
+        """Most systems answer "localhost" with ::1 and 127.0.0.1 together.
+
+        The app sitting next to Plex on one machine is the desktop case, so a
+        webhook at http://localhost must go out rather than being refused
+        because ::1 falls inside a reserved IPv6 range.
+        """
+        recorder = await self._send(
+            "http://localhost:32400/hook", resolves_to=["::1", "127.0.0.1"]
+        )
+
+        self.assertEqual(recorder.calls[0][0], "http://localhost:32400/hook")
 
     async def test_redirects_are_not_followed(self):
         recorder = await self._send("http://plex.local/hook", resolves_to="192.168.1.50")

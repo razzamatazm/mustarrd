@@ -103,7 +103,18 @@ def _address_is_forbidden(address: "ipaddress._BaseAddress") -> bool:
 
     Private and loopback addresses are deliberately *allowed*: a webhook
     pointed at the Plex box on the LAN is the main use case.
+
+    Loopback is answered first because ``::1`` sits inside ``::/8``, which
+    Python reports as reserved; without that, ``localhost`` (which resolves to
+    both ``::1`` and ``127.0.0.1`` on most systems) would be refused. An
+    IPv4-mapped IPv6 address is judged as the IPv4 address it carries, so the
+    answer does not depend on which Python version is running.
     """
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+    if address.is_loopback:
+        return False
     return bool(
         address.is_link_local
         or address.is_unspecified

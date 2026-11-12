@@ -32,7 +32,10 @@ Webhook delivery uses its own guard, not the logo cache's:
 
 - Scheme must be `http` or `https`; a host must be present.
 - Private and loopback addresses are **allowed**. This is the deliberate
-  divergence from `logo_cache`, and it is the point of the feature.
+  divergence from `logo_cache`, and it is the point of the feature. Loopback is
+  answered before the refusals below, because `::1` falls inside a range
+  Python's `ipaddress` reports as reserved and `localhost` usually resolves to
+  both `::1` and `127.0.0.1`.
 - Link-local (including `169.254.169.254` and `fe80::/10`), unspecified,
   multicast and reserved addresses are **refused**, both when the URL is a
   literal IP at save time and after DNS resolution immediately before the
