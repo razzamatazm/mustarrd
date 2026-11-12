@@ -4,6 +4,22 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-11-12
+
+### Added: Scheduled recordings can wait for catchup to become ready
+
+**What you would notice:** **Settings > Recording** now has a **Wait after recording** option. It defaults to 5 minutes, giving a provider time to publish a just-finished show to its catchup archive before Mustarrd starts the download. Set it to 0 for the previous immediate behavior. The wait begins after any **End late** padding, and changing it also updates the timing of recordings that are already scheduled but have not started downloading.
+
+**What changed:** A global `scheduled_download_delay_minutes` setting (0–120) now controls scheduled-recording readiness. The scheduler reads the current value on each pass, and schedule APIs include it in `available_at` so countdowns and expected start times match the actual dispatch time. Ad-hoc downloads and already-ended time-slot downloads remain immediate.
+
+### Added: Mustarrd can now tell other apps when a recording happens
+
+**What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
+
+**What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
+
+---
+
 ## 2026-09-04
 
 ### Fixed: A brief database hiccup no longer loses a scheduled recording
@@ -55,12 +71,6 @@ Options your machine does not appear to support are still listed, marked "(not d
 There is deliberately no separate Intel Quick Sync option. Hardware assist covers Intel and other non-NVIDIA hardware.
 
 **What changed:** A new `comskip_hw_decode_mode` setting (default `none`) adds `--hwassist` or `--cuvid` to the Comskip command line. A non-zero exit with a hardware flag present triggers exactly one retry without it before the failure is treated as real. Existing installs migrate to `none`.
-
-### Added: Scheduled recordings can wait for catchup to become ready
-
-**What you would notice:** **Settings > Recording** now has a **Wait after recording** option. It defaults to 5 minutes, giving a provider time to publish a just-finished show to its catchup archive before Mustarrd starts the download. Set it to 0 for the previous immediate behavior. The wait begins after any **End late** padding, and changing it also updates the timing of recordings that are already scheduled but have not started downloading.
-
-**What changed:** A global `scheduled_download_delay_minutes` setting (0–120) now controls scheduled-recording readiness. The scheduler reads the current value on each pass, and schedule APIs include it in `available_at` so countdowns and expected start times match the actual dispatch time. Ad-hoc downloads and already-ended time-slot downloads remain immediate.
 
 ### Fixed: Your chosen GPU is used when commercial skip is on
 
