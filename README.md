@@ -17,6 +17,7 @@ Mustarrd connects to your IPTV provider and lets you download past programs. Thi
 - **GPU-accelerated encoding:** if your server has an Intel, AMD, or NVIDIA GPU, re-encoding uses it automatically; the Settings page shows GPU status in plain language
 - **Download from On Demand:** if your provider offers on demand listings, you can grab those too — movies and series browse as a poster grid
 - **Scheduled recordings:** set programs to download automatically when they air; export and import your schedule as a backup or to move to another machine
+- **Download length checks:** compare the original catchup download with its requested length, including padding, before commercial removal or conversion changes the file
 - **Smart file naming:** TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
 - **Plex Link:** let your Plex users request programming by logging in with their Plex credentials (or don't), and push finished recordings straight into your Plex library
 - **Multiple accounts:** connect more than one IPTV provider. Add more users to give them download access

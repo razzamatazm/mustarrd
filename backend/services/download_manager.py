@@ -4,6 +4,7 @@ import aiofiles
 import errno
 import glob as glob_module
 import logging
+import math
 import os
 import shutil
 from pathlib import Path
@@ -19,6 +20,7 @@ from services.log_stream import backend_log_stream
 from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
 from services import nfo_writer
+from services.download_analysis import DURATION_ANALYSIS_STATUSES, DurationAnalysis, analyze_duration
 from services.plex_service import plex_service
 from services.recording_events import (
     POSTPROCESSING_COMPLETED,
@@ -976,6 +978,7 @@ class DownloadManager:
                         is_complete = False
 
                     if is_complete:
+                        await self._analyze_downloaded_file(download)
                         if self._needs_post_processing(download, settings):
                             recovered_post_ids.append(download.id)
                             await self._transition_processing(
@@ -1016,6 +1019,10 @@ class DownloadManager:
                     continue
 
                 if download.status == DownloadStatus.PROCESSING.value:
+                    # A legacy processing row may already point at media that
+                    # Commercial Skip transformed. Missing raw evidence cannot
+                    # be reconstructed from that final file.
+                    await self._analyze_downloaded_file(download, raw_available=False)
                     # Only trust "file already in the completed folder" as proof
                     # that post-processing finished when the completed folder is
                     # distinct from the download folder. With equal folders the
@@ -1185,6 +1192,7 @@ class DownloadManager:
 
                 # Preserve any recovered partial-file offset for Range resume attempt.
                 recovery_offset = download.downloaded_bytes or 0
+                self._reset_duration_analysis(download)
 
                 # Update status to downloading
                 await self._transition_downloading(session, download)
@@ -1207,6 +1215,7 @@ class DownloadManager:
                     )
                 transfer_complete = True
                 await self._broadcast_log(download_id, "Download transfer complete.")
+                await self._analyze_downloaded_file(download)
 
                 settings_result = await session.execute(select(AppSettings))
                 settings = settings_result.scalar_one_or_none()
@@ -1413,6 +1422,7 @@ class DownloadManager:
 
                 # Captured while the session is known good: the error handlers
                 # below may run against a session poisoned by a failed commit.
+                await self._analyze_downloaded_file(download, raw_available=False)
                 interrupted_reason = self._interruption_reason(download)
 
                 if download_id in self._cancelled:
@@ -1670,6 +1680,64 @@ class DownloadManager:
         if duration and duration > 0:
             download.recorded_duration_seconds = int(round(duration))
 
+    @staticmethod
+    def _reset_duration_analysis(download: Download) -> None:
+        """A new capture must never inherit the previous attempt's evidence."""
+        download.raw_duration_seconds = None
+        download.duration_analysis_status = None
+        download.duration_analysis_reason = None
+
+    async def _analyze_downloaded_file(
+        self, download: Download, *, raw_available: bool = True
+    ) -> None:
+        """Observe raw catchup media once, before it can be transformed.
+
+        The caller's existing transition commits the observation before a
+        processing worker can run. Recovery batches keep their single commit.
+        Probe failures are informational and never enter file-deletion paths.
+        """
+        if download.is_vod:
+            return
+        if download.duration_analysis_status in DURATION_ANALYSIS_STATUSES:
+            return
+        minutes = download.duration_minutes
+        valid_expected = (
+            not isinstance(minutes, bool)
+            and isinstance(minutes, (int, float))
+            and math.isfinite(minutes)
+            and minutes > 0
+        )
+        expected = minutes * 60 if valid_expected else 0
+        if not valid_expected:
+            analysis = analyze_duration(0, None)
+        elif not raw_available:
+            analysis = DurationAnalysis(
+                expected, None, "unavailable",
+                "The raw download was not measured before post-processing began.",
+            )
+        else:
+            try:
+                from services.post_processor import post_processor
+
+                measured = await post_processor._get_duration(download.output_path)
+            except Exception:
+                measured = None
+            analysis = analyze_duration(expected, measured)
+        download.raw_duration_seconds = analysis.actual_seconds
+        download.duration_analysis_status = analysis.status
+        download.duration_analysis_reason = analysis.reason
+        if analysis.actual_seconds is None:
+            message = f"Raw download duration unavailable: {analysis.reason}"
+        else:
+            message = (
+                f"Raw download duration: {analysis.actual_seconds:.1f}s; "
+                f"expected {analysis.expected_seconds:.1f}s including padding "
+                f"({analysis.status})."
+            )
+            if analysis.reason:
+                message += f" {analysis.reason}"
+        await self._broadcast_log(download.id, message)
+
     async def _write_nfo_sidecar(
         self,
         download: Download,
@@ -1827,6 +1895,7 @@ class DownloadManager:
         either message clobbering the other.
         """
         download.interruption_reason = reason
+        await self._analyze_downloaded_file(download)
         if settings is None:
             settings = await self._load_app_settings()
 
@@ -3048,6 +3117,7 @@ class DownloadManager:
                 DownloadStatus.CANCELLED.value,
                 DownloadStatus.INTERRUPTED.value
             ]:
+                self._reset_duration_analysis(download)
                 if download.status == DownloadStatus.INTERRUPTED.value:
                     # The kept partial already lives in the completed folder.
                     # Re-recording writes a fresh capture into the download

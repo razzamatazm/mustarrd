@@ -50,6 +50,11 @@ class Download(Base):
     # Actual duration of the recorded file (ffprobe), as opposed to the EPG
     # program duration in duration_minutes. Null when probing was unavailable.
     recorded_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Original catchup media, measured before any post-processing. Keep this
+    # distinct from the final file's duration (commercial removal shortens it).
+    raw_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_analysis_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    duration_analysis_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Why the capture stopped early. Non-null marks the recording as interrupted
     # and is kept separate from error_message so an interruption and a
     # "Completed with warnings" integrity note can coexist without clobbering.
@@ -69,6 +74,14 @@ class Download(Base):
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def expected_duration_seconds(self) -> int | None:
+        # duration_minutes is the requested catchup range, including the
+        # user's pre/post padding. VOD does not have this timing contract.
+        if self.is_vod or not self.duration_minutes or self.duration_minutes <= 0:
+            return None
+        return self.duration_minutes * 60
 
     def to_dict(self):
         return {
@@ -92,6 +105,10 @@ class Download(Base):
             "error_message": self.error_message,
             "is_vod": self.is_vod,
             "recorded_duration_seconds": self.recorded_duration_seconds,
+            "raw_duration_seconds": self.raw_duration_seconds,
+            "expected_duration_seconds": self.expected_duration_seconds,
+            "duration_analysis_status": self.duration_analysis_status,
+            "duration_analysis_reason": self.duration_analysis_reason,
             "interruption_reason": self.interruption_reason,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,

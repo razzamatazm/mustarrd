@@ -47,6 +47,15 @@ probing worked out, and the two are stored separately so probing can never
 overwrite a deliberate choice.
 _Avoid_: catchup format, timeshift mode, URL type
 
+**Raw download duration**:
+The measured length of catchup media immediately after capture, before trimming,
+Commercial Skip or container conversion. Compared with the requested duration,
+including explicit pre/post padding, with a five-second timestamp tolerance.
+Stored separately from the final file's recorded duration and retained after
+processing; a new capture attempt clears the previous observation. Missing or
+implausible measurements remain uncertain, never replaced with the requested
+length. This is a duration estimate, not proof of uninterrupted or correct content.
+
 ### Commercial Skip
 
 **Commercial Skip**:

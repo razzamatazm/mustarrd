@@ -18,6 +18,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 **What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
 
+### Added: See the downloaded length before processing changes it
+
+**What you would notice:** Downloads History now compares a catchup recording's original downloaded length with the requested length, including your padding. Beside the downloaded time it says whether the file is shorter than expected, longer than expected, or matches (within five seconds of the request). Commercial removal no longer makes that comparison use the shortened final file. If the original length cannot be measured reliably, History says so instead of guessing.
+
+**What changed:** Raw catchup duration is measured with ffprobe before post-processing and saved separately from the final file duration. Missing, invalid, or implausibly large measurements are recorded as uncertain. Restart recovery preserves the original observation; retries clear it for the next capture. This change reports the measurement without trimming media or automatically retrying it. Existing completed recordings and VOD are not retrospectively analyzed.
+
 ---
 
 ## 2026-09-04

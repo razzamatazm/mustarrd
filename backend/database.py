@@ -131,6 +131,14 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "downloads", "recorded_duration_seconds"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN recorded_duration_seconds INTEGER"))
 
+    for column_name, column_type in (
+        ("raw_duration_seconds", "FLOAT"),
+        ("duration_analysis_status", "VARCHAR(32)"),
+        ("duration_analysis_reason", "TEXT"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_type}"))
+
     if not await _column_exists(conn, "downloads", "interruption_reason"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN interruption_reason TEXT"))
 

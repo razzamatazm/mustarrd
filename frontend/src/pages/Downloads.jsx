@@ -90,14 +90,54 @@ function getFileName(filePath) {
   return parts[parts.length - 1] || 'file'
 }
 
-// "54 min of 60 min" for an interrupted recording, so the user can see how
-// much of the program was actually captured. Null when we have no probed
-// duration to compare against.
-function formatRecordedVsExpected(download) {
-  const recorded = download?.recorded_duration_seconds
-  const expected = download?.duration_minutes
-  if (!recorded || recorded <= 0 || !expected || expected <= 0) return null
-  return `${Math.round(recorded / 60)} min of ${expected} min`
+function formatMediaDuration(seconds) {
+  const total = Math.round(seconds)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const remainder = total % 60
+  const parts = []
+  if (hours) parts.push(`${hours}h`)
+  if (minutes) parts.push(`${minutes}m`)
+  if (remainder || parts.length === 0) parts.push(`${remainder}s`)
+  return parts.join(' ')
+}
+
+function renderDurationAnalysis(download) {
+  const status = download.duration_analysis_status
+  if (download.is_vod || !status) return null
+
+  const labels = {
+    matched: 'Matches expected length',
+    short: 'Shorter than expected',
+    long: 'Longer than expected',
+  }
+  const raw = download.raw_duration_seconds
+  const expected = download.expected_duration_seconds
+  const hasComparison = labels[status] &&
+    Number.isFinite(raw) && raw > 0 &&
+    Number.isFinite(expected) && expected > 0
+
+  // The final recorded_duration_seconds may already have had commercials
+  // removed. Only the persisted raw analysis can describe what was downloaded.
+  return (
+    <div style={{ whiteSpace: 'normal', marginTop: 4 }}>
+      {hasComparison ? (
+        <>
+          <div>Downloaded before processing: {formatMediaDuration(raw)} · {labels[status]}</div>
+          <div>
+            Expected: {formatMediaDuration(expected)} (including padding)
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            {status === 'unreliable' ? 'Download length could not be verified' : 'Download length unavailable'}
+          </div>
+          {download.duration_analysis_reason && <div>{download.duration_analysis_reason}</div>}
+        </>
+      )}
+    </div>
+  )
 }
 
 // An interrupted recording carries two independent messages: why the capture
@@ -692,17 +732,25 @@ export default function Downloads() {
                       subtitleParts.push(getFileName(download.output_path))
                     }
                     if (download.status === 'interrupted') {
-                      const captured = formatRecordedVsExpected(download)
-                      subtitleParts.unshift(
-                        captured ? `Interrupted - ${captured}` : 'Interrupted'
-                      )
+                      subtitleParts.unshift('Interrupted')
+                      const recorded = download.recorded_duration_seconds
+                      if (!download.duration_analysis_status && Number.isFinite(recorded) && recorded > 0) {
+                        subtitleParts.push(`Final file: ${formatMediaDuration(recorded)}`)
+                      }
                     }
                     return (
                       <HistoryRow
                         key={download.id}
                         status={download.status}
                         title={download.program_title}
-                        subtitle={subtitleParts.filter(Boolean).join(' · ')}
+                        subtitle={
+                          <>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {subtitleParts.filter(Boolean).join(' · ')}
+                            </div>
+                            {renderDurationAnalysis(download)}
+                          </>
+                        }
                         error={renderRowMessages(download)}
                         size={PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && download.file_size > 0 ? formatBytes(download.file_size) : null}
                         actions={renderHistoryActions(download)}

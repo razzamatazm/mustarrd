@@ -139,14 +139,119 @@ describe('Downloads page', () => {
     expect(screen.getByRole('button', { name: 'Cancel download' })).toBeInTheDocument()
   })
 
-  it('shows an interrupted recording in history with recorded versus expected duration', async () => {
+  it('labels the final file duration for a legacy interrupted recording', async () => {
     await renderDownloads({
       downloads: [interruptedDownload],
       initialEntries: ['/downloads?tab=history'],
     })
     expect(await screen.findByText('Championship Final')).toBeInTheDocument()
-    expect(screen.getByText(/Interrupted - 54 min of 60 min/)).toBeInTheDocument()
+    expect(screen.getByText(/Interrupted.*Final file: 54m/)).toBeInTheDocument()
     expect(screen.getByText(/Connection to the provider was lost/)).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['matched', 3600, '1h', 'Matches expected length'],
+    ['short', 3590, '59m 50s', 'Shorter than expected'],
+    ['long', 3900, '1h 5m', 'Longer than expected'],
+  ])('shows the raw %s duration without changing the recording status or actions', async (status, raw, formatted, label) => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        duration_minutes: 60,
+        raw_duration_seconds: raw,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: status,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText(`Downloaded before processing: ${formatted} · ${label}`)).toBeInTheDocument()
+    expect(screen.getByText('Expected: 1h (including padding)')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Completed' }))
+    expect(screen.getByText('Nature Documentary')).toBeInTheDocument()
+  })
+
+  it('uses the raw duration and padded expectation instead of the processed file duration', async () => {
+    await renderDownloads({
+      downloads: [{
+        ...interruptedDownload,
+        duration_minutes: 66,
+        raw_duration_seconds: 3840,
+        expected_duration_seconds: 3960,
+        recorded_duration_seconds: 2700,
+        duration_analysis_status: 'short',
+        error_message: 'Completed with warnings: unusual stream metadata.',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('Downloaded before processing: 1h 4m · Shorter than expected')).toBeInTheDocument()
+    expect(screen.getByText(/Expected: 1h 6m \(including padding\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/45m/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Connection to the provider was lost/)).toBeInTheDocument()
+    expect(screen.getByText(/Completed with warnings: unusual stream metadata/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['unavailable', null, 'Download length unavailable', 'The raw recording was no longer available.'],
+    ['unreliable', 93600, 'Download length could not be verified', 'The recording timestamps are inconsistent.'],
+  ])('explains %s analysis without substituting the final file duration', async (status, raw, label, reason) => {
+    await renderDownloads({
+      downloads: [{
+        ...interruptedDownload,
+        raw_duration_seconds: raw,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: status,
+        duration_analysis_reason: reason,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText(label)).toBeInTheDocument()
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Expected:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Final file:/)).not.toBeInTheDocument()
+  })
+
+  it('does not display invalid analysis values as measured duration', async () => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        raw_duration_seconds: null,
+        expected_duration_seconds: 3600,
+        recorded_duration_seconds: 2700,
+        duration_analysis_status: 'matched',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('Download length unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Matches expected length/)).not.toBeInTheDocument()
+  })
+
+  it('does not add catchup duration analysis to VOD or legacy completed recordings', async () => {
+    await renderDownloads({
+      downloads: [completedDownload, {
+        ...completedDownload,
+        id: 5,
+        program_title: 'VOD Movie',
+        is_vod: true,
+        raw_duration_seconds: 3900,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: 'long',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('VOD Movie')).toBeInTheDocument()
+    expect(screen.getByText('Nature Documentary')).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Download length unavailable/)).not.toBeInTheDocument()
   })
 
   it('offers a filter and a retry for interrupted recordings', async () => {
