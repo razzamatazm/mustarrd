@@ -49,4 +49,5 @@
 - Recording offsets are configurable:
   - Defaults live in settings: `default_pre_padding_minutes` and `default_post_padding_minutes` (default 1/5).
   - The Download modal starts from these defaults but allows per-download overrides.
+  - `scheduled_download_delay_minutes` is a global 0–120 minute wait after the scheduled end and post-padding; it defaults to 5, and 0 restores immediate dispatch.
 - Enabling Comskip forces `transcode_enabled = true`; enabling commercial removal forces `remux_only = false`.
