@@ -31,6 +31,7 @@ from services.webhook_dispatcher import (
     WebhookUrlError,
     validate_webhook_url,
 )
+from download_retry_window import MAX_RETRY_WINDOW_SECONDS
 from schedule_timing import (
     MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
     resolve_scheduled_download_delay_minutes,
@@ -106,6 +107,11 @@ class SettingsUpdate(BaseModel):
         ge=0,
         le=MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
     )
+    download_retry_window_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=MAX_RETRY_WINDOW_SECONDS,
+    )
     default_account_id: Optional[int] = None
     # Post-processing
     transcode_enabled: Optional[bool] = None
@@ -180,6 +186,7 @@ NON_NULLABLE_FIELDS = {
     "default_pre_padding_minutes",
     "default_post_padding_minutes",
     "scheduled_download_delay_minutes",
+    "download_retry_window_seconds",
     "transcode_enabled",
     "transcode_format",
     "hw_accel",

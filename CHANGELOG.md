@@ -30,6 +30,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 **What changed:** Raw catchup duration is measured with ffprobe before post-processing and saved separately from the final file duration. Missing, invalid, or implausibly large measurements are recorded as uncertain. Restart recovery preserves the original observation; retries clear it for the next capture. This change reports the measurement without trimming media or automatically retrying it. Existing completed recordings and VOD are not retrospectively analyzed.
 
+### Added: Choose how long a recording keeps trying through a provider outage
+
+**What you would notice:** **Settings > Recording** has a new **Keep retrying for** option under Provider outages. When your provider drops the connection partway through a recording, Mustarrd already waits and reconnects, picking up where it left off, but it used to give up after about 30 seconds of waiting. You can now stretch that to as much as an hour, so a recording survives a longer outage instead of ending early. It stays at 30 seconds unless you change it, so nothing is different after updating.
+
+**What changed:** A new `download_retry_window_seconds` setting (0-3600, default 30) replaces the hard-coded retry limit and backoff. The window is the total time one download spends waiting between retries, spent in growing waits of 5s, 10s, 15s and so on, capped at 30s each. The default is worked out from the old constants and yields the same three retries after 5, 10 and 15 seconds. The setting is read when a download first hits a network error, not on every download.
+
 ---
 
 ## 2026-09-04

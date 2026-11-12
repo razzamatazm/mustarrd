@@ -21,6 +21,11 @@ from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
 from services import nfo_writer
 from services.download_analysis import DURATION_ANALYSIS_STATUSES, DurationAnalysis, analyze_duration
+from download_retry_window import (
+    TRANSIENT_RETRY_LIMIT,  # noqa: F401 - re-exported; tests pin the default against it
+    resolve_retry_window_seconds,
+    retry_delays_for_window,
+)
 from services.plex_service import plex_service
 from services.provider_http import provider_request_headers
 from services.recording_events import (
@@ -44,7 +49,9 @@ logger = logging.getLogger(__name__)
 # Bounded retry for transient network errors mid-download. A single provider
 # hiccup (connection reset, read timeout) should not permanently fail the
 # download; each retry resumes from the bytes already on disk via HTTP Range.
-TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
+# How long that goes on is the user's retry window: see
+# download_retry_window.py, where TRANSIENT_RETRY_LIMIT now lives as
+# the constant the default window is worked out from.
 
 # A recording that is usable but suspect is a completion, not a failure. The
 # prefix is how that is written to ``error_message``; the seam reads it back
@@ -60,7 +67,6 @@ QUEUED_FOR_POST_PROCESSING_FRAME = {
     "indeterminate": False,
     "download_progress": 100.0,
 }
-TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
 
 # Default minimum free space to preserve when the AppSettings row has no value;
 # matches the default used by services.disk_space.check_disk_space.
@@ -2554,31 +2560,53 @@ class DownloadManager:
         when the provider supports it, or restarts from byte 0 otherwise.
         Non-network errors (HTTP status errors, disk errors) propagate
         immediately.
+
+        How many retries there are, and how long each waits, comes from the
+        user's retry window. It is read on the first network error rather than
+        up front, so a clean download never touches the settings row, and it
+        is read once, so a recording keeps the window it started failing with.
         """
         attempt = 0
         current_offset = offset
+        delays: Optional[List[float]] = None
         while True:
             try:
                 return await self._download_file_once(
                     url, output_path, download_id, session, offset=current_offset
                 )
             except Exception as e:
-                if not _is_transient_network_error(e) or attempt >= TRANSIENT_RETRY_LIMIT:
+                if not _is_transient_network_error(e):
                     raise
+                if delays is None:
+                    delays = await self._transient_retry_delays()
+                if attempt >= len(delays):
+                    raise
+                delay = delays[attempt]
                 attempt += 1
                 try:
                     current_offset = os.path.getsize(output_path)
                 except OSError:
                     current_offset = 0
-                delay = TRANSIENT_RETRY_BACKOFF_SECONDS * attempt
                 await self._broadcast_log(
                     download_id,
                     f"Network error during download: {type(e).__name__}: {e}. "
                     f"Retrying in {delay:.0f}s from byte {current_offset:,} "
-                    f"(attempt {attempt}/{TRANSIENT_RETRY_LIMIT}).",
+                    f"(attempt {attempt}/{len(delays)}).",
                     level="warning",
                 )
                 await asyncio.sleep(delay)
+
+    async def _transient_retry_delays(self) -> List[float]:
+        """The wait before each retry, from the user's retry window.
+
+        Unreadable settings fall back to the default window rather than
+        failing a download that is already in trouble.
+        """
+        settings = await self._load_app_settings()
+        window = resolve_retry_window_seconds(
+            getattr(settings, "download_retry_window_seconds", None)
+        )
+        return retry_delays_for_window(window)
 
     async def _download_file_once(
         self,
