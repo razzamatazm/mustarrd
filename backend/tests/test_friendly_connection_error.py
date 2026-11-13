@@ -1,5 +1,5 @@
 """
-Unit tests for _friendly_connection_error in epg_ingest_manager.
+Unit tests for friendly_connection_error in epg_ingest_manager.
 
 Covers all 7 branches:
   1. asyncio.TimeoutError
@@ -25,13 +25,13 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import aiohttp
-from services.epg_ingest_manager import _friendly_connection_error
+from services.epg_ingest_manager import friendly_connection_error
 
 
 class FriendlyConnectionErrorTests(unittest.TestCase):
 
     def test_timeout_error(self):
-        result = _friendly_connection_error(asyncio.TimeoutError())
+        result = friendly_connection_error(asyncio.TimeoutError())
         self.assertIn("timed out", result.lower())
 
     def test_client_connector_error(self):
@@ -39,53 +39,53 @@ class FriendlyConnectionErrorTests(unittest.TestCase):
         exc = aiohttp.ClientConnectorError(
             connection_key=MagicMock(), os_error=OSError("refused")
         )
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("reach", result.lower())
 
     def test_generic_client_error(self):
         exc = aiohttp.ClientError("something went wrong")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("network", result.lower())
 
     def test_invalid_credentials_substring(self):
         exc = Exception("Invalid credentials for account")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("credentials", result.lower())
 
     def test_http_401(self):
         exc = Exception("HTTP 401: Unauthorized")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("login", result.lower())
 
     def test_http_403(self):
         exc = Exception("HTTP 403: Forbidden")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("login", result.lower())
 
     def test_http_500(self):
         exc = Exception("HTTP 500: Internal Server Error")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("server error", result.lower())
 
     def test_http_503(self):
         exc = Exception("HTTP 503: Service Unavailable")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("server error", result.lower())
 
     def test_fallthrough_short_message(self):
         exc = Exception("some unrecognised error")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertEqual(result, "some unrecognised error")
 
     def test_fallthrough_empty_message(self):
         exc = Exception("")
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertEqual(result, "Connection failed.")
 
     def test_fallthrough_truncates_long_message(self):
         long_msg = "x" * 300
         exc = Exception(long_msg)
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertLessEqual(len(result), 210, "Long messages must be truncated")
         self.assertTrue(result.endswith("..."))
 
@@ -94,7 +94,7 @@ class FriendlyConnectionErrorTests(unittest.TestCase):
         exc = aiohttp.ClientConnectorError(
             connection_key=MagicMock(), os_error=OSError("connection refused")
         )
-        result = _friendly_connection_error(exc)
+        result = friendly_connection_error(exc)
         self.assertIn("reach", result.lower(),
                       "ClientConnectorError must match the connector branch, not the generic one")
 

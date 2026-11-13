@@ -6,6 +6,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-11-12
 
+### Added: A notification bell for problems you would otherwise miss
+
+**What you would notice:** There is a bell next to the Mustarrd logo (top right on a phone). A red number on it means something needs your attention: an IPTV account expiring within 7 days or already expired, an account Mustarrd could not connect to on its last guide refresh or Test, or a recording that failed. Click one to jump to the right page, or click the X to dismiss it. Dismissing only hides it for you. Notifications clear themselves when the problem is fixed, for example when an account is renewed or a failed recording is retried successfully, and they come back if the problem returns. Download-only users see only failures of recordings they asked for; account problems go to admins.
+
+**What changed:** New `notifications` and `notification_dismissals` tables, created automatically on startup. Recording failures are picked up the moment a recording is marked failed. Connection failures come from the guide refresh and the account Test button, which now also updates the account's connection status. Each guide refresh re-reads the account's expiry date from the provider, so renewing clears the warning on its own; an hourly background check handles the countdown. Old recording-failure notifications are deleted after 30 days. Nothing is sent outside Mustarrd; use webhooks for that.
+
 ### Fixed: Accounts that work in other apps no longer fail with "Provider connection failed"
 
 **What you would notice:** Some providers hang up on anything that does not introduce itself as a video player. Mustarrd was not introducing itself as one, so adding an account on those providers failed with "Provider connection failed" even though the same login worked everywhere else. Mustarrd now identifies itself as a media player on everything it asks a provider for: signing in, the guide, channel logos, previews, and the recordings themselves. If your provider insists on one particular player, you can set it with the `CATCHUP_PROVIDER_USER_AGENT` environment variable.

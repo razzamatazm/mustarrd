@@ -154,6 +154,17 @@ def restyle_timeshift_url(url: Optional[str], style: str) -> Optional[str]:
     return _format_timeshift_url(style=style, **parts)
 
 
+def parse_expiration_date(user_info: dict) -> Optional[datetime]:
+    """The account's expiry from an authenticate() ``user_info``, or None."""
+    raw = (user_info or {}).get("exp_date")
+    if not raw:
+        return None
+    try:
+        return datetime.fromtimestamp(int(raw))
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
 class XtreamClient:
     def __init__(self, server_url: str, username: str, password: str):
         self.server_url = server_url.rstrip("/")
