@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,12 +70,11 @@ def get_title_matcher(match_mode: str | None):
 
 
 def build_rule_airing_key(program) -> str:
-    """Stable identity for one provider/channel airing.
+    """Stable identity for one provider/channel listing.
 
     Keyed on the exact provider start/stop, which survives EPG re-ingest (the
-    important case). The tradeoff: if a provider shifts a listing by even a
-    minute between refreshes the key changes and the airing is scheduled a
-    second time. Not solved here.
+    important case). A listing the provider moves gets a different key; that
+    case is caught by ``_Covered.is_same_showing`` rather than by the key.
     """
     return (
         f"{program.account_id}:{program.channel_id}:"
@@ -148,6 +147,69 @@ class _Airing:
     @property
     def key(self) -> str:
         return build_rule_airing_key(self)
+
+
+@dataclass
+class _Covered:
+    """A stretch of a channel that is already scheduled, recording or recorded.
+
+    Providers retime listings between guide refreshes: a match overruns, a
+    slot is corrected from 8:00 to 8:05. The guide keeps the old listing and
+    gains the new one beside it, so one showing appears twice with slightly
+    different times. Exact start/stop cannot tell that these are the same
+    showing; title plus overlap can.
+    """
+
+    account_id: int
+    channel_id: str
+    title: str
+    start_timestamp: int
+    stop_timestamp: int
+    # Set only for a rule's recording that has not started: the one kind that
+    # can still be moved to follow its listing.
+    schedule_id: int | None = None
+    # The guide row that recording was made from.
+    listing_id: int | None = None
+
+    def overlap_with(self, airing: _Airing) -> int:
+        return min(self.stop_timestamp, airing.stop_timestamp) - max(
+            self.start_timestamp, airing.start_timestamp
+        )
+
+    def is_same_showing(self, airing: _Airing) -> bool:
+        """Same title, and the two overlap for most of the shorter one.
+
+        "Most of" is what keeps back-to-back episodes of one show apart: after
+        a five minute move, an episode overlaps its own old listing almost
+        entirely and its neighbour's by five minutes.
+        """
+        if self.title != exact_title_matcher.normalize(airing.title):
+            return False
+        shorter = min(
+            self.stop_timestamp - self.start_timestamp,
+            airing.stop_timestamp - airing.start_timestamp,
+        )
+        return shorter > 0 and self.overlap_with(airing) * 2 > shorter
+
+    def can_follow(self, airing: _Airing) -> bool:
+        """Whether this is a waiting recording and *airing* is its newer listing.
+
+        Guide rows are only ever added, so the higher row id is the listing
+        the provider sent more recently. Following only newer rows also keeps
+        the old listing, still in the guide, from pulling the recording back.
+        """
+        return (
+            self.schedule_id is not None
+            and self.listing_id is not None
+            and airing.id > self.listing_id
+        )
+
+
+def _listing_id(program_id: str | None) -> int | None:
+    try:
+        return int(program_id) if program_id is not None else None
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -247,7 +309,9 @@ class RecordingRuleService:
         rule made while tonight's episode is on air still catches it.
 
         An airing that is already scheduled, recording or recorded, by hand
-        or by another rule, is left alone.
+        or by another rule, is left alone. So is a listing the provider has
+        only moved: it is the same showing, and if the rule's recording for
+        it has not started, that recording is moved to the new time instead.
         """
         async with self.lock:
             return await self._evaluate(
@@ -369,43 +433,87 @@ class RecordingRuleService:
         )
         # Already scheduled by hand, recording, or recorded: by anyone, by any
         # route. A rule made after you recorded an episode yourself must not
-        # record it a second time.
-        taken_slots = {
-            tuple(row)
-            for row in (
-                await session.execute(
-                    select(
-                        ScheduledRecording.account_id,
-                        ScheduledRecording.channel_id,
-                        ScheduledRecording.start_timestamp,
-                        ScheduledRecording.stop_timestamp,
-                    ).where(
-                        ScheduledRecording.account_id.in_(account_ids),
-                        ScheduledRecording.channel_id.in_(channel_ids),
-                        ScheduledRecording.stop_timestamp > earliest_stop,
+        # record it a second time. A recording the rule itself made counts
+        # whatever became of it, exactly as its airing key does: an episode
+        # you cancelled stays cancelled when its listing moves.
+        #
+        # Reaches back to the earliest listing under consideration rather than
+        # to "now": a recording whose listing has just ended still covers the
+        # moved listing that is still on air.
+        covered_since = min(airing.start_timestamp for airing in airings)
+        covered: dict[tuple[int, str], list[_Covered]] = defaultdict(list)
+        for row in (
+            await session.execute(
+                select(
+                    ScheduledRecording.id,
+                    ScheduledRecording.account_id,
+                    ScheduledRecording.channel_id,
+                    ScheduledRecording.program_title,
+                    ScheduledRecording.start_timestamp,
+                    ScheduledRecording.stop_timestamp,
+                    ScheduledRecording.status,
+                    ScheduledRecording.download_id,
+                    ScheduledRecording.program_id,
+                    ScheduledRecording.recording_rule_id,
+                ).where(
+                    ScheduledRecording.account_id.in_(account_ids),
+                    ScheduledRecording.channel_id.in_(channel_ids),
+                    ScheduledRecording.stop_timestamp > covered_since,
+                    or_(
                         ScheduledRecording.status.not_in(_NOT_TAKEN_SCHEDULE_STATUSES),
-                    )
+                        ScheduledRecording.rule_airing_key.is_not(None),
+                    ),
                 )
-            ).all()
-        }
-        taken_slots |= {
-            tuple(row)
-            for row in (
-                await session.execute(
-                    select(
-                        Download.account_id,
-                        Download.channel_id,
-                        Download.start_timestamp,
-                        Download.stop_timestamp,
-                    ).where(
-                        Download.account_id.in_(account_ids),
-                        Download.channel_id.in_(channel_ids),
-                        Download.stop_timestamp > earliest_stop,
-                        Download.is_vod.is_(False),
-                        Download.status.in_(_TAKEN_DOWNLOAD_STATUSES),
-                    )
+            )
+        ).all():
+            waiting_for_a_rule = (
+                row.recording_rule_id is not None
+                and row.status in UNFIRED_SCHEDULE_STATUSES
+                and row.download_id is None
+            )
+            covered[(row.account_id, row.channel_id)].append(
+                _Covered(
+                    account_id=row.account_id,
+                    channel_id=row.channel_id,
+                    title=exact_title_matcher.normalize(row.program_title),
+                    start_timestamp=row.start_timestamp,
+                    stop_timestamp=row.stop_timestamp,
+                    schedule_id=row.id if waiting_for_a_rule else None,
+                    listing_id=_listing_id(row.program_id) if waiting_for_a_rule else None,
                 )
-            ).all()
+            )
+        for row in (
+            await session.execute(
+                select(
+                    Download.account_id,
+                    Download.channel_id,
+                    Download.program_title,
+                    Download.start_timestamp,
+                    Download.stop_timestamp,
+                ).where(
+                    Download.account_id.in_(account_ids),
+                    Download.channel_id.in_(channel_ids),
+                    Download.stop_timestamp > covered_since,
+                    Download.is_vod.is_(False),
+                    Download.status.in_(_TAKEN_DOWNLOAD_STATUSES),
+                )
+            )
+        ).all():
+            covered[(row.account_id, row.channel_id)].append(
+                _Covered(
+                    account_id=row.account_id,
+                    channel_id=row.channel_id,
+                    title=exact_title_matcher.normalize(row.program_title),
+                    start_timestamp=row.start_timestamp,
+                    stop_timestamp=row.stop_timestamp,
+                )
+            )
+        # The exact slot is taken whatever it is called: a provider correcting
+        # a title in place must not look like a new airing.
+        taken_slots = {
+            (item.account_id, item.channel_id, item.start_timestamp, item.stop_timestamp)
+            for items in covered.values()
+            for item in items
         }
 
         pending_by_rule: dict[int, int] = defaultdict(int)
@@ -430,12 +538,28 @@ class RecordingRuleService:
         from api.schedules import ScheduleCreate, _create_schedule_record
 
         created = 0
+        moved = 0
         capped: set[int] = set()
         for airing in airings:
             if airing.key in taken_keys or airing.slot in taken_slots:
                 continue
             if airing.stop_timestamp <= earliest_stop_for(airing.account_id):
                 # Finished, and either this is a refresh or it is too old.
+                continue
+            on_this_channel = covered[(airing.account_id, airing.channel_id)]
+            same_showing = max(
+                (item for item in on_this_channel if item.is_same_showing(airing)),
+                key=lambda item: item.overlap_with(airing),
+                default=None,
+            )
+            if same_showing is not None:
+                # The provider moved a listing that is already dealt with.
+                if same_showing.can_follow(airing) and await self._follow_listing(
+                    session, same_showing, airing
+                ):
+                    moved += 1
+                    taken_keys.add(airing.key)
+                    taken_slots.add(airing.slot)
                 continue
             for rule in rules_by_channel.get((airing.account_id, airing.channel_id), []):
                 matcher = get_title_matcher(rule.match_mode)
@@ -485,7 +609,7 @@ class RecordingRuleService:
                     post_padding_minutes=rule.post_padding_minutes,
                 )
                 try:
-                    await _create_schedule_record(
+                    schedule = await _create_schedule_record(
                         payload,
                         auth,
                         session,
@@ -497,6 +621,17 @@ class RecordingRuleService:
                     pending_by_rule[rule.id] += 1
                     taken_keys.add(airing.key)
                     taken_slots.add(airing.slot)
+                    on_this_channel.append(
+                        _Covered(
+                            account_id=airing.account_id,
+                            channel_id=airing.channel_id,
+                            title=exact_title_matcher.normalize(airing.title),
+                            start_timestamp=airing.start_timestamp,
+                            stop_timestamp=airing.stop_timestamp,
+                            schedule_id=schedule.id,
+                            listing_id=airing.id,
+                        )
+                    )
                     break
                 except HTTPException as exc:
                     if exc.status_code >= 500:
@@ -512,6 +647,11 @@ class RecordingRuleService:
                     taken_keys.add(airing.key)
                     break
 
+        if moved:
+            logger.info(
+                "Moved %d waiting recording(s) to follow listings the provider retimed",
+                moved,
+            )
         for capped_rule_id in sorted(capped):
             logger.info(
                 "Recording rule %s already has %d recordings waiting; the rest are "
@@ -520,6 +660,57 @@ class RecordingRuleService:
                 MAX_PENDING_SCHEDULES_PER_RULE,
             )
         return created
+
+    async def _follow_listing(
+        self, session: AsyncSession, waiting: _Covered, airing: _Airing
+    ) -> bool:
+        """Move a rule's waiting recording onto the listing the provider moved.
+
+        Without this the recording keeps the old times and cuts off the end of
+        a show that was pushed later. Only a recording that has not started is
+        moved; the check is repeated in the UPDATE because the scheduler can
+        start it between the read above and this write.
+        """
+        try:
+            result = await session.execute(
+                update(ScheduledRecording)
+                .where(
+                    ScheduledRecording.id == waiting.schedule_id,
+                    ScheduledRecording.status.in_(UNFIRED_SCHEDULE_STATUSES),
+                    ScheduledRecording.download_id.is_(None),
+                )
+                .values(
+                    program_id=str(airing.id),
+                    epg_id=airing.epg_id,
+                    program_description=airing.description or None,
+                    program_start=datetime.fromtimestamp(
+                        airing.start_timestamp, tz=timezone.utc
+                    ),
+                    program_end=datetime.fromtimestamp(
+                        airing.stop_timestamp, tz=timezone.utc
+                    ),
+                    start_timestamp=airing.start_timestamp,
+                    stop_timestamp=airing.stop_timestamp,
+                    provider_start=airing.provider_start,
+                    provider_stop=airing.provider_stop,
+                    duration_minutes=int(
+                        (airing.stop_timestamp - airing.start_timestamp) / 60
+                    ),
+                    rule_airing_key=airing.key,
+                    updated_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+        except IntegrityError:
+            # Another recording already holds this listing's key.
+            await session.rollback()
+            return False
+        if not result.rowcount:
+            return False
+        waiting.start_timestamp = airing.start_timestamp
+        waiting.stop_timestamp = airing.stop_timestamp
+        waiting.listing_id = airing.id
+        return True
 
 
 recording_rule_service = RecordingRuleService()

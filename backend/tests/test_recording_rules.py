@@ -852,6 +852,203 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         for schedule in await self._schedules():
             self.assertIsNone(schedule.recording_rule_id)
 
+    # --- a listing the provider moved -------------------------------------
+    #
+    # A guide refresh adds the retimed listing next to the old one (rows are
+    # keyed on channel + start + stop), so after a move the guide holds both.
+
+    async def _add_listing(
+        self, suffix, *, starts_in_minutes, minutes=60, title="The Example Show"
+    ):
+        if not hasattr(self, "_guide_now"):
+            self._guide_now = datetime.now(timezone.utc).replace(microsecond=0)
+        start = self._guide_now + timedelta(minutes=starts_in_minutes)
+        end = start + timedelta(minutes=minutes)
+        async with self.session_factory() as session:
+            session.add(
+                EPGProgram(
+                    account_id=1,
+                    channel_id="101",
+                    channel_name="Example TV",
+                    epg_id=f"epg-{suffix}",
+                    title=title,
+                    start_time=start,
+                    end_time=end,
+                    start_timestamp=int(start.timestamp()),
+                    stop_timestamp=int(end.timestamp()),
+                    duration_minutes=minutes,
+                    has_archive=True,
+                )
+            )
+            await session.commit()
+
+    async def _assert_recording_is_for(self, schedule, suffix):
+        program = await self._program(suffix)
+        self.assertEqual(
+            (schedule.program_id, schedule.start_timestamp, schedule.stop_timestamp),
+            (str(program.id), program.start_timestamp, program.stop_timestamp),
+        )
+
+    async def test_a_listing_moved_by_a_few_minutes_is_not_recorded_twice(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule()
+        await self._add_listing("moved", starts_in_minutes=125)
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+
+    async def test_the_waiting_recording_follows_the_listing_to_its_new_time(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule()
+        await self._add_listing("moved", starts_in_minutes=125, minutes=65)
+
+        await self._refresh()
+
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "moved")
+        self.assertEqual(schedule.duration_minutes, 65)
+        self.assertEqual(schedule.status, ScheduledStatus.SCHEDULED.value)
+        moved = await self._program("moved")
+        self.assertEqual(
+            int(schedule.program_start.replace(tzinfo=timezone.utc).timestamp()),
+            moved.start_timestamp,
+        )
+        self.assertEqual(
+            int(schedule.program_end.replace(tzinfo=timezone.utc).timestamp()),
+            moved.stop_timestamp,
+        )
+
+    async def test_the_old_listing_still_in_the_guide_does_not_pull_it_back(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule()
+        await self._add_listing("moved", starts_in_minutes=125)
+        await self._refresh()
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "moved")
+
+    async def test_a_rule_saved_while_both_listings_are_in_the_guide_records_once(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._add_listing("moved", starts_in_minutes=125)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 1)
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "moved")
+
+    async def test_a_recording_that_has_already_started_is_left_where_it_is(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule()
+        await self._set_schedule_status(
+            "as-first-listed", ScheduledStatus.DOWNLOADING.value, download_id=7
+        )
+        await self._add_listing("moved", starts_in_minutes=125)
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "as-first-listed")
+
+    async def test_a_listing_that_moved_as_it_was_ending_is_not_recorded_twice(self):
+        """The first listing has just ended, the moved one is still on air."""
+        await self._set_archive_days(7)
+        await self._add_listing("as-first-listed", starts_in_minutes=-62)
+        await self._create_rule()
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+        await self._add_listing("moved", starts_in_minutes=-57)
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "moved")
+
+    async def test_back_to_back_episodes_that_both_move_stay_two_recordings(self):
+        await self._add_listing("first", starts_in_minutes=120, minutes=30)
+        await self._add_listing("second", starts_in_minutes=150, minutes=30)
+        await self._create_rule()
+        await self._add_listing("first-moved", starts_in_minutes=125, minutes=30)
+        await self._add_listing("second-moved", starts_in_minutes=155, minutes=30)
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        first, second = await self._schedules()
+        await self._assert_recording_is_for(first, "first-moved")
+        await self._assert_recording_is_for(second, "second-moved")
+
+    async def test_a_repeat_later_the_same_day_is_still_its_own_recording(self):
+        await self._add_listing("evening", starts_in_minutes=120)
+        await self._add_listing("late-repeat", starts_in_minutes=300)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 2)
+
+    async def test_a_different_programme_put_in_the_slot_is_still_recorded(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule(title_match="Example", match_mode="contains")
+        await self._add_listing(
+            "replacement", starts_in_minutes=125, title="Example Special"
+        )
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 1)
+        self.assertEqual(await self._count(ScheduledRecording), 2)
+
+    async def test_a_recording_scheduled_by_hand_covers_the_moved_listing_too(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._schedule_by_hand("as-first-listed", ScheduledStatus.SCHEDULED.value)
+        await self._add_listing("moved", starts_in_minutes=125)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+        (schedule,) = await self._schedules()
+        await self._assert_recording_is_for(schedule, "as-first-listed")
+
+    async def test_an_episode_already_downloaded_is_not_recorded_again_after_a_move(self):
+        await self._set_archive_days(7)
+        await self._add_listing("as-first-listed", starts_in_minutes=-180)
+        await self._download_by_hand("as-first-listed", DownloadStatus.COMPLETED.value)
+        await self._add_listing("moved", starts_in_minutes=-175)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    async def test_a_failed_download_does_not_stop_the_moved_listing_being_recorded(self):
+        await self._set_archive_days(7)
+        await self._add_listing("as-first-listed", starts_in_minutes=-180)
+        await self._download_by_hand("as-first-listed", DownloadStatus.FAILED.value)
+        await self._add_listing("moved", starts_in_minutes=-175)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 1)
+
+    async def test_a_recording_you_cancelled_stays_cancelled_when_the_listing_moves(self):
+        await self._add_listing("as-first-listed", starts_in_minutes=120)
+        await self._create_rule()
+        await self._set_schedule_status("as-first-listed", ScheduledStatus.CANCELLED.value)
+        await self._add_listing("moved", starts_in_minutes=125)
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        (schedule,) = await self._schedules()
+        self.assertEqual(schedule.status, ScheduledStatus.CANCELLED.value)
+        await self._assert_recording_is_for(schedule, "as-first-listed")
+
 
 if __name__ == "__main__":
     unittest.main()
