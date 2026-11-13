@@ -2824,7 +2824,12 @@ class DownloadManager:
         expected_duration_seconds: Optional[float] = None,
     ) -> tuple[str, list[str]]:
         """Run post-processing on downloaded file (transcoding, commercial removal)."""
-        from services.post_processor import post_processor, OutputFormat, HardwareAccel
+        from services.post_processor import (
+            post_processor,
+            CommercialRemovalSkipped,
+            OutputFormat,
+            HardwareAccel,
+        )
 
         warnings: list[str] = []
 
@@ -3019,21 +3024,28 @@ class DownloadManager:
                         f"Comskip: commercials detected. Removing commercials and outputting {output_format.value}."
                     )
 
-                    current_path = await post_processor.remove_commercials(
-                        current_path,
-                        edl_path,
-                        output_format,
-                        hw_accel=hw_accel,
-                        remove_original=settings.delete_original_after_transcode,
-                        progress_callback=transcode_progress_callback,
-                        log_callback=log_callback,
-                        remux_only=remux_only,
-                        render_device=render_device,
-                        expected_duration_seconds=expected_duration_seconds,
-                        status_callback=processing_status_callback,
-                    )
-                    commercials_removed = True
-                    await log_callback(f"Commercial removal complete: {current_path}")
+                    try:
+                        current_path = await post_processor.remove_commercials(
+                            current_path,
+                            edl_path,
+                            output_format,
+                            hw_accel=hw_accel,
+                            remove_original=settings.delete_original_after_transcode,
+                            progress_callback=transcode_progress_callback,
+                            log_callback=log_callback,
+                            remux_only=remux_only,
+                            render_device=render_device,
+                            expected_duration_seconds=expected_duration_seconds,
+                            status_callback=processing_status_callback,
+                        )
+                    except CommercialRemovalSkipped as skipped:
+                        # Recording stays uncut; the transcode/remux step below
+                        # still produces the chosen output format.
+                        await log_callback(str(skipped))
+                        warnings.append(str(skipped))
+                    else:
+                        commercials_removed = True
+                        await log_callback(f"Commercial removal complete: {current_path}")
                 else:
                     await log_callback("Comskip: no commercials detected.")
             except Exception as e:

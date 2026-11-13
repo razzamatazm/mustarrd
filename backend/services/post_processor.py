@@ -102,6 +102,13 @@ ENCODER_MAP = {
 }
 
 
+class CommercialRemovalSkipped(Exception):
+    """Commercial removal was skipped on purpose; the recording is left uncut.
+
+    The message is user-facing and explains why.
+    """
+
+
 class PostProcessor:
     """Handles transcoding and commercial detection/removal."""
 
@@ -1589,9 +1596,21 @@ class PostProcessor:
                 except Exception:
                     pass
 
-        # Get video duration
-        duration = await self._resolve_duration(
-            input_path,
+        # Get video duration. Cutting needs the file's real length to place the
+        # last boundary, so a missing ffprobe reading skips the cut rather than
+        # falling back to the scheduled length: that is a guess about the file,
+        # and cutting against a guess risks removing the wrong parts.
+        probed_duration = await self._get_duration(input_path, log_callback=log_callback)
+        if probed_duration <= 0:
+            self._cleanup_comskip_outputs(input_path, edl_path)
+            raise CommercialRemovalSkipped(
+                "Commercial removal skipped: ffprobe could not measure the "
+                "recording's length, so it was kept uncut rather than risk "
+                "cutting the wrong parts. Make sure ffprobe is installed "
+                "alongside ffmpeg."
+            )
+        duration = await self._sanity_check_duration(
+            probed_duration,
             expected_duration_seconds=expected_duration_seconds,
             log_callback=log_callback,
         )
@@ -1599,12 +1618,6 @@ class PostProcessor:
             log_callback,
             f"Commercial removal: duration={duration:.3f}s"
         )
-        if duration <= 0:
-            raise Exception(
-                "Commercial removal requires ffprobe to determine video duration, "
-                "but ffprobe was not found or returned no duration. "
-                "Please ensure ffprobe is installed alongside ffmpeg."
-            )
 
         # Build keep segments (inverse of commercial segments)
         keep_segments = self._invert_segments(segments, duration)
@@ -2176,6 +2189,19 @@ class PostProcessor:
         commercial-removal segment boundaries far beyond the recording.
         """
         probed_duration = await self._get_duration(input_path, log_callback=log_callback)
+        return await self._sanity_check_duration(
+            probed_duration,
+            expected_duration_seconds=expected_duration_seconds,
+            log_callback=log_callback,
+        )
+
+    async def _sanity_check_duration(
+        self,
+        probed_duration: float,
+        expected_duration_seconds: Optional[float] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> float:
+        """Check an ffprobe duration against the scheduled recording length."""
         try:
             expected_duration = float(expected_duration_seconds or 0)
         except (TypeError, ValueError):
