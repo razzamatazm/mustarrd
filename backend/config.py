@@ -147,6 +147,11 @@ class Settings(BaseSettings):
     # CATCHUP_PROVIDER_USER_AGENT if yours wants a specific one.
     provider_user_agent: str = "VLC/3.0.21 LibVLC/3.0.21"
 
+    # The commit this build was made from. Baked into published Docker images
+    # (see backend/Dockerfile); empty for local and desktop builds, which turns
+    # the update check off.
+    build_sha: str = ""
+
     # EPG Cache
     epg_cache_ttl: int = 3600  # 1 hour in seconds
     epg_refresh_interval_hours: int = 8

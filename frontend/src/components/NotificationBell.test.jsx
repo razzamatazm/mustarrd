@@ -102,4 +102,23 @@ describe('NotificationBell', () => {
     fireEvent.click(await screen.findByText(failed.message))
     expect(await screen.findByText('Downloads page')).toBeInTheDocument()
   })
+
+  it('opens a link to another site in a new tab', async () => {
+    const update = {
+      id: 3,
+      kind: 'update_available',
+      severity: 'warning',
+      title: 'Update available',
+      message: 'A newer version of Mustarrd is available (3 changes since this build).',
+      link: 'https://github.com/razzamatazm/mustarrd/compare/abc1234...main',
+      created_at: '2026-11-12T11:00:00Z',
+    }
+    notificationsApi.list.mockResolvedValue({ items: [update], count: 1 })
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    renderBell()
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }))
+    fireEvent.click(await screen.findByText(update.message))
+    expect(open).toHaveBeenCalledWith(update.link, '_blank', 'noopener,noreferrer')
+    open.mockRestore()
+  })
 })

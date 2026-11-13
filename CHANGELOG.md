@@ -42,6 +42,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 **What changed:** A new `download_retry_window_seconds` setting (0-3600, default 30) replaces the hard-coded retry limit and backoff. The window is the total time one download spends waiting between retries, spent in growing waits of 5s, 10s, 15s and so on, capped at 30s each. The default is worked out from the old constants and yields the same three retries after 5, 10 and 15 seconds. The setting is read when a download first hits a network error, not on every download.
 
+### Added: Mustarrd tells you when a newer version is out
+
+**What you would notice:** If you run the published Docker image, the notification bell now shows "Update available" when a newer Mustarrd has been published, with how many changes there are since yours. Clicking it opens the list of changes on GitHub. To update, pull the latest image and restart the container; the notice goes away on its own once you are up to date. Admins see it, download-only users do not. If you would rather not be told, turn off **Check for updates** in the new **Settings > Updates** section, which also shows which build you are running.
+
+**What changed:** Published images now carry the commit they were built from (`CATCHUP_BUILD_SHA`). About a minute after startup and then once a day, Mustarrd asks GitHub's public API how far the main branch is ahead of that commit. The request sends nothing about you, your server or your recordings. If GitHub cannot be reached, or the build is not one from the main branch, nothing happens. Local and desktop builds have no build commit, so they never check.
+
 ---
 
 ## 2026-09-04

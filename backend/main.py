@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
         notification_sweeper,
         register_notification_subscriber,
     )
+    from services.update_check import update_checker
 
     # Drains the recording lifecycle event queue. Started before recovery so
     # the events recovery publishes are delivered rather than sitting in the
@@ -90,6 +91,7 @@ async def lifespan(app: FastAPI):
     schedule_task = asyncio.create_task(scheduled_manager.process_queue())
     epg_task = asyncio.create_task(epg_ingest_manager.process_queue())
     notification_task = asyncio.create_task(notification_sweeper.process_queue())
+    update_check_task = asyncio.create_task(update_checker.process_queue())
 
     yield
 
@@ -103,6 +105,7 @@ async def lifespan(app: FastAPI):
     epg_task.cancel()
     recording_event_task.cancel()
     notification_task.cancel()
+    update_check_task.cancel()
     await asyncio.gather(
         download_task,
         post_process_task,
@@ -110,6 +113,7 @@ async def lifespan(app: FastAPI):
         epg_task,
         recording_event_task,
         notification_task,
+        update_check_task,
         return_exceptions=True,
     )
 

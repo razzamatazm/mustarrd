@@ -380,6 +380,40 @@ describe('Settings page', () => {
     expect(settingsApi.update.mock.calls[0][0]).toEqual({ write_nfo_files: false })
   })
 
+  it('turns the update check off and saves only that field', async () => {
+    settingsApi.get.mockResolvedValue({
+      ...baseSettings,
+      update_check_enabled: true,
+      build_sha: '0123456789abcdef0123456789abcdef01234567',
+    })
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Check for updates' })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText('0123456')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ update_check_enabled: false })
+  })
+
+  it('says when this build has no commit to check against', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    expect(await screen.findByRole('switch', { name: 'Check for updates' })).toBeChecked()
+    expect(screen.getByText('Local build')).toBeInTheDocument()
+  })
+
   it('maps the two-step format picker onto the transcode fields', async () => {
     renderSettings()
     await screen.findByText('Connections')
