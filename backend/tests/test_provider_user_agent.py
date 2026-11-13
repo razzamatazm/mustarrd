@@ -179,7 +179,8 @@ class EveryProviderSessionSendsTheUserAgentTests(unittest.TestCase):
     """A new request site that forgets the header would bring #453 back quietly."""
 
     # Sessions that talk to something other than an IPTV provider.
-    NOT_PROVIDER_FACING = {"plex_service.py", "webhook_dispatcher.py"}
+    # update_check.py talks to api.github.com and names its own User-Agent.
+    NOT_PROVIDER_FACING = {"plex_service.py", "webhook_dispatcher.py", "update_check.py"}
 
     def test_no_provider_session_is_opened_without_the_headers(self):
         import ast

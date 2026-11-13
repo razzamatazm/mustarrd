@@ -25,7 +25,9 @@ from models import AppSettings, XtreamAccount
 from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
+from services.notifications import clear_notification
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from services.update_check import UPDATE_NOTIFICATION_KEY, update_checker
 from services.webhook_dispatcher import (
     WEBHOOK_SETTING_FIELDS,
     WebhookUrlError,
@@ -163,6 +165,7 @@ class SettingsUpdate(BaseModel):
     show_future_programs: Optional[bool] = None
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
+    update_check_enabled: Optional[bool] = None
 
     # Webhooks: one URL per recording lifecycle event. Empty clears it.
     webhook_url_recording_started: Optional[str] = None
@@ -215,6 +218,7 @@ NON_NULLABLE_FIELDS = {
     "show_future_programs",
     "launch_on_startup",
     "auto_retry_failed_downloads",
+    "update_check_enabled",
 }
 
 
@@ -430,6 +434,10 @@ async def update_settings(
             detail="Min single commercial cannot exceed max single commercial",
         )
 
+    # Turning the update check off takes any "update available" notice with it.
+    if update_dict.get("update_check_enabled") is False:
+        await clear_notification(session, UPDATE_NOTIFICATION_KEY)
+
     if _paths_match(settings.download_folder, settings.completed_folder):
         logger.warning(
             "Download folder and completed folder are set to the same path (%s). "
@@ -448,6 +456,8 @@ async def update_settings(
 
     if "epg_offset_minutes" in update_dict:
         epg_service.clear_cache()
+    if update_dict.get("update_check_enabled") is True:
+        update_checker.request_check()
 
     return settings.to_dict()
 

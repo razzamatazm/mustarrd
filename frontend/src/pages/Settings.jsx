@@ -1409,6 +1409,38 @@ export default function Settings() {
     </Stack>
   )
 
+  const renderUpdates = () => (
+    <Stack gap="xl">
+      <SectionHeader title="Updates" description="Find out when a newer version of Mustarrd is out" />
+
+      <Stack gap={0}>
+        <SettingRow
+          label="Check for updates"
+          description="Once a day, ask GitHub whether there is a newer Mustarrd image and say so under the bell. Sends nothing about you or your recordings."
+        >
+          <Switch
+            size={switchSize}
+            aria-label="Check for updates"
+            checked={formData.update_check_enabled !== false}
+            onChange={(e) => handleChange('update_check_enabled', e.currentTarget.checked)}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Running build"
+          description={
+            formData.build_sha
+              ? 'The code version this server was built from'
+              : 'Built outside the published Docker image, so there is nothing to compare against and no check runs'
+          }
+        >
+          <Text size="sm" ff="monospace" c={formData.build_sha ? undefined : 'dimmed'}>
+            {formData.build_sha ? formData.build_sha.slice(0, 7) : 'Local build'}
+          </Text>
+        </SettingRow>
+      </Stack>
+    </Stack>
+  )
+
   const renderSecurity = () => (
     <Stack gap="xl">
       <SectionHeader
@@ -1761,6 +1793,7 @@ export default function Settings() {
     guide: renderGuide,
     appearance: renderAppearance,
     security: renderSecurity,
+    updates: renderUpdates,
     users: renderUsers,
     plex: renderPlex,
     webhooks: renderWebhooks,

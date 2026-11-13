@@ -78,6 +78,12 @@ export default function NotificationBell({ onNavigate }) {
   const openItem = (item) => {
     if (!item.link) return
     setOpened(false)
+    // An outside page (e.g. the GitHub changes behind an update notice) opens
+    // in a new tab; app routes stay in this one.
+    if (/^https?:\/\//i.test(item.link)) {
+      window.open(item.link, '_blank', 'noopener,noreferrer')
+      return
+    }
     onNavigate?.()
     navigate(item.link)
   }
