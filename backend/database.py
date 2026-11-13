@@ -259,6 +259,27 @@ async def _apply_lightweight_migrations(conn) -> None:
             text("ALTER TABLE app_settings ADD COLUMN write_nfo_files BOOLEAN DEFAULT 1")
         )
 
+    # Poster art (#443): which image a recording's poster came from, the two
+    # switches, and the optional (encrypted) TMDB key.
+    for column_name, column_type in (
+        ("poster_url", "TEXT"),
+        ("poster_thumb_url", "TEXT"),
+        ("poster_source", "VARCHAR(32)"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_type}")
+            )
+    for column_name, column_type in (
+        ("poster_art_enabled", "BOOLEAN DEFAULT 1"),
+        ("poster_art_save_to_library", "BOOLEAN DEFAULT 1"),
+        ("tmdb_api_key_encrypted", "TEXT"),
+    ):
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_type}")
+            )
+
 
 async def _carry_over_legacy_comskip_ini(conn) -> None:
     """Preserve a pre-editor custom comskip INI choice.

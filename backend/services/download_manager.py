@@ -417,6 +417,9 @@ class DownloadManager:
             payload = None
         if not isinstance(payload, dict):
             payload = {}
+        # The poster is an in-app path that needs a signed-in browser, and it
+        # is looked up after this event is sent. It means nothing off the box.
+        payload.pop("poster", None)
         payload["recovered"] = bool(recovered)
         payload["post_processed"] = bool(post_processed)
         payload["warning"] = warning

@@ -27,6 +27,13 @@ from services.download_manager import download_manager
 from services.epg_service import epg_service
 from services.notifications import clear_notification
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from services.poster_art import (
+    TmdbKeyError,
+    check_tmdb_api_key,
+    clean_tmdb_api_key,
+    encrypt_tmdb_api_key,
+    tmdb_api_key_from,
+)
 from services.update_check import UPDATE_NOTIFICATION_KEY, update_checker
 from services.webhook_dispatcher import (
     WEBHOOK_SETTING_FIELDS,
@@ -139,6 +146,11 @@ class SettingsUpdate(BaseModel):
     remux_only: Optional[bool] = None
     integrity_check_enabled: Optional[bool] = None
     write_nfo_files: Optional[bool] = None
+    poster_art_enabled: Optional[bool] = None
+    poster_art_save_to_library: Optional[bool] = None
+    # Write-only. A key replaces the saved one, "" removes it, and leaving it
+    # out changes nothing. The saved key is never sent back.
+    tmdb_api_key: Optional[str] = Field(default=None, max_length=1000)
     comskip_enabled: Optional[bool] = None
     comskip_cut: Optional[bool] = None
     comskip_path: Optional[str] = None
@@ -198,6 +210,8 @@ NON_NULLABLE_FIELDS = {
     "remux_only",
     "integrity_check_enabled",
     "write_nfo_files",
+    "poster_art_enabled",
+    "poster_art_save_to_library",
     "comskip_enabled",
     "comskip_cut",
     "comskip_use_custom_ini",
@@ -383,6 +397,15 @@ async def update_settings(
             value = normalize_comskip_hw_decode_mode(value)
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
+        if field == "tmdb_api_key":
+            if value is None:
+                continue
+            try:
+                cleaned_key = clean_tmdb_api_key(value)
+            except TmdbKeyError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            settings.tmdb_api_key_encrypted = encrypt_tmdb_api_key(cleaned_key)
+            continue
         if field in WEBHOOK_SETTING_FIELDS and value is not None:
             # Empty turns that webhook off; anything else must be an address we
             # will actually send to. Raised as a 400 with a sentence rather
@@ -460,6 +483,49 @@ async def update_settings(
         update_checker.request_check()
 
     return settings.to_dict()
+
+
+class TmdbKeyCheck(BaseModel):
+    # The key as typed, to check it before saving. Left out, the saved key is
+    # checked instead.
+    api_key: Optional[str] = Field(default=None, max_length=1000)
+
+
+@router.post("/poster-art/check-key")
+async def check_poster_art_key(
+    body: TmdbKeyCheck,
+    _admin: None = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Ask TMDB whether a key works, and say so in a sentence.
+
+    Always answers 200 with ``ok``: a rejected key is a result, not an error.
+    ``ok`` is null when TMDB could not be reached, because that says nothing
+    about the key.
+    """
+    try:
+        api_key = clean_tmdb_api_key(body.api_key)
+    except TmdbKeyError as exc:
+        return {"ok": False, "message": str(exc)}
+
+    if not api_key:
+        result = await session.execute(select(AppSettings))
+        api_key = tmdb_api_key_from(result.scalar_one_or_none()) or ""
+    if not api_key:
+        return {"ok": False, "message": "There is no TMDB key to check yet."}
+
+    accepted = await check_tmdb_api_key(api_key)
+    if accepted is True:
+        return {"ok": True, "message": "TMDB accepted this key."}
+    if accepted is False:
+        return {
+            "ok": False,
+            "message": "TMDB did not accept this key. Check that you copied all of it.",
+        }
+    return {
+        "ok": None,
+        "message": "Could not reach TMDB just now, so the key was not checked.",
+    }
 
 
 @router.get("/folders/status")

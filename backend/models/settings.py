@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Boolean
+from sqlalchemy import String, Integer, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 from config import settings as app_settings
@@ -81,6 +81,15 @@ class AppSettings(Base):
     # and Jellyfin match it against the right show.
     write_nfo_files: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Poster art (services/poster_art.py). Looking a poster up tells TMDB or
+    # TVMaze the name of the show, so it can be turned off; saving a copy into
+    # the library is a second switch for people who only want the thumbnail.
+    poster_art_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    poster_art_save_to_library: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional TMDB API key, AES-GCM encrypted like account passwords. Never
+    # returned by the API: to_dict() only says whether one is saved.
+    tmdb_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     comskip_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Cut vs Mark. True = Cut (physically remove commercials, the pre-existing
     # behaviour, forces a re-encode). False = Mark (detect only; write an EDL
@@ -156,6 +165,9 @@ class AppSettings(Base):
             "remux_only": self.remux_only,
             "integrity_check_enabled": self.integrity_check_enabled,
             "write_nfo_files": self.write_nfo_files,
+            "poster_art_enabled": self.poster_art_enabled is not False,
+            "poster_art_save_to_library": self.poster_art_save_to_library is not False,
+            "tmdb_api_key_set": bool(self.tmdb_api_key_encrypted),
             "comskip_enabled": self.comskip_enabled,
             "comskip_cut": self.comskip_cut,
             "comskip_path": self.comskip_path,

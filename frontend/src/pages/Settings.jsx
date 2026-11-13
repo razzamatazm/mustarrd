@@ -53,6 +53,7 @@ import SaveBar from '../components/settings/SaveBar'
 import SettingsSearch from '../components/settings/SettingsSearch'
 import { SectionHeader, SettingRow, SubGroup } from '../components/settings/SettingsPrimitives'
 import WebhooksSection, { getWebhookErrors } from '../components/settings/WebhooksSection'
+import PosterArtSection from '../components/settings/PosterArtSection'
 import { SECTION_GROUPS, ADMIN_SECTIONS, DOWNLOAD_USER_SECTIONS } from '../components/settings/sections'
 import classes from './Settings.module.css'
 
@@ -1785,6 +1786,10 @@ export default function Settings() {
     <WebhooksSection formData={formData} onChange={handleChange} />
   )
 
+  const renderPosterArt = () => (
+    <PosterArtSection formData={formData} onChange={handleChange} switchSize={switchSize} />
+  )
+
   const sectionContent = {
     recording: renderRecording,
     processing: renderProcessing,
@@ -1797,6 +1802,7 @@ export default function Settings() {
     users: renderUsers,
     plex: renderPlex,
     webhooks: renderWebhooks,
+    'poster-art': renderPosterArt,
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }

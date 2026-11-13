@@ -136,6 +136,32 @@ than by default.
 _Avoid_: transcoded preview (it usually only converts the audio), compatibility
 mode (that's the user-facing wording, not the concept), server-side preview
 
+### Poster art
+
+**Poster art**:
+The picture that stands for a finished recording: the show's poster for an
+episode, the film's poster for a film. Looked up after the recording is
+already finished, from a **poster source**, and used twice: as the thumbnail
+in History and as a **library poster** saved next to the recording. Having
+none is a normal state, not a failure. One poster per recording, though every
+episode of a show normally ends up with the same one.
+_Avoid_: artwork (fine in the UI, but it also means fanart, banners and logos,
+which Mustarrd does not fetch), cover, thumbnail (that's only the small
+rendition History shows), logo (that's a channel's)
+
+**Poster source**:
+A service Mustarrd asks for a poster: TMDB (only with the user's key), then
+TVMaze. Asked by ID when the [[structured guide metadata]] has one, otherwise
+by name, and a name match must be exact.
+_Avoid_: provider (that's the IPTV service), scraper, agent
+
+**Library poster**:
+The copy of the poster saved in the completed folder, named the way Kodi and
+Jellyfin look for it: `poster.jpg` in a show's own folder, or the recording's
+name ending in `-poster.jpg` anywhere else.
+_Avoid_: sidecar (kept for the `.nfo` and EDL files that describe one
+recording; a show's `poster.jpg` is shared by all its episodes)
+
 ### Integrations
 
 **Recording event**:
