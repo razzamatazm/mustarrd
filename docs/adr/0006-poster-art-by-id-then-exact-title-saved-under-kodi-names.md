@@ -37,11 +37,18 @@ user's: the default TV template is flat, with every show in one folder.
   request parameter, never glued into a URL.
 - **No match means no poster.** It is not an error, it is not retried on a
   timer, and it is never "closest result wins".
-- **It runs off the recording event seam**, after the recording is finished,
-  as the last subscriber and under a time limit. It cannot delay or fail a
-  recording, and it cannot hold up webhooks or notifications behind it.
+- **It runs off the recording event seam**, after the recording is finished.
+  The bus waits for each subscriber, so the subscriber only schedules the
+  work: lookups run in a task of their own, one at a time and under a time
+  limit. It cannot delay or fail a recording, and it cannot hold up the
+  webhooks and notifications queued behind it.
 - **It can be turned off**, and saving into the library is a second switch.
-  Both default to on. The settings page says what is sent and to whom.
+  Both default to on. The settings page says what is sent and to whom. Off
+  means no requests to a poster's host at all, including from History.
+- **Film or show.** A numbered episode is a show and a film category is a
+  film. With neither, a recording of 85 minutes or more is tried as a film
+  first. A year the guide put in the title narrows the search, with the plain
+  search as the fallback.
 - **Third-party services are told who is asking.** Lookups and image fetches
   send `Mustarrd (poster lookup)`, not the player-style User-Agent providers
   get (#453). The image fetch reuses `logo_cache`'s guard: public addresses
@@ -49,7 +56,8 @@ user's: the default TV template is flat, with every show in one folder.
 - **Kodi's names.** An episode whose folder (or whose `Season NN` folder's
   parent) is named after the show gets `<show folder>/poster.jpg`. Everything
   else gets `<recording name>-poster.jpg`. An existing show poster is left
-  alone unless the user presses Refresh artwork.
+  alone unless an admin presses Refresh artwork: it is shared by every
+  episode in the folder, including other users'.
 - **The TMDB key is a secret.** Encrypted at rest like account passwords,
   write-only through the API, and kept out of logs: a failed lookup logs the
   exception's type, not its text, because the text can carry the request URL.
@@ -60,7 +68,8 @@ user's: the default TV template is flat, with every show in one folder.
   (UK)" is handled; "Det. S2" is not) get no poster. That is the intended
   trade. Loosening the match to fix it brings back wrong posters; the route to
   better coverage is more IDs in the guide, or a manual pick.
-- Films get nothing without a TMDB key.
+- Films get nothing from TMDB without a key. A film that shares its exact
+  name with a show can then get the show's poster from TVMaze.
 - In a flat or channel-grouped library, each episode gets its own
   `-poster.jpg`, which Kodi and Jellyfin ignore for episodes. Users who want
   show posters in their library need a `{show}/...` folder in the TV template.
@@ -70,3 +79,25 @@ user's: the default TV template is flat, with every show in one folder.
   until the user switches it off.
 - On-demand (VOD) downloads are skipped: their rows carry no guide metadata
   and, for episodes, not the show's name.
+
+## Considered options
+
+- **The provider's own picture as the no-key fallback.** #443 originally said
+  artwork would degrade "to whatever image URLs the provider guide and VOD
+  info already hand us". The owner later chose TMDB and TVMaze only. Mustarrd
+  also stores no picture for a guide program, so this would only ever have
+  covered on-demand items, which this feature skips.
+- **OMDb and iTunes** (both in Dispatcharr's chain). OMDb needs its own key.
+  iTunes can only be searched by name.
+- **ID-only matching.** Safest, and nearly useless: most guides publish no IDs.
+- **Closest search result wins.** Maximum coverage, and the cause of the bug
+  this issue set out to avoid.
+- **Looking the poster up inside the download pipeline**, beside the NFO
+  sidecar. It would put seconds of third-party network time, and nine call
+  sites, between a finished download and its "completed" status.
+- **Reusing ADR 0005's webhook guard for the image fetch.** Wrong direction:
+  a webhook target is typed by an admin and may be on the LAN, a poster URL
+  comes out of someone else's JSON and must be public. `logo_cache`'s guard
+  is the one that fits. This is the third outbound-URL feature ADR 0005 said
+  to revisit at; the two guards stay separate because their rules are
+  opposites.

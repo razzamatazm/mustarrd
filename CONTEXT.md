@@ -136,6 +136,8 @@ than by default.
 _Avoid_: transcoded preview (it usually only converts the audio), compatibility
 mode (that's the user-facing wording, not the concept), server-side preview
 
+### Poster art
+
 **Poster art**:
 The picture that stands for a finished recording: the show's poster for an
 episode, the film's poster for a film. Looked up after the recording is

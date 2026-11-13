@@ -1786,7 +1786,7 @@ export default function Settings() {
     <WebhooksSection formData={formData} onChange={handleChange} />
   )
 
-  const renderArtwork = () => (
+  const renderPosterArt = () => (
     <PosterArtSection formData={formData} onChange={handleChange} switchSize={switchSize} />
   )
 
@@ -1802,7 +1802,7 @@ export default function Settings() {
     users: renderUsers,
     plex: renderPlex,
     webhooks: renderWebhooks,
-    artwork: renderArtwork,
+    'poster-art': renderPosterArt,
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }

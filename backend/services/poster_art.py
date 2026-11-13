@@ -8,8 +8,9 @@ with it:
   Jellyfin look for it.
 
 It runs off the recording event seam, after the recording is already marked
-finished, so nothing here can delay a recording or fail one. No poster is a
-normal outcome, not an error.
+finished, and in a task of its own, so nothing here can delay a recording,
+fail one, or keep a webhook waiting. No poster is a normal outcome, not an
+error.
 
 Where things live:
 
@@ -33,7 +34,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 from sqlalchemy import select
@@ -62,10 +63,11 @@ from services.recording_events import RECORDING_COMPLETED, RecordingEvent
 logger = logging.getLogger(__name__)
 
 POSTER_MAX_BYTES = 5 * 1024 * 1024
-# The whole job for one recording: lookups, the image, the file. Events are
-# delivered one at a time, so this is also the longest a poster can hold up
-# the next recording's webhook.
+# The whole job for one recording: lookups, the image, the file.
 ATTACH_TIMEOUT_SECONDS = 45
+# Posters are fetched one at a time off to the side of the event bus. Past
+# this many waiting, new ones are skipped; Refresh artwork can fetch them.
+MAX_PENDING_ATTACHES = 200
 # Twenty episodes of one show finishing together should cost one lookup.
 RESOLVE_CACHE_SECONDS = 24 * 60 * 60
 RESOLVE_NEGATIVE_CACHE_SECONDS = 30 * 60
@@ -73,7 +75,6 @@ RESOLVE_CACHE_MAX_ENTRIES = 500
 
 LIBRARY_POSTER_SUFFIX = "-poster"
 SHOW_FOLDER_POSTER_NAME = "poster"
-_POSTER_EXTENSIONS = (".jpg", ".png", ".webp")
 _SEASON_FOLDER_RE = re.compile(r"^(season|series|specials|staffel|s)[\s._-]*\d*$", re.IGNORECASE)
 _FOLDER_TAG_RE = re.compile(r"\s*[\(\[\{].*$")
 
@@ -101,6 +102,10 @@ class PosterCache(LogoCache):
 poster_cache = PosterCache()
 
 
+_IMAGE_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+_POSTER_EXTENSIONS = tuple(_IMAGE_TYPES)
+
+
 def image_extension(content: bytes) -> Optional[str]:
     """The file extension for these image bytes, judged by the bytes themselves.
 
@@ -117,15 +122,11 @@ def image_extension(content: bytes) -> Optional[str]:
     return None
 
 
-def content_type_for(content: bytes, declared: str) -> str:
-    extension = image_extension(content)
-    if extension == ".jpg":
-        return "image/jpeg"
-    if extension == ".png":
-        return "image/png"
-    if extension == ".webp":
-        return "image/webp"
-    return declared
+def is_poster_eligible(download) -> bool:
+    """Poster art is for finished recordings, and not for on-demand downloads."""
+    return not getattr(download, "is_vod", False) and (
+        getattr(download, "status", None) in _FINISHED_STATUSES
+    )
 
 
 # --- the library file -------------------------------------------------------
@@ -166,13 +167,14 @@ def library_poster_path(
     return os.path.splitext(video_path)[0] + LIBRARY_POSTER_SUFFIX + extension, False
 
 
-def _existing_show_poster(path: str) -> Optional[str]:
-    base = os.path.splitext(path)[0]
-    for extension in _POSTER_EXTENSIONS:
-        candidate = base + extension
-        if os.path.exists(candidate):
-            return candidate
-    return None
+def _same_poster_other_formats(path: str) -> List[str]:
+    """Existing files that are this poster under another image extension."""
+    base, own = os.path.splitext(path)
+    return [
+        base + extension
+        for extension in _POSTER_EXTENSIONS
+        if extension != own and os.path.exists(base + extension)
+    ]
 
 
 def write_library_poster(
@@ -181,15 +183,17 @@ def write_library_poster(
     *,
     show_title: str,
     episodic: bool,
-    replace: bool = False,
+    replace_show_poster: bool = False,
 ) -> Optional[str]:
     """Save the poster into the library beside ``video_path``.
 
     Returns the poster's path, or ``None`` when nothing was written. A show
     folder's ``poster.jpg`` is shared by every episode and may be the user's
-    own, so it is left alone unless ``replace`` is set (the refresh action).
-    Never raises: like the NFO sidecar, an unwritable library folder must not
-    become anybody's error.
+    own, so an existing one is left alone unless ``replace_show_poster`` is
+    set (an admin pressing Refresh artwork). A poster that changes format
+    replaces the old file instead of sitting beside it. Never raises: like
+    the NFO sidecar, an unwritable library folder must not become anybody's
+    error.
     """
     try:
         if not video_path or not os.path.isfile(video_path):
@@ -198,14 +202,21 @@ def write_library_poster(
         if extension is None:
             return None
         target, shared = library_poster_path(video_path, show_title, episodic, extension)
-        if shared and not replace:
-            existing = _existing_show_poster(target)
-            if existing:
-                return existing
+        others = _same_poster_other_formats(target)
+        if shared and not replace_show_poster:
+            if os.path.exists(target):
+                return target
+            if others:
+                return others[0]
         tmp_path = target + ".tmp"
         with open(tmp_path, "wb") as handle:
             handle.write(content)
         os.replace(tmp_path, target)
+        for stale in others:
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
         return target
     except Exception as exc:  # noqa: BLE001 - a poster is a nicety
         logger.warning("Could not save poster art for %s: %s", video_path, exc)
@@ -304,15 +315,25 @@ class PosterArtService:
     def _sessions(self):
         return self._session_maker or async_session_maker
 
-    async def attach(self, download_id: int, *, replace: bool = False) -> PosterOutcome:
+    async def attach(
+        self,
+        download_id: int,
+        *,
+        replace: bool = False,
+        replace_show_poster: bool = True,
+    ) -> PosterOutcome:
         """Find and save the poster for one finished recording. Never raises.
 
         ``replace`` is the refresh action: look again even if a poster is
         already recorded, refetch the image, and overwrite the library copy.
         A refresh that finds nothing keeps the poster the recording had.
+        ``replace_show_poster`` says whether that refresh may also overwrite
+        a show folder's shared ``poster.jpg``.
         """
         try:
-            return await self._attach(download_id, replace=replace)
+            return await self._attach(
+                download_id, replace=replace, replace_show_poster=replace_show_poster
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a poster is not the recording's problem
@@ -321,11 +342,12 @@ class PosterArtService:
             )
             return PosterOutcome(OUTCOME_NOT_FOUND)
 
-    async def _attach(self, download_id: int, *, replace: bool) -> PosterOutcome:
-        snapshot_or_outcome = await self._load(download_id)
-        if isinstance(snapshot_or_outcome, PosterOutcome):
-            return snapshot_or_outcome
-        snapshot = snapshot_or_outcome
+    async def _attach(
+        self, download_id: int, *, replace: bool, replace_show_poster: bool
+    ) -> PosterOutcome:
+        snapshot, outcome = await self._load(download_id)
+        if snapshot is None:
+            return outcome
 
         match: Optional[PosterMatch] = None
         if snapshot.poster_url and not replace:
@@ -337,9 +359,7 @@ class PosterArtService:
         elif snapshot.query is not None:
             match = await self._resolve(snapshot.query, snapshot.tmdb_api_key, fresh=replace)
 
-        if replace and match is not None and match.thumbnail_url:
-            self._cache.forget(match.thumbnail_url)
-        poster_url, content = await self._fetch_first(match, fresh=replace)
+        poster_url, content = await self._first_image(match, fresh=replace)
         if poster_url is None or content is None:
             return PosterOutcome(
                 OUTCOME_NOT_FOUND,
@@ -349,6 +369,9 @@ class PosterArtService:
 
         # A thumbnail only stands in for the poster it was offered alongside.
         thumb_url = match.thumbnail_url if match.thumbnail_url != poster_url else None
+        if thumb_url:
+            # Fetched now, so that opening History later costs no network.
+            await self._image(thumb_url, fresh=replace)
         if (poster_url, thumb_url, match.source) != (
             snapshot.poster_url,
             snapshot.poster_thumb_url,
@@ -365,24 +388,25 @@ class PosterArtService:
                 content,
                 show_title=FileNamer.extract_show_name(snapshot.program_title),
                 episodic=episodic,
-                replace=replace,
+                replace_show_poster=replace and replace_show_poster,
             )
 
         return PosterOutcome(
             OUTCOME_SAVED, poster_url=poster_url, source=match.source, library_path=library_path
         )
 
-    async def _load(self, download_id: int):
+    async def _load(self, download_id: int) -> Tuple[Optional[_Snapshot], PosterOutcome]:
+        """``(snapshot, _)`` to go ahead, or ``(None, outcome)`` with the reason not to."""
         async with self._sessions()() as session:
             download = (
                 await session.execute(select(Download).where(Download.id == download_id))
             ).scalar_one_or_none()
-            if download is None or download.is_vod or download.status not in _FINISHED_STATUSES:
-                return PosterOutcome(OUTCOME_SKIPPED)
+            if download is None or not is_poster_eligible(download):
+                return None, PosterOutcome(OUTCOME_SKIPPED)
             settings = (await session.execute(select(AppSettings))).scalar_one_or_none()
             if settings is not None and settings.poster_art_enabled is False:
-                return PosterOutcome(OUTCOME_DISABLED, poster_url=download.poster_url)
-            return _Snapshot(
+                return None, PosterOutcome(OUTCOME_DISABLED, poster_url=download.poster_url)
+            snapshot = _Snapshot(
                 program_title=download.program_title or "",
                 output_path=download.output_path or "",
                 poster_url=download.poster_url,
@@ -394,6 +418,7 @@ class PosterArtService:
                 ),
                 tmdb_api_key=tmdb_api_key_from(settings) if settings is not None else None,
             )
+            return snapshot, PosterOutcome(OUTCOME_SAVED)
 
     async def _resolve(
         self, query: PosterQuery, tmdb_api_key: Optional[str], *, fresh: bool
@@ -413,19 +438,34 @@ class PosterArtService:
         self._resolved[key] = (now + ttl, match)
         return match
 
-    async def _fetch_first(
+    async def _image(
+        self, url: Optional[str], *, fresh: bool = False, fetch: bool = True
+    ) -> Optional[Tuple[bytes, str]]:
+        """``(bytes, content type)`` for ``url`` if it is a real image, else None.
+
+        ``fresh`` drops the cached copy first. ``fetch=False`` answers from
+        the disk cache only and never reaches for the network.
+        """
+        if not url:
+            return None
+        if fresh:
+            self._cache.forget(url)
+        result = await self._cache.get_image(url) if fetch else self._cache.cached_image(url)
+        if result is None:
+            return None
+        content, declared = result
+        extension = image_extension(content)
+        if extension is None:
+            return None
+        return content, _IMAGE_TYPES.get(extension, declared)
+
+    async def _first_image(
         self, match: Optional[PosterMatch], *, fresh: bool
     ) -> Tuple[Optional[str], Optional[bytes]]:
         for url in (match.urls if match else ()):
-            if fresh:
-                self._cache.forget(url)
-            result = await self._cache.get_logo(url)
-            if result is None:
-                continue
-            content, _content_type = result
-            if image_extension(content) is None:
-                continue
-            return url, content
+            image = await self._image(url, fresh=fresh)
+            if image is not None:
+                return url, image[0]
         return None, None
 
     async def _store(
@@ -442,22 +482,17 @@ class PosterArtService:
             download.poster_source = source or None
             await session.commit()
 
-    async def read(self, *urls: Optional[str]) -> Optional[Tuple[bytes, str]]:
+    async def read(self, *urls: Optional[str], fetch: bool = True) -> Optional[Tuple[bytes, str]]:
         """The first of ``urls`` that loads, as ``(bytes, content type)``.
 
         History passes the thumbnail first and the full poster as a fallback.
-        Bytes the cache has lost are refetched.
+        With ``fetch`` the bytes are refetched if the cache has lost them;
+        without it (poster art switched off) only the disk cache is read.
         """
         for url in urls:
-            if not url:
-                continue
-            result = await self._cache.get_logo(url)
-            if result is None:
-                continue
-            content, declared = result
-            if image_extension(content) is None:
-                continue
-            return content, content_type_for(content, declared)
+            image = await self._image(url, fetch=fetch)
+            if image is not None:
+                return image
         return None
 
 
@@ -468,10 +503,19 @@ poster_art = PosterArtService()
 
 
 class PosterArtSubscriber:
-    """Recording event seam consumer: a finished recording gets its poster."""
+    """Recording event seam consumer: a finished recording gets its poster.
+
+    The bus delivers one event at a time and waits for each subscriber, so a
+    lookup done inline would hold the next recording's webhook and
+    notification behind a slow TMDB. The event only schedules the work here;
+    the lookups run in their own task, one at a time so a batch of episodes
+    shares one lookup, and the bus moves on straight away.
+    """
 
     def __init__(self, service: Optional[PosterArtService] = None) -> None:
         self._service = service or poster_art
+        self._tasks: Set["asyncio.Task[None]"] = set()
+        self._one_at_a_time = asyncio.Lock()
 
     async def __call__(self, event: RecordingEvent) -> None:
         if event.name != RECORDING_COMPLETED:
@@ -480,17 +524,40 @@ class PosterArtSubscriber:
         download_id = recording.get("id")
         if download_id is None or recording.get("is_vod"):
             return
-        try:
-            await asyncio.wait_for(
-                self._service.attach(int(download_id)), timeout=ATTACH_TIMEOUT_SECONDS
+        if len(self._tasks) >= MAX_PENDING_ATTACHES:
+            logger.warning(
+                "Too many posters waiting (%d); skipped download %s",
+                len(self._tasks),
+                download_id,
             )
+            return
+        task = asyncio.create_task(self._attach(int(download_id)))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _attach(self, download_id: int) -> None:
+        try:
+            async with self._one_at_a_time:
+                await asyncio.wait_for(
+                    self._service.attach(download_id), timeout=ATTACH_TIMEOUT_SECONDS
+                )
         except asyncio.TimeoutError:
             logger.warning("Poster art for download %s took too long; skipped", download_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - nothing awaits this task
+            logger.warning(
+                "Poster art for download %s failed (%s)", download_id, type(exc).__name__
+            )
+
+    async def wait_idle(self) -> None:
+        """Wait for every scheduled poster to finish. For tests and shutdown."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
 def register_poster_art_subscriber(bus) -> PosterArtSubscriber:
-    """Put the poster consumer on the recording event bus. Called at startup,
-    after the webhook and notification consumers so it never keeps them waiting."""
+    """Put the poster consumer on the recording event bus. Called at startup."""
     subscriber = PosterArtSubscriber()
     bus.subscribe(subscriber)
     return subscriber

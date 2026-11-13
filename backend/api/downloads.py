@@ -22,7 +22,12 @@ from database import get_session
 from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
 from services.disk_space import check_disk_space
 from services.download_manager import download_manager
-from services.poster_art import OUTCOME_DISABLED, OUTCOME_SKIPPED, poster_art
+from services.poster_art import (
+    OUTCOME_DISABLED,
+    OUTCOME_SKIPPED,
+    is_poster_eligible,
+    poster_art,
+)
 from api.hls_common import hls_asset_response, hls_http_error, hls_playlist_response
 from services.hls_streamer import (
     HLS_ASSET_PATTERN,
@@ -640,10 +645,14 @@ async def get_download_poster(
     """
     download = await _owned_download(download_id, auth, session)
     thumb_url, poster_url = download.poster_thumb_url, download.poster_url
+    settings_row = (await session.execute(select(AppSettings))).scalar_one_or_none()
+    # Switched off means no requests to the poster's host, including from
+    # here: a poster already on disk is still shown, a lost one is not refetched.
+    may_fetch = settings_row is None or settings_row.poster_art_enabled is not False
     # Let go of the database before any refetch reaches for the network.
     await session.close()
 
-    result = await poster_art.read(thumb_url, poster_url)
+    result = await poster_art.read(thumb_url, poster_url, fetch=may_fetch)
     if result is None:
         raise HTTPException(status_code=404, detail="No poster for this recording")
     content, content_type = result
@@ -667,17 +676,18 @@ async def refresh_download_poster(
 ):
     """Look a finished recording's poster up again and replace what is there."""
     download = await _owned_download(download_id, auth, session)
-    if download.is_vod or download.status not in (
-        DownloadStatus.COMPLETED.value,
-        DownloadStatus.INTERRUPTED.value,
-    ):
+    if not is_poster_eligible(download):
         raise HTTPException(
             status_code=400,
             detail="Artwork can only be refreshed for a finished recording",
         )
     await session.close()
 
-    outcome = await poster_art.attach(download_id, replace=True)
+    # A show folder's poster.jpg is shared by every episode in it, including
+    # other people's, so only an admin's refresh may overwrite one.
+    outcome = await poster_art.attach(
+        download_id, replace=True, replace_show_poster=auth.is_admin
+    )
     if outcome.status == OUTCOME_DISABLED:
         raise HTTPException(
             status_code=409,

@@ -51,6 +51,9 @@ TVMAZE_API_BASE = "https://api.tvmaze.com"
 LOOKUP_USER_AGENT = "Mustarrd (poster lookup)"
 LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=12, sock_connect=6, sock_read=8)
 LOOKUP_MAX_JSON_BYTES = 2 * 1024 * 1024
+# With nothing else to go on, a recording this long is more likely a film
+# than an episode, so films are searched first. Padding is included.
+LONG_FORM_MINUTES = 85
 
 _MOVIE_CATEGORY_WORDS = ("movie", "film", "cinema")
 _TMDB_TV_HINTS = ("tv", "series", "show")
@@ -58,6 +61,7 @@ _TMDB_MOVIE_HINTS = ("movie", "film")
 
 _TRAILING_BRACKETS_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$")
 _LEADING_TAG_RE = re.compile(r"^\s*(?:new|live|repeat)\s*[:\-]\s*", re.IGNORECASE)
+_YEAR_TAG_RE = re.compile(r"\(((?:19|20)\d{2})\)")
 _IMDB_ID_RE = re.compile(r"tt\d{5,}")
 _DIGITS_RE = re.compile(r"\d+")
 
@@ -71,6 +75,9 @@ class PosterQuery:
     tmdb_id: Optional[str] = None
     tvdb_id: Optional[str] = None
     imdb_id: Optional[str] = None
+    # A "(1979)" the guide put in the title, used to tell remakes apart.
+    year: Optional[int] = None
+    runtime_minutes: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +119,9 @@ def normalize_title(title: Optional[str]) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.casefold().replace("&", " and ")
-    return re.sub(r"[^a-z0-9]+", "", text)
+    # Letters and digits of any script. Keeping only a-z would reduce
+    # "Новости 24" to "24" and let it match a show called "24".
+    return "".join(ch for ch in text if ch.isalnum())
 
 
 def _kind_for(title: str, metadata: GuideMetadata) -> str:
@@ -146,12 +155,16 @@ def query_from_download(download) -> Optional[PosterQuery]:
     if not title and not (metadata.tmdb_id or metadata.tvdb_id or metadata.imdb_id):
         return None
 
+    year_tag = _YEAR_TAG_RE.search(program_title)
+    runtime = getattr(download, "duration_minutes", None)
     return PosterQuery(
         title=title,
         kind=_kind_for(program_title, metadata),
         tmdb_id=metadata.tmdb_id,
         tvdb_id=metadata.tvdb_id,
         imdb_id=metadata.imdb_id,
+        year=int(year_tag.group(1)) if year_tag else None,
+        runtime_minutes=runtime if isinstance(runtime, int) and runtime > 0 else None,
     )
 
 
@@ -260,8 +273,11 @@ def _tvdb_reference(value: Optional[str]) -> Tuple[Optional[str], bool]:
     return match.group(0), "episode" in text[: match.start()]
 
 
-def _kinds_to_try(kind: str) -> Sequence[str]:
-    if kind == KIND_MOVIE:
+def _kinds_to_try(query: PosterQuery) -> Sequence[str]:
+    """Which of TMDB's two catalogues to try first for this recording."""
+    if query.kind == KIND_MOVIE:
+        return (KIND_MOVIE, KIND_TV)
+    if query.kind == KIND_UNKNOWN and (query.runtime_minutes or 0) >= LONG_FORM_MINUTES:
         return (KIND_MOVIE, KIND_TV)
     return (KIND_TV, KIND_MOVIE)
 
@@ -316,6 +332,11 @@ class TmdbSource:
             if isinstance(value, str) and value.strip():
                 yield value
 
+    @classmethod
+    def _same_name(cls, wanted: str, item: dict) -> bool:
+        """An empty name matches nothing, so it can never match everything."""
+        return bool(wanted) and wanted in {normalize_title(n) for n in cls._names(item)}
+
     async def find(self, query: PosterQuery) -> Optional[PosterMatch]:
         if not self._api_key:
             return None
@@ -330,14 +351,14 @@ class TmdbSource:
         if not number:
             return None
         wanted = normalize_title(query.title)
-        for kind in ((hint,) if hint else _kinds_to_try(query.kind)):
+        for kind in ((hint,) if hint else _kinds_to_try(query)):
             status, item = await self._get(f"/{kind}/{number}")
             if status != 200 or not isinstance(item, dict):
                 continue
             # TV 1399 and film 1399 are different things. A bare number is
             # only trusted when we know which it is, or the name agrees.
             certain = bool(hint) or query.kind == kind
-            if not certain and wanted not in {normalize_title(n) for n in self._names(item)}:
+            if not certain and not self._same_name(wanted, item):
                 continue
             match = self._poster(item)
             if match:
@@ -348,18 +369,21 @@ class TmdbSource:
         lookups = []
         imdb = _imdb_reference(query.imdb_id)
         if imdb:
-            lookups.append((imdb, "imdb_id"))
-        tvdb, _is_episode = _tvdb_reference(query.tvdb_id)
+            lookups.append((imdb, "imdb_id", False))
+        tvdb, is_episode = _tvdb_reference(query.tvdb_id)
         if tvdb:
-            lookups.append((tvdb, "tvdb_id"))
+            lookups.append((tvdb, "tvdb_id", is_episode))
 
-        for external_id, source in lookups:
+        for external_id, source, episode_only in lookups:
             status, payload = await self._get(
                 f"/find/{external_id}", {"external_source": source}
             )
             if status != 200 or not isinstance(payload, dict):
                 continue
-            for bucket in ("tv_results", "movie_results"):
+            # TVDB numbers shows and episodes separately, so an episode's
+            # number can also be some other show's. When the guide says it is
+            # an episode, only the episode answer counts.
+            for bucket in () if episode_only else ("tv_results", "movie_results"):
                 match = self._poster(_first_dict(payload.get(bucket)))
                 if match:
                     return match
@@ -378,18 +402,23 @@ class TmdbSource:
         wanted = normalize_title(query.title)
         if not wanted:
             return None
-        for kind in _kinds_to_try(query.kind):
-            status, payload = await self._get(f"/search/{kind}", {"query": query.title})
-            if status != 200 or not isinstance(payload, dict):
-                continue
-            for item in payload.get("results") or []:
-                if not isinstance(item, dict):
+        for kind in _kinds_to_try(query):
+            searches = [{"query": query.title}]
+            if query.year:
+                # Narrow to the year first; guides get years wrong often
+                # enough that the plain search stays as the fallback.
+                year_param = "year" if kind == KIND_MOVIE else "first_air_date_year"
+                searches.insert(0, {"query": query.title, year_param: str(query.year)})
+            for params in searches:
+                status, payload = await self._get(f"/search/{kind}", params)
+                if status != 200 or not isinstance(payload, dict):
                     continue
-                if wanted not in {normalize_title(n) for n in self._names(item)}:
-                    continue
-                match = self._poster(item)
-                if match:
-                    return match
+                for item in payload.get("results") or []:
+                    if not isinstance(item, dict) or not self._same_name(wanted, item):
+                        continue
+                    match = self._poster(item)
+                    if match:
+                        return match
         return None
 
 

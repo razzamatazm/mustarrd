@@ -90,6 +90,14 @@ class LookupTitleTests(unittest.TestCase):
     def test_different_shows_stay_different(self):
         self.assertNotEqual(normalize_title("Bluey"), normalize_title("Bluey's Big Play"))
 
+    def test_titles_in_other_alphabets_keep_their_letters(self):
+        """Keeping only a-z turned "Новости 24" into "24", which matches the show 24."""
+        self.assertNotEqual(normalize_title("Новости 24"), normalize_title("24"))
+        self.assertNotEqual(normalize_title("Новости 24"), normalize_title("Вести 24"))
+        self.assertNotEqual(normalize_title("MBC أخبار"), normalize_title("MBC"))
+        self.assertEqual(normalize_title("НОВОСТИ 24"), normalize_title("новости 24"))
+        self.assertTrue(normalize_title("Матрица"))
+
 
 class QueryFromRecordingTests(unittest.TestCase):
     def test_a_numbered_episode_is_a_show(self):
@@ -111,6 +119,14 @@ class QueryFromRecordingTests(unittest.TestCase):
 
     def test_anything_else_is_unknown(self):
         self.assertEqual(query_from_download(_recording("News at Ten")).kind, KIND_UNKNOWN)
+
+    def test_a_year_in_the_title_and_the_length_ride_along(self):
+        recording = _recording("Alien (1979)")
+        recording.duration_minutes = 123
+
+        query = query_from_download(recording)
+
+        self.assertEqual((query.title, query.year, query.runtime_minutes), ("Alien", 1979, 123))
 
     def test_guide_ids_ride_along(self):
         query = query_from_download(
@@ -167,6 +183,15 @@ class TmdbTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(wrong)
         self.assertEqual(right.urls, (f"{TMDB_IMAGE_BASE}/film.jpg",))
 
+    async def test_a_bare_tmdb_id_never_matches_on_an_empty_name(self):
+        http = FakeJsonClient(
+            {_tmdb("/tv/603"): (200, {"name": "!!!", "poster_path": "/wrong.jpg"})}
+        )
+
+        match = await TmdbSource(V3_KEY, http).find(PosterQuery(title="???", tmdb_id="603"))
+
+        self.assertIsNone(match)
+
     async def test_an_imdb_id_is_looked_up_without_searching_by_name(self):
         http = FakeJsonClient(
             {
@@ -201,6 +226,76 @@ class TmdbTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(match.urls, (f"{TMDB_IMAGE_BASE}/d.jpg",))
+
+    async def test_an_episode_id_is_not_mistaken_for_a_show_with_the_same_number(self):
+        """TVDB numbers shows and episodes separately."""
+        http = FakeJsonClient(
+            {
+                _tmdb("/find/5551234"): (
+                    200,
+                    {
+                        "tv_results": [{"name": "Some Other Show", "poster_path": "/other.jpg"}],
+                        "tv_episode_results": [{"show_id": 61381}],
+                    },
+                ),
+                _tmdb("/tv/61381"): (200, {"name": "Detectorists", "poster_path": "/d.jpg"}),
+            }
+        )
+
+        match = await TmdbSource(V3_KEY, http).find(
+            PosterQuery(title="Detectorists", kind=KIND_TV, tvdb_id="episode/5551234")
+        )
+
+        self.assertEqual(match.urls, (f"{TMDB_IMAGE_BASE}/d.jpg",))
+
+    async def test_a_long_recording_of_unknown_kind_is_tried_as_a_film_first(self):
+        """The film Fargo should not get the series' poster when TMDB has both."""
+        http = FakeJsonClient(
+            {
+                _tmdb("/search/movie"): (200, {"results": [{"title": "Fargo", "poster_path": "/film.jpg"}]}),
+                _tmdb("/search/tv"): (200, {"results": [{"name": "Fargo", "poster_path": "/series.jpg"}]}),
+            }
+        )
+        source = TmdbSource(V3_KEY, http)
+
+        film = await source.find(PosterQuery(title="Fargo", runtime_minutes=104))
+        episode = await source.find(PosterQuery(title="Fargo", runtime_minutes=66))
+
+        self.assertEqual(film.urls, (f"{TMDB_IMAGE_BASE}/film.jpg",))
+        self.assertEqual(episode.urls, (f"{TMDB_IMAGE_BASE}/series.jpg",))
+
+    async def test_a_year_in_the_title_picks_between_remakes(self):
+        http = FakeJsonClient(
+            {
+                (_tmdb("/search/movie"), (("api_key", V3_KEY), ("query", "Dune"), ("year", "1984"))): (
+                    200,
+                    {"results": [{"title": "Dune", "poster_path": "/1984.jpg"}]},
+                ),
+                _tmdb("/search/movie"): (200, {"results": [{"title": "Dune", "poster_path": "/2021.jpg"}]}),
+            }
+        )
+
+        match = await TmdbSource(V3_KEY, http).find(
+            PosterQuery(title="Dune", kind=KIND_MOVIE, year=1984)
+        )
+
+        self.assertEqual(match.urls, (f"{TMDB_IMAGE_BASE}/1984.jpg",))
+
+    async def test_a_wrong_year_falls_back_to_the_plain_search(self):
+        http = FakeJsonClient(
+            {
+                (_tmdb("/search/movie"), (("api_key", V3_KEY), ("query", "Dune"))): (
+                    200,
+                    {"results": [{"title": "Dune", "poster_path": "/2021.jpg"}]},
+                ),
+            }
+        )
+
+        match = await TmdbSource(V3_KEY, http).find(
+            PosterQuery(title="Dune", kind=KIND_MOVIE, year=2026)
+        )
+
+        self.assertEqual(match.urls, (f"{TMDB_IMAGE_BASE}/2021.jpg",))
 
     async def test_a_title_search_only_accepts_the_same_name(self):
         http = FakeJsonClient(

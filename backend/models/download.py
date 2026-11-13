@@ -94,12 +94,12 @@ class Download(Base):
         return self.duration_minutes * 60
 
     @property
-    def poster_path(self) -> str | None:
+    def poster_api_path(self) -> str | None:
         """Where the UI loads this recording's poster from, or None without one.
 
-        The provider-neutral API path, not the third-party image URL: the
-        browser never talks to the poster's host. The ``v`` tag changes when
-        the poster does, so a refreshed poster is not served from cache.
+        Our own API path, not the third-party image URL: the browser never
+        talks to the poster's host. The ``v`` tag changes when the poster
+        does, so a refreshed poster is not served from cache.
         """
         if not self.poster_url:
             return None
@@ -134,7 +134,7 @@ class Download(Base):
             "duration_analysis_status": self.duration_analysis_status,
             "duration_analysis_reason": self.duration_analysis_reason,
             "interruption_reason": self.interruption_reason,
-            "poster": self.poster_path,
+            "poster": self.poster_api_path,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

@@ -73,7 +73,7 @@ export default function PosterArtSection({ formData, onChange, switchSize }) {
         </SettingRow>
         <SettingRow
           label="Save a copy next to the recording"
-          description="Puts the poster in your library so Kodi and Jellyfin show it. A show in its own folder gets poster.jpg in that folder. Anything else gets a file named after the recording, ending in -poster.jpg."
+          description="Puts the poster in your library. A show in its own folder gets poster.jpg in that folder, which is where Kodi and Jellyfin look for a show's poster. Anything else gets a file named after the recording, ending in -poster.jpg, which they use for films but not for single episodes."
         >
           <Switch
             size={switchSize}

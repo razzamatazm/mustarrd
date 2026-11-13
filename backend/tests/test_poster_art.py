@@ -78,10 +78,16 @@ class FakeImageCache:
     def __init__(self, images=None):
         self.images = dict(images or {})
         self.fetched = []
+        self.read_from_disk = []
         self.forgotten = []
 
-    async def get_logo(self, url):
+    async def get_image(self, url):
         self.fetched.append(url)
+        content = self.images.get(url)
+        return None if content is None else (content, "image/jpeg")
+
+    def cached_image(self, url):
+        self.read_from_disk.append(url)
         content = self.images.get(url)
         return None if content is None else (content, "image/jpeg")
 
@@ -233,6 +239,13 @@ class FinishedRecordingGetsAPosterTests(PosterArtTestCase):
         self.assertIsNone((await self._reload(download.id)).poster_url)
         self.assertEqual(self._library_files(), ["Bluey - S03E12 - Sleepytime.mkv"])
 
+    async def test_the_thumbnail_is_fetched_up_front_so_History_costs_no_network(self):
+        download = await self._recording()
+
+        await self.service.attach(download.id)
+
+        self.assertIn(TVMAZE_MEDIUM, self.cache.fetched)
+
     async def test_a_batch_of_episodes_costs_one_lookup(self):
         ids = []
         for episode in range(1, 6):
@@ -277,7 +290,7 @@ class NeverTheRecordingsProblemTests(PosterArtTestCase):
         self.assertEqual((await self._reload(download.id)).status, DownloadStatus.COMPLETED.value)
 
     async def test_an_image_fetch_that_blows_up_does_not_raise(self):
-        self.cache.get_logo = AsyncMock(side_effect=OSError("disk gone"))
+        self.cache.get_image = AsyncMock(side_effect=OSError("disk gone"))
         download = await self._recording()
 
         self.assertFalse((await self.service.attach(download.id)).found)
@@ -407,6 +420,20 @@ class LibraryFileTests(PosterArtTestCase):
         self.assertEqual(mine.read_bytes(), PNG)
         self.assertFalse((self.library / "Bluey" / "poster.jpg").exists())
 
+    async def test_a_poster_that_changes_format_replaces_the_old_file(self):
+        video = self._video("Bluey/Bluey - S03E12.mkv")
+        self.cache.images[TVMAZE_ORIGINAL] = PNG
+        download = await self._recording(output_path=video)
+        await self.service.attach(download.id)
+        self.assertTrue((self.library / "Bluey" / "poster.png").exists())
+
+        self.cache.images[TVMAZE_ORIGINAL] = JPEG
+        await self.service.attach(download.id, replace=True)
+
+        self.assertEqual(
+            sorted(p.name for p in (self.library / "Bluey").glob("poster.*")), ["poster.jpg"]
+        )
+
     async def test_the_extension_follows_the_image_not_the_link(self):
         self.cache.images[TVMAZE_ORIGINAL] = PNG
         download = await self._recording()
@@ -497,9 +524,66 @@ class RefreshTests(PosterArtTestCase):
 class EventSeamTests(PosterArtTestCase):
     async def _publish(self, name, recording):
         bus = RecordingEventBus()
-        bus.subscribe(svc.PosterArtSubscriber(self.service))
+        subscriber = svc.PosterArtSubscriber(self.service)
+        bus.subscribe(subscriber)
         bus.publish(name, recording)
         await bus.drain_once()
+        await subscriber.wait_idle()
+
+    async def test_a_slow_poster_does_not_keep_the_next_consumer_waiting(self):
+        """The bus waits for each subscriber, so the lookup must not run inside it."""
+        import asyncio
+
+        from services.recording_events import FakeRecordingSubscriber
+
+        release = asyncio.Event()
+        started = asyncio.Event()
+
+        async def slow(_download_id, **_kwargs):
+            started.set()
+            await release.wait()
+
+        self.service.attach = slow
+        download = await self._recording()
+        bus = RecordingEventBus()
+        posters = svc.PosterArtSubscriber(self.service)
+        webhook = FakeRecordingSubscriber()
+        bus.subscribe(posters)
+        bus.subscribe(webhook)
+
+        bus.publish(RECORDING_COMPLETED, download.to_dict())
+        bus.publish(RECORDING_FAILED, download.to_dict())
+        await asyncio.wait_for(bus.drain_once(), timeout=2)
+
+        self.assertEqual(webhook.names, [RECORDING_COMPLETED, RECORDING_FAILED])
+        await asyncio.wait_for(started.wait(), timeout=2)
+        release.set()
+        await posters.wait_idle()
+
+    async def test_posters_are_fetched_one_at_a_time(self):
+        import asyncio
+
+        running = 0
+        most_at_once = 0
+
+        async def counted(_download_id, **_kwargs):
+            nonlocal running, most_at_once
+            running += 1
+            most_at_once = max(most_at_once, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+
+        self.service.attach = counted
+        download = await self._recording()
+        bus = RecordingEventBus()
+        posters = svc.PosterArtSubscriber(self.service)
+        bus.subscribe(posters)
+        for _ in range(4):
+            bus.publish(RECORDING_COMPLETED, download.to_dict())
+        await bus.drain_once()
+        await posters.wait_idle()
+
+        self.assertEqual(most_at_once, 1)
 
     async def test_a_completed_recording_gets_its_poster(self):
         download = await self._recording()
@@ -542,17 +626,9 @@ class EventSeamTests(PosterArtTestCase):
         self.assertNotIn("poster", payload)
         self.assertEqual(payload["id"], download.id)
 
-    async def test_startup_registers_it_after_the_other_consumers(self):
+    async def test_startup_registers_it_before_the_bus_starts_draining(self):
         source = (BACKEND_ROOT / "main.py").read_text()
 
-        self.assertLess(
-            source.index("register_webhook_subscriber(recording_events)"),
-            source.index("register_poster_art_subscriber(recording_events)"),
-        )
-        self.assertLess(
-            source.index("register_notification_subscriber(recording_events)"),
-            source.index("register_poster_art_subscriber(recording_events)"),
-        )
         self.assertLess(
             source.index("register_poster_art_subscriber(recording_events)"),
             source.index("recording_events.run()"),
@@ -694,6 +770,17 @@ class PosterApiTests(PosterArtTestCase):
 
         self.assertEqual(response.body, JPEG)
 
+    async def test_switched_off_shows_what_is_on_disk_and_fetches_nothing(self):
+        download = await self._recording()
+        await self.service.attach(download.id)
+        await self._settings(poster_art_enabled=False)
+        self.cache.fetched.clear()
+
+        response = await self._get(download.id, _admin())
+
+        self.assertEqual(response.body, SMALL_JPEG)
+        self.assertEqual(self.cache.fetched, [], "Off means no requests to the poster's host.")
+
     async def test_a_recording_without_a_poster_is_a_404(self):
         download = await self._recording(program_title="News at Ten", guide_metadata_json=None)
 
@@ -718,6 +805,18 @@ class PosterApiTests(PosterArtTestCase):
 
         self.assertIs(result["found"], True)
         self.assertTrue(result["download"]["poster"].startswith(f"/api/downloads/{download.id}/poster"))
+
+    async def test_only_an_admin_refresh_replaces_a_shows_shared_poster(self):
+        video = self._video("Bluey/Bluey - S03E12.mkv")
+        shared = self.library / "Bluey" / "poster.jpg"
+        shared.write_bytes(OTHER_JPEG)
+        download = await self._recording(output_path=video, requested_by_user_id=2)
+
+        await self._refresh(download.id, _viewer(2))
+        self.assertEqual(shared.read_bytes(), OTHER_JPEG, "Other people's episodes share it.")
+
+        await self._refresh(download.id, _admin())
+        self.assertEqual(shared.read_bytes(), JPEG)
 
     async def test_refresh_finding_nothing_is_an_answer_not_an_error(self):
         download = await self._recording(program_title="News at Ten", guide_metadata_json=None)

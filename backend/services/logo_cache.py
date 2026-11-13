@@ -92,6 +92,14 @@ class LogoCache:
 
     async def get_logo(self, url: str) -> tuple[bytes, str] | None:
         """Return (bytes, content_type) for the logo, fetching it on a miss."""
+        return await self.get_image(url)
+
+    def cached_image(self, url: str) -> tuple[bytes, str] | None:
+        """The image if it is already on disk. Never touches the network."""
+        return self._read_cached(_cache_key(url))
+
+    async def get_image(self, url: str) -> tuple[bytes, str] | None:
+        """Return (bytes, content_type) for the image, fetching it on a miss."""
         key = _cache_key(url)
 
         cached = self._read_cached(key)
@@ -114,7 +122,7 @@ class LogoCache:
         try:
             return await asyncio.shield(future)
         except Exception:
-            logger.exception("Logo fetch failed url_hash=%s", key)
+            logger.exception("Image fetch failed cache=%s url_hash=%s", self.cache_subdir, key)
             self._negative[key] = time.monotonic() + NEGATIVE_CACHE_SECONDS
             return None
 
