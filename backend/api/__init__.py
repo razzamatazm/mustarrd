@@ -12,6 +12,7 @@ from . import (
     onboarding,
     admin_users,
     admin_plex,
+    notifications,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "onboarding",
     "admin_users",
     "admin_plex",
+    "notifications",
 ]

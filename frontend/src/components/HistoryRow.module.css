@@ -41,6 +41,23 @@
   color: var(--mantine-color-dimmed);
 }
 
+/* Poster art thumbnail (2:3). The slot keeps its size when empty so titles
+   line up down the list whether or not a recording has a poster. */
+.poster {
+  width: 28px;
+  height: 42px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .main {
   flex: 1;
   min-width: 0;

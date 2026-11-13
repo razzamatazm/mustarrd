@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,13 +10,19 @@ from auth import require_admin, require_admin_or_download_user, AuthContext
 from database import get_session
 from models import AppSettings, EPGProgram, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
 from services.download_manager import download_manager
-from services.epg_ingest_manager import epg_ingest_manager
+from services.epg_ingest_manager import epg_ingest_manager, friendly_connection_error
 from services.epg_service import epg_service
+from services import notifications as notification_service
 from services.account_credentials import (
     encrypt_account_password,
     resolve_account_password_with_migration,
 )
-from services.xtream_client import XtreamClient, TIMESHIFT_STYLE_AUTO, TIMESHIFT_STYLE_SETTINGS
+from services.xtream_client import (
+    XtreamClient,
+    TIMESHIFT_STYLE_AUTO,
+    TIMESHIFT_STYLE_SETTINGS,
+    parse_expiration_date,
+)
 
 
 router = APIRouter()
@@ -95,6 +101,23 @@ async def list_accounts_public(
     ]
 
 
+def _record_connection_check(account: XtreamAccount, ok: bool, error: str | None = None) -> None:
+    account.last_connection_ok = ok
+    account.last_connection_checked_at = datetime.now(timezone.utc)
+    account.last_connection_error = None if ok else error
+
+
+async def _sync_account_notifications(session: AsyncSession, account: XtreamAccount) -> None:
+    """Re-check the bell for this account after a save. Never fails the save."""
+    try:
+        await notification_service.sync_account_expiry(session, account)
+        await notification_service.sync_account_connection(session, account)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not update notifications for account_id=%s", account.id)
+        await session.rollback()
+
+
 @router.post("")
 async def create_account(
     account: AccountCreate,
@@ -121,13 +144,7 @@ async def create_account(
     user_info = auth_data.get("user_info", {})
     server_info = auth_data.get("server_info", {})
 
-    # Parse expiration date
-    exp_date = None
-    if user_info.get("exp_date"):
-        try:
-            exp_date = datetime.fromtimestamp(int(user_info["exp_date"]))
-        except (ValueError, TypeError):
-            pass
+    exp_date = parse_expiration_date(user_info)
 
     # Create account
     db_account = XtreamAccount(
@@ -146,6 +163,7 @@ async def create_account(
     session.add(db_account)
     await session.commit()
     await session.refresh(db_account)
+    await _sync_account_notifications(session, db_account)
 
     refresh_task = asyncio.create_task(epg_ingest_manager.refresh_account_by_id(db_account.id))
     refresh_task.add_done_callback(_log_task_result)
@@ -209,6 +227,7 @@ async def update_account(
 
     await session.commit()
     await session.refresh(account)
+    await _sync_account_notifications(session, account)
 
     return account.to_dict()
 
@@ -267,9 +286,19 @@ async def delete_account(
         delete(EPGProgram).where(EPGProgram.account_id == account.id)
     )
 
+    deleted_account_id = account.id
     await session.delete(account)
     await session.commit()
     epg_service.clear_cache()
+
+    # Best effort: the hourly sweep also removes notifications whose account
+    # is gone, so a failure here only delays their disappearance.
+    try:
+        await notification_service.clear_for_account(session, deleted_account_id)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not clear notifications for deleted account_id=%s", deleted_account_id)
+        await session.rollback()
 
     for dl_id in active_dl_ids:
         await download_manager.cancel_download(dl_id)
@@ -305,19 +334,14 @@ async def test_account(
         # Update cached info
         user_info = auth_data.get("user_info", {})
 
-        exp_date = None
-        if user_info.get("exp_date"):
-            try:
-                exp_date = datetime.fromtimestamp(int(user_info["exp_date"]))
-            except (ValueError, TypeError):
-                pass
-
         account.max_connections = user_info.get("max_connections")
         account.active_connections = user_info.get("active_cons")
-        account.expiration_date = exp_date
+        account.expiration_date = parse_expiration_date(user_info)
         account.last_used = datetime.utcnow()
+        _record_connection_check(account, ok=True)
 
         await session.commit()
+        await _sync_account_notifications(session, account)
 
         return {
             "status": "connected",
@@ -325,8 +349,17 @@ async def test_account(
             "server_info": auth_data.get("server_info", {}),
         }
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Account test failed account_id=%s", account_id)
+        # The Test button is a connection check like a guide refresh, so it
+        # updates the same status and the bell's "can't connect" entry.
+        try:
+            _record_connection_check(account, ok=False, error=friendly_connection_error(exc))
+            await session.commit()
+            await _sync_account_notifications(session, account)
+        except Exception:
+            logger.exception("Could not record failed test for account_id=%s", account_id)
+            await session.rollback()
         raise HTTPException(status_code=400, detail="Provider connection failed")
     finally:
         await client.close()

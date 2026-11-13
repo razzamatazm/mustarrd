@@ -78,8 +78,10 @@ class ScheduleDedupFallbackTests(unittest.IsolatedAsyncioTestCase):
             program=_PROGRAM_NO_IDS,
         )
         auth = _make_auth()
-        # execute calls: account lookup (found), dedup check (no duplicate)
-        session = _make_session([_make_account(), None])
+        # execute calls: account lookup, dedup check, settings lookup for the
+        # response's delay-adjusted available_at timestamp.
+        settings = MagicMock(scheduled_download_delay_minutes=5)
+        session = _make_session([_make_account(), None, settings])
 
         result = await create_schedule(data=data, auth=auth, session=session)
 
@@ -116,8 +118,10 @@ class ScheduleDedupFallbackTests(unittest.IsolatedAsyncioTestCase):
             program=_PROGRAM_NO_IDS,
         )
         auth = _make_auth()
-        # dedup check returns None: different channel, no match
-        session = _make_session([_make_account(), None])
+        # The dedup check returns None (different channel, no match), then the
+        # response loads the current scheduled-download delay.
+        settings = MagicMock(scheduled_download_delay_minutes=5)
+        session = _make_session([_make_account(), None, settings])
 
         result = await create_schedule(data=data, auth=auth, session=session)
 

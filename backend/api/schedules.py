@@ -11,6 +11,7 @@ from database import get_session
 from models import ScheduledRecording, ScheduledStatus, XtreamAccount, Download
 from services.download_manager import download_manager
 from services.file_namer import file_namer
+from schedule_timing import get_scheduled_download_delay_minutes
 
 
 router = APIRouter()
@@ -140,6 +141,7 @@ async def list_schedules(
         query = query.where(ScheduledRecording.requested_by_user_id == auth.user_id)
     result = await session.execute(query)
     schedules = result.scalars().all()
+    download_delay_minutes = await get_scheduled_download_delay_minutes(session)
 
     download_ids = [s.download_id for s in schedules if s.download_id]
     downloads = {}
@@ -152,7 +154,7 @@ async def list_schedules(
     response = []
     for schedule in schedules:
         download = downloads.get(schedule.download_id)
-        data = schedule.to_dict()
+        data = schedule.to_dict(download_delay_minutes)
         if download:
             data["status"] = _map_download_status(download.status)
             data["download_status"] = download.status
@@ -279,7 +281,8 @@ async def create_schedule(
     session: AsyncSession = Depends(get_session)
 ):
     schedule = await _create_schedule_record(data, auth, session)
-    return schedule.to_dict()
+    download_delay_minutes = await get_scheduled_download_delay_minutes(session)
+    return schedule.to_dict(download_delay_minutes)
 
 
 @router.get("/export")

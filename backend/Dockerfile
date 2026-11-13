@@ -110,6 +110,12 @@ RUN chmod +x /usr/local/bin/ffmpegwrapper.sh
 RUN mkdir -p /app/downloads /app/completed /app/config \
   && chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# The commit this image was built from, for the in-app update check. Declared
+# last so a new commit does not invalidate the cached layers above. Empty in a
+# local build, which turns the check off.
+ARG MUSTARRD_BUILD_SHA=""
+ENV CATCHUP_BUILD_SHA=$MUSTARRD_BUILD_SHA
+
 # Expose port
 EXPOSE 4177
 

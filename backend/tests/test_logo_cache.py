@@ -87,6 +87,7 @@ class LogoCacheTestBase(unittest.TestCase):
     def _patch_http(self, responses):
         def factory(*args, **kwargs):
             self.session_factory_calls += 1
+            self.session_factory_kwargs = kwargs
             return _FakeHttpSession(responses)
 
         patcher = patch.object(logo_cache_module.aiohttp, "ClientSession", factory)
@@ -124,6 +125,20 @@ class TestLogoFetchAndCache(LogoCacheTestBase):
 
         self.assertEqual(result, (b"logo-bytes", "image/png"))
         self.assertEqual(self.session_factory_calls, 1)
+
+    def test_logo_fetch_identifies_as_a_media_player(self):
+        """#453: logos are often served by the provider, behind the same filter."""
+        from services.provider_http import DEFAULT_PROVIDER_USER_AGENT
+
+        self._patch_url_validation()
+        self._patch_http([_make_response(body=b"logo-bytes")])
+
+        asyncio.run(LogoCache().get_logo(LOGO_URL))
+
+        self.assertEqual(
+            self.session_factory_kwargs["headers"],
+            {"User-Agent": DEFAULT_PROVIDER_USER_AGENT},
+        )
 
     def test_failed_fetch_is_negative_cached(self):
         self._patch_url_validation()

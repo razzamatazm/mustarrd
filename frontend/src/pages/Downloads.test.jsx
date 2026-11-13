@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -14,6 +15,7 @@ vi.mock('../api', () => ({
     diskSpace: vi.fn(),
     cancel: vi.fn(),
     retry: vi.fn(),
+    refreshPoster: vi.fn(),
     clearFinished: vi.fn(),
   },
   authApi: { status: vi.fn() },
@@ -321,5 +323,91 @@ describe('Downloads page', () => {
       expect(screen.queryByText('Nature Documentary')).not.toBeInTheDocument()
     })
     expect(screen.getByText('Late Show')).toBeInTheDocument()
+  })
+
+  describe('poster art', () => {
+    const withPoster = { ...completedDownload, poster: '/api/downloads/2/poster?v=abc123' }
+
+    it('shows the poster beside a recording that has one', async () => {
+      await renderDownloads({
+        downloads: [withPoster, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const slots = screen.getAllByTestId('history-poster-slot')
+      expect(slots).toHaveLength(2)
+      expect(slots[0].querySelector('img')).toHaveAttribute('src', '/api/downloads/2/poster?v=abc123')
+      // The row without a poster keeps an empty slot so the titles line up.
+      expect(slots[1].querySelector('img')).toBeNull()
+    })
+
+    it('leaves History exactly as it was when nothing has a poster', async () => {
+      await renderDownloads({
+        downloads: [completedDownload, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      expect(screen.queryByTestId('history-poster-slot')).not.toBeInTheDocument()
+    })
+
+    it('drops a poster that fails to load instead of showing a broken image', async () => {
+      await renderDownloads({
+        downloads: [withPoster],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const slot = screen.getByTestId('history-poster-slot')
+      fireEvent.error(slot.querySelector('img'))
+
+      expect(slot.querySelector('img')).toBeNull()
+    })
+
+    it('offers Refresh artwork on a finished recording and says what happened', async () => {
+      const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
+      downloadsApi.refreshPoster.mockResolvedValue({ found: true, download: withPoster })
+      await renderDownloads({
+        downloads: [completedDownload, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const buttons = screen.getAllByRole('button', { name: 'Refresh artwork' })
+      expect(buttons).toHaveLength(1)
+      fireEvent.click(buttons[0])
+
+      await waitFor(() => expect(downloadsApi.refreshPoster).toHaveBeenCalledWith(2))
+      await waitFor(() =>
+        expect(show).toHaveBeenCalledWith(expect.objectContaining({ title: 'Artwork Updated' }))
+      )
+    })
+
+    it('says so plainly when a refresh finds no poster', async () => {
+      const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
+      downloadsApi.refreshPoster.mockResolvedValue({ found: false, download: completedDownload })
+      await renderDownloads({
+        downloads: [completedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh artwork' }))
+
+      await waitFor(() =>
+        expect(show).toHaveBeenCalledWith(expect.objectContaining({ title: 'No Artwork Found' }))
+      )
+    })
+
+    it('does not offer it for on-demand downloads', async () => {
+      await renderDownloads({
+        downloads: [{ ...completedDownload, is_vod: true }],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      expect(screen.queryByRole('button', { name: 'Refresh artwork' })).not.toBeInTheDocument()
+    })
   })
 })

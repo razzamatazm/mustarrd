@@ -21,7 +21,13 @@ from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
 from services import nfo_writer
 from services.download_analysis import DURATION_ANALYSIS_STATUSES, DurationAnalysis, analyze_duration
+from download_retry_window import (
+    TRANSIENT_RETRY_LIMIT,  # noqa: F401 - re-exported; tests pin the default against it
+    resolve_retry_window_seconds,
+    retry_delays_for_window,
+)
 from services.plex_service import plex_service
+from services.provider_http import provider_request_headers
 from services.recording_events import (
     POSTPROCESSING_COMPLETED,
     RECORDING_CANCELLED,
@@ -43,7 +49,9 @@ logger = logging.getLogger(__name__)
 # Bounded retry for transient network errors mid-download. A single provider
 # hiccup (connection reset, read timeout) should not permanently fail the
 # download; each retry resumes from the bytes already on disk via HTTP Range.
-TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
+# How long that goes on is the user's retry window: see
+# download_retry_window.py, where TRANSIENT_RETRY_LIMIT now lives as
+# the constant the default window is worked out from.
 
 # A recording that is usable but suspect is a completion, not a failure. The
 # prefix is how that is written to ``error_message``; the seam reads it back
@@ -59,7 +67,6 @@ QUEUED_FOR_POST_PROCESSING_FRAME = {
     "indeterminate": False,
     "download_progress": 100.0,
 }
-TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
 
 # Default minimum free space to preserve when the AppSettings row has no value;
 # matches the default used by services.disk_space.check_disk_space.
@@ -410,6 +417,9 @@ class DownloadManager:
             payload = None
         if not isinstance(payload, dict):
             payload = {}
+        # The poster is an in-app path that needs a signed-in browser, and it
+        # is looked up after this event is sent. It means nothing off the box.
+        payload.pop("poster", None)
         payload["recovered"] = bool(recovered)
         payload["post_processed"] = bool(post_processed)
         payload["warning"] = warning
@@ -1493,7 +1503,8 @@ class DownloadManager:
                     original_path,
                     download_id,
                     session,
-                    settings
+                    settings,
+                    expected_duration_seconds=download.expected_duration_seconds,
                 )
                 post_processing_ran = True
 
@@ -2558,31 +2569,53 @@ class DownloadManager:
         when the provider supports it, or restarts from byte 0 otherwise.
         Non-network errors (HTTP status errors, disk errors) propagate
         immediately.
+
+        How many retries there are, and how long each waits, comes from the
+        user's retry window. It is read on the first network error rather than
+        up front, so a clean download never touches the settings row, and it
+        is read once, so a recording keeps the window it started failing with.
         """
         attempt = 0
         current_offset = offset
+        delays: Optional[List[float]] = None
         while True:
             try:
                 return await self._download_file_once(
                     url, output_path, download_id, session, offset=current_offset
                 )
             except Exception as e:
-                if not _is_transient_network_error(e) or attempt >= TRANSIENT_RETRY_LIMIT:
+                if not _is_transient_network_error(e):
                     raise
+                if delays is None:
+                    delays = await self._transient_retry_delays()
+                if attempt >= len(delays):
+                    raise
+                delay = delays[attempt]
                 attempt += 1
                 try:
                     current_offset = os.path.getsize(output_path)
                 except OSError:
                     current_offset = 0
-                delay = TRANSIENT_RETRY_BACKOFF_SECONDS * attempt
                 await self._broadcast_log(
                     download_id,
                     f"Network error during download: {type(e).__name__}: {e}. "
                     f"Retrying in {delay:.0f}s from byte {current_offset:,} "
-                    f"(attempt {attempt}/{TRANSIENT_RETRY_LIMIT}).",
+                    f"(attempt {attempt}/{len(delays)}).",
                     level="warning",
                 )
                 await asyncio.sleep(delay)
+
+    async def _transient_retry_delays(self) -> List[float]:
+        """The wait before each retry, from the user's retry window.
+
+        Unreadable settings fall back to the default window rather than
+        failing a download that is already in trouble.
+        """
+        settings = await self._load_app_settings()
+        window = resolve_retry_window_seconds(
+            getattr(settings, "download_retry_window_seconds", None)
+        )
+        return retry_delays_for_window(window)
 
     async def _download_file_once(
         self,
@@ -2608,7 +2641,9 @@ class DownloadManager:
             request_headers["Range"] = f"bytes={offset}-"
 
         async with aiohttp.ClientSession(
-            timeout=timeout, read_bufsize=DOWNLOAD_READ_BUFFER_BYTES
+            timeout=timeout,
+            read_bufsize=DOWNLOAD_READ_BUFFER_BYTES,
+            headers=provider_request_headers(),
         ) as http_session:
             needs_restart = False
 
@@ -2850,10 +2885,16 @@ class DownloadManager:
         file_path: str,
         download_id: int,
         session: AsyncSession,
-        settings: Optional[AppSettings] = None
+        settings: Optional[AppSettings] = None,
+        expected_duration_seconds: Optional[float] = None,
     ) -> tuple[str, list[str]]:
         """Run post-processing on downloaded file (transcoding, commercial removal)."""
-        from services.post_processor import post_processor, OutputFormat, HardwareAccel
+        from services.post_processor import (
+            post_processor,
+            CommercialRemovalSkipped,
+            OutputFormat,
+            HardwareAccel,
+        )
 
         warnings: list[str] = []
 
@@ -2931,6 +2972,7 @@ class DownloadManager:
         transcode_progress: Optional[float] = None
         comskip_indeterminate = False
         transcode_indeterminate = False
+        remux_fell_back = False
 
         async def broadcast_processing(progress: float, message: Optional[str], indeterminate: bool = False):
             await self._update_processing(
@@ -2958,6 +3000,17 @@ class DownloadManager:
                 last_progress = p
                 transcode_progress = p
                 await broadcast_processing(p, current_message, indeterminate=transcode_indeterminate)
+
+        async def processing_status_callback(message: str):
+            nonlocal current_message, remux_fell_back
+            current_message = message
+            if message.startswith("Remux failed;"):
+                remux_fell_back = True
+            await broadcast_processing(
+                transcode_progress or 0.0,
+                current_message,
+                indeterminate=transcode_indeterminate,
+            )
 
         # log_callback defined above to also persist logs
 
@@ -3042,19 +3095,28 @@ class DownloadManager:
                         f"Comskip: commercials detected. Removing commercials and outputting {output_format.value}."
                     )
 
-                    current_path = await post_processor.remove_commercials(
-                        current_path,
-                        edl_path,
-                        output_format,
-                        hw_accel=hw_accel,
-                        remove_original=settings.delete_original_after_transcode,
-                        progress_callback=transcode_progress_callback,
-                        log_callback=log_callback,
-                        remux_only=remux_only,
-                        render_device=render_device
-                    )
-                    commercials_removed = True
-                    await log_callback(f"Commercial removal complete: {current_path}")
+                    try:
+                        current_path = await post_processor.remove_commercials(
+                            current_path,
+                            edl_path,
+                            output_format,
+                            hw_accel=hw_accel,
+                            remove_original=settings.delete_original_after_transcode,
+                            progress_callback=transcode_progress_callback,
+                            log_callback=log_callback,
+                            remux_only=remux_only,
+                            render_device=render_device,
+                            expected_duration_seconds=expected_duration_seconds,
+                            status_callback=processing_status_callback,
+                        )
+                    except CommercialRemovalSkipped as skipped:
+                        # Recording stays uncut; the transcode/remux step below
+                        # still produces the chosen output format.
+                        await log_callback(str(skipped))
+                        warnings.append(str(skipped))
+                    else:
+                        commercials_removed = True
+                        await log_callback(f"Commercial removal complete: {current_path}")
                 else:
                     await log_callback("Comskip: no commercials detected.")
             except Exception as e:
@@ -3087,9 +3149,16 @@ class DownloadManager:
                     log_callback=log_callback,
                     remove_original=settings.delete_original_after_transcode,
                     remux_only=remux_only,
-                    render_device=render_device
+                    render_device=render_device,
+                    expected_duration_seconds=expected_duration_seconds,
+                    status_callback=processing_status_callback,
                 )
-                await log_callback(f"{'Remux' if remux_only else 'Transcode'} complete: {current_path}")
+                completed_operation = (
+                    "Re-encode" if remux_fell_back
+                    else "Remux" if remux_only
+                    else "Transcode"
+                )
+                await log_callback(f"{completed_operation} complete: {current_path}")
             except Exception as e:
                 await log_callback(f"Transcode error: {e}")
                 warnings.append(f"Transcode failed: {e}")

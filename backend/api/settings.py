@@ -25,7 +25,26 @@ from models import AppSettings, XtreamAccount
 from services.comskip_ini import ComskipIniError, validate_comskip_ini_path
 from services.download_manager import download_manager
 from services.epg_service import epg_service
+from services.notifications import clear_notification
 from services.post_processor import post_processor, normalize_comskip_hw_decode_mode
+from services.poster_art import (
+    TmdbKeyError,
+    check_tmdb_api_key,
+    clean_tmdb_api_key,
+    encrypt_tmdb_api_key,
+    tmdb_api_key_from,
+)
+from services.update_check import UPDATE_NOTIFICATION_KEY, update_checker
+from services.webhook_dispatcher import (
+    WEBHOOK_SETTING_FIELDS,
+    WebhookUrlError,
+    validate_webhook_url,
+)
+from download_retry_window import MAX_RETRY_WINDOW_SECONDS
+from schedule_timing import (
+    MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    resolve_scheduled_download_delay_minutes,
+)
 
 
 router = APIRouter()
@@ -92,6 +111,16 @@ class SettingsUpdate(BaseModel):
     min_free_space_gb: Optional[int] = Field(default=None, ge=1)
     default_pre_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
     default_post_padding_minutes: Optional[int] = Field(default=None, ge=0, le=120)
+    scheduled_download_delay_minutes: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=MAX_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    )
+    download_retry_window_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=MAX_RETRY_WINDOW_SECONDS,
+    )
     default_account_id: Optional[int] = None
     # Post-processing
     trim_dispatcharr_buffer: Optional[bool] = None
@@ -118,6 +147,11 @@ class SettingsUpdate(BaseModel):
     remux_only: Optional[bool] = None
     integrity_check_enabled: Optional[bool] = None
     write_nfo_files: Optional[bool] = None
+    poster_art_enabled: Optional[bool] = None
+    poster_art_save_to_library: Optional[bool] = None
+    # Write-only. A key replaces the saved one, "" removes it, and leaving it
+    # out changes nothing. The saved key is never sent back.
+    tmdb_api_key: Optional[str] = Field(default=None, max_length=1000)
     comskip_enabled: Optional[bool] = None
     comskip_cut: Optional[bool] = None
     comskip_path: Optional[str] = None
@@ -144,9 +178,18 @@ class SettingsUpdate(BaseModel):
     show_future_programs: Optional[bool] = None
     launch_on_startup: Optional[bool] = None
     auto_retry_failed_downloads: Optional[bool] = None
+    update_check_enabled: Optional[bool] = None
+
+    # Webhooks: one URL per recording lifecycle event. Empty clears it.
+    webhook_url_recording_started: Optional[str] = None
+    webhook_url_recording_completed: Optional[str] = None
+    webhook_url_recording_failed: Optional[str] = None
+    webhook_url_recording_cancelled: Optional[str] = None
+    webhook_url_postprocessing_completed: Optional[str] = None
 
 
 NON_NULLABLE_FIELDS = {
+    *WEBHOOK_SETTING_FIELDS,
     "download_folder",
     "completed_folder",
     "tv_template",
@@ -158,6 +201,8 @@ NON_NULLABLE_FIELDS = {
     "min_free_space_gb",
     "default_pre_padding_minutes",
     "default_post_padding_minutes",
+    "scheduled_download_delay_minutes",
+    "download_retry_window_seconds",
     "trim_dispatcharr_buffer",
     "transcode_enabled",
     "transcode_format",
@@ -167,6 +212,8 @@ NON_NULLABLE_FIELDS = {
     "remux_only",
     "integrity_check_enabled",
     "write_nfo_files",
+    "poster_art_enabled",
+    "poster_art_save_to_library",
     "comskip_enabled",
     "comskip_cut",
     "comskip_use_custom_ini",
@@ -187,6 +234,7 @@ NON_NULLABLE_FIELDS = {
     "show_future_programs",
     "launch_on_startup",
     "auto_retry_failed_downloads",
+    "update_check_enabled",
 }
 
 
@@ -274,6 +322,15 @@ async def get_settings(
         await session.commit()
         await session.refresh(settings)
 
+    resolved_download_delay = resolve_scheduled_download_delay_minutes(
+        settings.scheduled_download_delay_minutes
+    )
+    if settings.scheduled_download_delay_minutes != resolved_download_delay:
+        settings.scheduled_download_delay_minutes = resolved_download_delay
+        session.add(settings)
+        await session.commit()
+        await session.refresh(settings)
+
     if settings.max_concurrent_post_processing is None:
         settings.max_concurrent_post_processing = 1
         session.add(settings)
@@ -328,7 +385,11 @@ async def update_settings(
             value = int(value)
         if field == "max_concurrent_post_processing" and value is not None:
             value = max(1, int(value))
-        if field in {"default_pre_padding_minutes", "default_post_padding_minutes"} and value is not None:
+        if field in {
+            "default_pre_padding_minutes",
+            "default_post_padding_minutes",
+            "scheduled_download_delay_minutes",
+        } and value is not None:
             value = int(value)
         if field == "min_free_space_gb" and value is not None:
             value = int(value)
@@ -338,6 +399,23 @@ async def update_settings(
             value = normalize_comskip_hw_decode_mode(value)
         if field == "comskip_custom_ini_path" and value is not None:
             value = value.strip() or None
+        if field == "tmdb_api_key":
+            if value is None:
+                continue
+            try:
+                cleaned_key = clean_tmdb_api_key(value)
+            except TmdbKeyError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            settings.tmdb_api_key_encrypted = encrypt_tmdb_api_key(cleaned_key)
+            continue
+        if field in WEBHOOK_SETTING_FIELDS and value is not None:
+            # Empty turns that webhook off; anything else must be an address we
+            # will actually send to. Raised as a 400 with a sentence rather
+            # than a schema error, because the user typed it.
+            try:
+                value = validate_webhook_url(value)
+            except WebhookUrlError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         setattr(settings, field, value)
 
     # Enforce ComSkip constraint on the final stored state: the cut needs
@@ -381,6 +459,10 @@ async def update_settings(
             detail="Min single commercial cannot exceed max single commercial",
         )
 
+    # Turning the update check off takes any "update available" notice with it.
+    if update_dict.get("update_check_enabled") is False:
+        await clear_notification(session, UPDATE_NOTIFICATION_KEY)
+
     if _paths_match(settings.download_folder, settings.completed_folder):
         logger.warning(
             "Download folder and completed folder are set to the same path (%s). "
@@ -399,8 +481,53 @@ async def update_settings(
 
     if "epg_offset_minutes" in update_dict:
         epg_service.clear_cache()
+    if update_dict.get("update_check_enabled") is True:
+        update_checker.request_check()
 
     return settings.to_dict()
+
+
+class TmdbKeyCheck(BaseModel):
+    # The key as typed, to check it before saving. Left out, the saved key is
+    # checked instead.
+    api_key: Optional[str] = Field(default=None, max_length=1000)
+
+
+@router.post("/poster-art/check-key")
+async def check_poster_art_key(
+    body: TmdbKeyCheck,
+    _admin: None = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Ask TMDB whether a key works, and say so in a sentence.
+
+    Always answers 200 with ``ok``: a rejected key is a result, not an error.
+    ``ok`` is null when TMDB could not be reached, because that says nothing
+    about the key.
+    """
+    try:
+        api_key = clean_tmdb_api_key(body.api_key)
+    except TmdbKeyError as exc:
+        return {"ok": False, "message": str(exc)}
+
+    if not api_key:
+        result = await session.execute(select(AppSettings))
+        api_key = tmdb_api_key_from(result.scalar_one_or_none()) or ""
+    if not api_key:
+        return {"ok": False, "message": "There is no TMDB key to check yet."}
+
+    accepted = await check_tmdb_api_key(api_key)
+    if accepted is True:
+        return {"ok": True, "message": "TMDB accepted this key."}
+    if accepted is False:
+        return {
+            "ok": False,
+            "message": "TMDB did not accept this key. Check that you copied all of it.",
+        }
+    return {
+        "ok": None,
+        "message": "Could not reach TMDB just now, so the key was not checked.",
+    }
 
 
 @router.get("/folders/status")
@@ -535,5 +662,8 @@ async def get_public_settings(
         "show_future_programs": show_future,
         "default_pre_padding_minutes": max(0, settings.default_pre_padding_minutes) if settings.default_pre_padding_minutes is not None else 1,
         "default_post_padding_minutes": max(0, settings.default_post_padding_minutes) if settings.default_post_padding_minutes is not None else 5,
+        "scheduled_download_delay_minutes": resolve_scheduled_download_delay_minutes(
+            settings.scheduled_download_delay_minutes
+        ),
         "default_account_id": settings.default_account_id,
     }

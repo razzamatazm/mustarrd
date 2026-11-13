@@ -157,7 +157,8 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
   const TypeIcon = typeIcons[detectedType] || IconFile
   const totalDuration = (program.duration_minutes || 0) + prePadding + postPadding
   const adjustedStart = startTime?.subtract(prePadding, 'minute')
-  const availableAt = endTime?.add(postPadding, 'minute')
+  const downloadDelay = settings?.scheduled_download_delay_minutes ?? 5
+  const availableAt = endTime?.add(postPadding + downloadDelay, 'minute')
 
   return (
     <Modal
