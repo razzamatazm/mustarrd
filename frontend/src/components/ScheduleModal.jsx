@@ -145,8 +145,8 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
       notifications.show({
         title: 'Recurring Recording Created',
         message: rule.scheduled_count
-          ? `Matched ${rule.scheduled_count} future airing${rule.scheduled_count === 1 ? '' : 's'}`
-          : 'Future matching airings will be scheduled after each guide refresh',
+          ? `Scheduled ${rule.scheduled_count} recording${rule.scheduled_count === 1 ? '' : 's'}. More are added after each guide refresh.`
+          : 'Nothing to schedule yet. Matching airings are added after each guide refresh.',
         color: 'green',
       })
       onClose()

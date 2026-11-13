@@ -241,7 +241,7 @@ const weekdayOptions = [
   { value: '6', label: 'Sun' },
 ]
 
-function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving }) {
+function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving, isAdmin }) {
   const [titleMatch, setTitleMatch] = useState('')
   const [matchMode, setMatchMode] = useState('exact')
   const [enabled, setEnabled] = useState(true)
@@ -305,7 +305,12 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
           data={[
             { value: 'exact', label: 'Exact title (normalized)' },
             { value: 'contains', label: 'Title contains' },
-            { value: 'regex', label: 'Regular expression' },
+            // A pattern is run against every title in the guide, and a bad
+            // one can stall the server, so the server only takes them from
+            // an admin.
+            ...(isAdmin || matchMode === 'regex'
+              ? [{ value: 'regex', label: 'Regular expression' }]
+              : []),
           ]}
           value={matchMode}
           onChange={(value) => {
@@ -362,7 +367,7 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
   )
 }
 
-function RuleRow({ rule, accountName, onToggle, onUpdate, onDelete, updating }) {
+function RuleRow({ rule, accountName, onToggle, onUpdate, onDelete, updating, isAdmin }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const matchLabel = matchModeLabels[rule.match_mode || 'exact'] || matchModeLabels.exact
@@ -438,6 +443,7 @@ function RuleRow({ rule, accountName, onToggle, onUpdate, onDelete, updating }) 
         accountName={accountName}
         onSave={onUpdate}
         saving={updating}
+        isAdmin={isAdmin}
       />
     </div>
   )
@@ -531,8 +537,8 @@ export default function Scheduled() {
         notifications.show({
           title: 'Recording Rule Updated',
           message: result.scheduled_count
-            ? `Matched ${result.scheduled_count} additional future airing${result.scheduled_count === 1 ? '' : 's'}`
-            : 'The updated rule is active for future guide refreshes',
+            ? `Scheduled ${result.scheduled_count} more recording${result.scheduled_count === 1 ? '' : 's'}`
+            : 'Nothing new to schedule right now. The rule is checked again after each guide refresh.',
           color: 'green',
         })
       }
@@ -1013,6 +1019,7 @@ export default function Scheduled() {
                   onUpdate={(item, changes) => updateRuleMutation.mutateAsync({ rule: item, changes })}
                   onDelete={(item) => deleteRuleMutation.mutate(item)}
                   updating={updateRuleMutation.isPending}
+                  isAdmin={isAdmin}
                 />
               ))}
             </div>

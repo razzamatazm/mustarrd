@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,8 +24,12 @@ from api.recording_rules import (
 from auth import AuthContext
 from database import Base
 from fastapi import HTTPException
+from api.accounts import delete_account
+from api.admin_users import delete_user
 from models import (
     AppSettings,
+    Download,
+    DownloadStatus,
     EPGProgram,
     RecordingRule,
     ScheduledRecording,
@@ -32,7 +37,12 @@ from models import (
     User,
     XtreamAccount,
 )
-from services.recording_rule_service import recording_rule_service
+from services.recording_rule_service import (
+    BACKFILL_HOURS,
+    MAX_PENDING_SCHEDULES_PER_RULE,
+    MAX_TITLE_MATCH_LENGTH,
+    recording_rule_service,
+)
 
 
 class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
@@ -499,6 +509,348 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.status_code, 404)
         self.assertEqual(await self._count(ScheduledRecording), 1)
+
+
+    # --- helpers for the cases below -----------------------------------
+
+    async def _set_archive_days(self, days):
+        async with self.session_factory() as session:
+            account = (
+                await session.execute(select(XtreamAccount).where(XtreamAccount.id == 1))
+            ).scalar_one()
+            account.catchup_max_archive_days = days
+            account.catchup_days = days
+            await session.commit()
+
+    async def _program(self, suffix):
+        async with self.session_factory() as session:
+            return (
+                await session.execute(
+                    select(EPGProgram).where(EPGProgram.epg_id == f"epg-{suffix}")
+                )
+            ).scalar_one()
+
+    async def _schedule_by_hand(self, suffix, status):
+        program = await self._program(suffix)
+        async with self.session_factory() as session:
+            session.add(
+                ScheduledRecording(
+                    account_id=1,
+                    channel_id=program.channel_id,
+                    channel_name=program.channel_name,
+                    program_id=str(program.id),
+                    program_title=program.title,
+                    program_start=program.start_time,
+                    program_end=program.end_time,
+                    start_timestamp=program.start_timestamp,
+                    stop_timestamp=program.stop_timestamp,
+                    duration_minutes=60,
+                    status=status,
+                    requested_by_user_id=1,
+                )
+            )
+            await session.commit()
+
+    async def _download_by_hand(self, suffix, status):
+        program = await self._program(suffix)
+        async with self.session_factory() as session:
+            session.add(
+                Download(
+                    account_id=1,
+                    channel_id=program.channel_id,
+                    channel_name=program.channel_name,
+                    program_title=program.title,
+                    program_start=program.start_time,
+                    program_end=program.end_time,
+                    start_timestamp=program.start_timestamp,
+                    stop_timestamp=program.stop_timestamp,
+                    duration_minutes=60,
+                    source_url="http://provider.test/timeshift",
+                    output_path="/recordings/already.ts",
+                    status=status,
+                    requested_by_user_id=1,
+                )
+            )
+            await session.commit()
+
+    async def _refresh(self):
+        async with self.session_factory() as session:
+            return await recording_rule_service.evaluate(session, account_id=1)
+
+    # --- an airing that is already taken --------------------------------
+
+    async def test_an_airing_already_recorded_by_hand_is_not_recorded_again(self):
+        await self._add_program(suffix="seen")
+        await self._schedule_by_hand("seen", ScheduledStatus.COMPLETED.value)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+
+    async def test_an_airing_already_downloaded_from_the_guide_is_not_recorded_again(self):
+        await self._set_archive_days(7)
+        await self._add_program(suffix="grabbed", hours_from_now=-3)
+        await self._download_by_hand("grabbed", DownloadStatus.COMPLETED.value)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    async def test_an_airing_scheduled_by_hand_and_still_waiting_is_left_to_it(self):
+        await self._add_program(suffix="waiting")
+        await self._schedule_by_hand("waiting", ScheduledStatus.SCHEDULED.value)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+
+    async def test_a_cancelled_or_failed_attempt_by_hand_does_not_block_the_rule(self):
+        await self._add_program(suffix="cancelled", hours_from_now=2)
+        await self._add_program(suffix="failed", hours_from_now=5)
+        await self._schedule_by_hand("cancelled", ScheduledStatus.CANCELLED.value)
+        await self._schedule_by_hand("failed", ScheduledStatus.FAILED.value)
+        await self._download_by_hand("failed", DownloadStatus.FAILED.value)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 2)
+
+    async def test_removing_a_finished_recording_from_history_does_not_record_it_again(self):
+        """A guide refresh only looks forward, so it cannot resurrect an ended airing."""
+        await self._set_archive_days(7)
+        await self._add_program(suffix="aired", hours_from_now=-3)
+        rule = await self._create_rule()
+        self.assertEqual(rule["scheduled_count"], 1)
+        async with self.session_factory() as session:
+            schedule = (await session.execute(select(ScheduledRecording))).scalar_one()
+            await session.delete(schedule)
+            await session.commit()
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 0)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    # --- catching up when a rule is saved --------------------------------
+
+    async def test_saving_a_rule_catches_what_finished_recently(self):
+        await self._set_archive_days(7)
+        await self._add_program(suffix="last-night", hours_from_now=-(BACKFILL_HOURS - 2))
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 1)
+
+    async def test_saving_a_rule_does_not_queue_the_whole_catchup_archive(self):
+        """An hourly title on a week of catchup used to queue over 160 at once."""
+        await self._set_archive_days(7)
+        for hours_ago in range(BACKFILL_HOURS + 2, 24 * 6, 6):
+            await self._add_program(suffix=f"old-{hours_ago}", hours_from_now=-hours_ago)
+        await self._add_program(suffix="recent", hours_from_now=-3)
+        await self._add_program(suffix="upcoming", hours_from_now=3)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 2)
+
+    async def test_catchup_shorter_than_a_day_limits_it_further(self):
+        await self._set_archive_days(0)
+        await self._add_program(suffix="no-catchup", hours_from_now=-3)
+
+        rule = await self._create_rule()
+
+        self.assertEqual(rule["scheduled_count"], 0)
+
+    async def test_a_guide_refresh_does_not_reach_back_at_all(self):
+        await self._set_archive_days(7)
+        rule = await self._create_rule(enabled=False)
+        await self._add_program(suffix="ended", hours_from_now=-3)
+        await self._add_program(suffix="on-air", hours_from_now=-0.5)
+        async with self.session_factory() as session:
+            stored = (await session.execute(select(RecordingRule))).scalar_one()
+            stored.enabled = True
+            await session.commit()
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 1, "Only the programme still on air.")
+        self.assertEqual(rule["scheduled_count"], 0)
+
+    # --- loose patterns ---------------------------------------------------
+
+    async def _add_many(self, count):
+        start = datetime.now(timezone.utc) + timedelta(hours=1)
+        async with self.session_factory() as session:
+            for index in range(count):
+                begin = start + timedelta(hours=index)
+                end = begin + timedelta(hours=1)
+                session.add(
+                    EPGProgram(
+                        account_id=1,
+                        channel_id="101",
+                        channel_name="Example TV",
+                        epg_id=f"epg-many-{index}",
+                        title=f"Programme about a thing {index}",
+                        start_time=begin,
+                        end_time=end,
+                        start_timestamp=int(begin.timestamp()),
+                        stop_timestamp=int(end.timestamp()),
+                        duration_minutes=60,
+                        has_archive=True,
+                    )
+                )
+            await session.commit()
+
+    async def test_a_rule_keeps_a_bounded_number_of_recordings_waiting(self):
+        await self._add_many(MAX_PENDING_SCHEDULES_PER_RULE + 40)
+
+        rule = await self._create_rule(title_match="a", match_mode="contains")
+
+        self.assertEqual(rule["scheduled_count"], MAX_PENDING_SCHEDULES_PER_RULE)
+        schedules = await self._schedules()
+        self.assertEqual(len(schedules), MAX_PENDING_SCHEDULES_PER_RULE)
+        soonest = min(schedule.start_timestamp for schedule in schedules)
+        self.assertLess(soonest - datetime.now(timezone.utc).timestamp(), 2 * 3600, "Nearest first.")
+
+    async def test_the_rest_are_scheduled_as_the_first_ones_are_recorded(self):
+        await self._add_many(MAX_PENDING_SCHEDULES_PER_RULE + 40)
+        await self._create_rule(title_match="a", match_mode="contains")
+        async with self.session_factory() as session:
+            first_ten = (
+                await session.execute(
+                    select(ScheduledRecording)
+                    .order_by(ScheduledRecording.start_timestamp)
+                    .limit(10)
+                )
+            ).scalars().all()
+            for schedule in first_ten:
+                schedule.status = ScheduledStatus.COMPLETED.value
+            await session.commit()
+
+        created = await self._refresh()
+
+        self.assertEqual(created, 10)
+
+    async def test_a_very_long_title_pattern_is_refused(self):
+        with self.assertRaises(ValidationError):
+            RecordingRuleCreate(
+                account_id=1,
+                channel_id="101",
+                channel_name="Example TV",
+                title_match="x" * (MAX_TITLE_MATCH_LENGTH + 1),
+            )
+        with self.assertRaises(ValidationError):
+            RecordingRuleUpdate(title_match="x" * (MAX_TITLE_MATCH_LENGTH + 1))
+
+    # --- regex is for admins ----------------------------------------------
+    # A pattern runs against every guide title on every refresh, on the
+    # event loop, so one bad pattern can stall the server for everyone.
+
+    async def _add_viewer(self):
+        async with self.session_factory() as session:
+            session.add(User(id=2, role="download_only", username="alice"))
+            await session.commit()
+        return AuthContext(
+            authenticated=True, role="download_only", provider="local", user_id=2, is_admin=False
+        )
+
+    async def _create_as(self, auth, **fields):
+        defaults = dict(
+            account_id=1, channel_id="101", channel_name="Example TV", title_match="The Example Show"
+        )
+        defaults.update(fields)
+        async with self.session_factory() as session:
+            return await create_recording_rule(
+                data=RecordingRuleCreate(**defaults), auth=auth, session=session
+            )
+
+    async def test_a_download_only_user_cannot_create_a_regex_rule(self):
+        viewer = await self._add_viewer()
+
+        with self.assertRaises(HTTPException) as raised:
+            await self._create_as(viewer, title_match="^(.*?,?){12}Z$", match_mode="regex")
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(await self._count(RecordingRule), 0)
+
+    async def test_a_download_only_user_cannot_turn_their_rule_into_a_regex(self):
+        viewer = await self._add_viewer()
+        rule = await self._create_as(viewer)
+
+        with self.assertRaises(HTTPException) as raised:
+            async with self.session_factory() as session:
+                await update_recording_rule(
+                    rule_id=rule["id"],
+                    data=RecordingRuleUpdate(match_mode="regex", title_match="^News"),
+                    auth=viewer,
+                    session=session,
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    async def test_exact_and_contains_stay_open_to_everyone(self):
+        viewer = await self._add_viewer()
+        await self._add_program()
+
+        exact = await self._create_as(viewer)
+        contains = await self._create_as(
+            viewer, channel_id="202", title_match="example", match_mode="contains"
+        )
+
+        self.assertEqual(exact["scheduled_count"], 1)
+        self.assertEqual(contains["match_mode"], "contains")
+
+    async def test_an_admin_can_still_use_a_regex(self):
+        await self._add_program()
+
+        rule = await self._create_as(self.auth, title_match="^the example", match_mode="regex")
+
+        self.assertEqual(rule["scheduled_count"], 1)
+
+    # --- rules do not outlive their owner ---------------------------------
+
+    async def test_deleting_a_user_deletes_their_rules(self):
+        alice = await self._add_viewer()
+        await self._add_program(suffix="alices")
+        async with self.session_factory() as session:
+            await create_recording_rule(
+                data=RecordingRuleCreate(
+                    account_id=1, channel_id="101", channel_name="Example TV",
+                    title_match="The Example Show",
+                ),
+                auth=alice,
+                session=session,
+            )
+        self.assertEqual(await self._count(ScheduledRecording), 1)
+
+        with (
+            patch("api.admin_users.download_manager.cancel_download", AsyncMock()),
+            patch("api.admin_users.download_manager.disconnect_user_websockets", AsyncMock()),
+        ):
+            async with self.session_factory() as session:
+                await delete_user(user_id=2, _admin=self.auth, session=session)
+
+        self.assertEqual(await self._count(RecordingRule), 0)
+        await self._add_program(suffix="after-she-left", hours_from_now=30)
+        self.assertEqual(await self._refresh(), 0, "Nothing is left to schedule for her.")
+
+    async def test_deleting_an_account_deletes_its_rules(self):
+        await self._add_program(suffix="on-the-account")
+        await self._create_rule()
+
+        with (
+            patch("api.accounts.download_manager.cancel_download", AsyncMock()),
+            patch("api.accounts.epg_service.clear_cache", MagicMock()),
+        ):
+            async with self.session_factory() as session:
+                await delete_account(account_id=1, _admin=None, session=session)
+
+        self.assertEqual(await self._count(RecordingRule), 0)
+        for schedule in await self._schedules():
+            self.assertIsNone(schedule.recording_rule_id)
 
 
 if __name__ == "__main__":

@@ -4,17 +4,37 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, conint, field_validator, model_validator
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import AuthContext, require_admin_or_download_user
 from database import get_session
-from models import RecordingRule, ScheduledRecording, XtreamAccount
-from services.recording_rule_service import recording_rule_service
+from models import RecordingRule, XtreamAccount
+from services.recording_rule_service import MAX_TITLE_MATCH_LENGTH, recording_rule_service
 
 
 router = APIRouter()
 MatchMode = Literal["exact", "contains", "regex"]
+
+
+def _require_admin_for_regex(match_mode: str | None, auth: AuthContext) -> None:
+    """A regular expression runs against every guide title on every refresh.
+
+    A badly behaved pattern can take minutes on one title and stall the whole
+    server while it does, so only an admin may save one.
+    """
+    if match_mode == "regex" and not auth.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can save a regular expression rule. "
+            "Use Exact or Contains instead.",
+        )
+
+
+def _validate_title_length(value: str) -> str:
+    if len(value) > MAX_TITLE_MATCH_LENGTH:
+        raise ValueError(f"must be {MAX_TITLE_MATCH_LENGTH} characters or fewer")
+    return value
 
 
 def _validate_rule_pattern(match_mode: str, title_match: str) -> None:
@@ -44,6 +64,11 @@ class RecordingRuleCreate(BaseModel):
             raise ValueError("must not be empty")
         return value
 
+    @field_validator("title_match")
+    @classmethod
+    def limit_title_length(cls, value: str) -> str:
+        return _validate_title_length(value)
+
     @model_validator(mode="after")
     def validate_pattern(self):
         _validate_rule_pattern(self.match_mode, self.title_match)
@@ -66,7 +91,7 @@ class RecordingRuleUpdate(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("must not be empty")
-        return value
+        return _validate_title_length(value)
 
     @model_validator(mode="after")
     def require_update(self):
@@ -115,6 +140,7 @@ async def create_recording_rule(
     ).scalar_one_or_none()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    _require_admin_for_regex(data.match_mode, auth)
 
     rule = RecordingRule(
         account_id=data.account_id,
@@ -133,7 +159,9 @@ async def create_recording_rule(
     await session.commit()
     await session.refresh(rule)
 
-    scheduled_count = await recording_rule_service.evaluate(session, rule_id=rule.id)
+    scheduled_count = await recording_rule_service.evaluate(
+        session, rule_id=rule.id, backfill=True
+    )
     response = rule.to_dict()
     response["scheduled_count"] = scheduled_count
     return response
@@ -157,6 +185,8 @@ async def update_recording_rule(
     fields = data.model_fields_set
     new_match_mode = data.match_mode if "match_mode" in fields else rule.match_mode
     new_title_match = data.title_match if "title_match" in fields else rule.title_match
+    if "match_mode" in fields or "title_match" in fields:
+        _require_admin_for_regex(new_match_mode, auth)
     try:
         _validate_rule_pattern(new_match_mode or "exact", new_title_match)
     except ValueError as exc:
@@ -178,7 +208,9 @@ async def update_recording_rule(
     await session.refresh(rule)
     scheduled_count = 0
     if rule.enabled:
-        scheduled_count = await recording_rule_service.evaluate(session, rule_id=rule.id)
+        scheduled_count = await recording_rule_service.evaluate(
+            session, rule_id=rule.id, backfill=True
+        )
     response = rule.to_dict()
     response["scheduled_count"] = scheduled_count
     return response
@@ -200,13 +232,9 @@ async def delete_recording_rule(
 
     # Recordings the rule scheduled that have not started go with it: nobody
     # asked for them except the rule. Everything that has started, finished or
-    # failed is history, so it is detached and kept.
-    removed = await recording_rule_service.remove_unfired_schedules(session, rule.id)
-    await session.execute(
-        update(ScheduledRecording)
-        .where(ScheduledRecording.recording_rule_id == rule.id)
-        .values(recording_rule_id=None)
-    )
-    await session.delete(rule)
-    await session.commit()
+    # failed is history, so it is detached and kept. Under the evaluation
+    # lock, so a guide refresh cannot schedule more for it halfway through.
+    async with recording_rule_service.lock:
+        removed = await recording_rule_service.delete_rules(session, rule_id=rule.id)
+        await session.commit()
     return {"status": "deleted", "removed_schedules": removed}
