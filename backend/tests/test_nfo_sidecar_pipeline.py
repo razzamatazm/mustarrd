@@ -114,7 +114,7 @@ class SidecarPipelineTests(unittest.TestCase):
         # then moves that file, not the .ts, into the completed folder.
         transcoded = self.download_folder / "Detectorists - S02E04.mkv"
 
-        async def fake_post_process(path, download_id, session, settings_arg):
+        async def fake_post_process(path, download_id, session, settings_arg, **_kwargs):
             transcoded.write_bytes(b"\x00" * 400)
             return str(transcoded), []
 

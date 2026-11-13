@@ -6,6 +6,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-11-12
 
+### Fixed: Processing no longer looks stuck on recordings with broken timestamps
+
+**What you would notice:** Some provider recordings carry timestamps that jump partway through, which made a one-hour show look about 26 hours long to ffprobe. The progress bar would crawl as if the job had stalled. Mustarrd now checks the measured length against how long the recording was scheduled for, and uses the scheduled length when the measurement is clearly wrong. When a quick remux fails and Mustarrd falls back to a full re-encode, the status now says so and names the encoder (for example "Remux failed; re-encoding with NVENC (h264_nvenc)."), and the log ends with "Re-encode complete" instead of "Remux complete". Separately, if ffprobe cannot measure a recording at all, commercial removal is now skipped: the recording is kept uncut with a warning explaining why, and it is still converted to your chosen format. Before, the whole download failed. Thanks to @geoffwatts, from #438.
+
+**What changed:** Post-processing gets the requested recording length (including padding; not used for VOD). A probe is replaced by the scheduled length when it is more than twice the schedule or more than 30 minutes over, whichever is lower. When ffprobe returns no duration, the scheduled length is used for progress only, never for commercial cut points, since cutting against a guess risks removing the wrong parts of a show.
+
 ### Added: A notification bell for problems you would otherwise miss
 
 **What you would notice:** There is a bell next to the Mustarrd logo (top right on a phone). A red number on it means something needs your attention: an IPTV account expiring within 7 days or already expired, an account Mustarrd could not connect to on its last guide refresh or Test, or a recording that failed. Click one to jump to the right page, or click the X to dismiss it. Dismissing only hides it for you. Notifications clear themselves when the problem is fixed, for example when an account is renewed or a failed recording is retried successfully, and they come back if the problem returns. Download-only users see only failures of recordings they asked for; account problems go to admins.
