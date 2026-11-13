@@ -180,7 +180,14 @@ class EveryProviderSessionSendsTheUserAgentTests(unittest.TestCase):
 
     # Sessions that talk to something other than an IPTV provider.
     # update_check.py talks to api.github.com and names its own User-Agent.
-    NOT_PROVIDER_FACING = {"plex_service.py", "webhook_dispatcher.py", "update_check.py"}
+    # poster_art.py and poster_lookup.py talk to TMDB and TVMaze, and say so.
+    NOT_PROVIDER_FACING = {
+        "plex_service.py",
+        "webhook_dispatcher.py",
+        "update_check.py",
+        "poster_art.py",
+        "poster_lookup.py",
+    }
 
     def test_no_provider_session_is_opened_without_the_headers(self):
         import ast

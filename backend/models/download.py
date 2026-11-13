@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from enum import Enum
 from sqlalchemy import String, Integer, DateTime, Float, ForeignKey, Text, Boolean
@@ -67,6 +68,15 @@ class Download(Base):
     # on the guide when the user pressed record.
     guide_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Poster art (services/poster_art.py): the image this recording's poster
+    # was fetched from, and which source found it. The bytes are a disk cache
+    # keyed by this URL, so this is all that has to be stored. Null means no
+    # poster has been found.
+    poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A small rendition of the same poster, for the History thumbnail.
+    poster_thumb_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    poster_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Automatic retry bookkeeping (auto_retry_failed_downloads setting)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -82,6 +92,20 @@ class Download(Base):
         if self.is_vod or not self.duration_minutes or self.duration_minutes <= 0:
             return None
         return self.duration_minutes * 60
+
+    @property
+    def poster_path(self) -> str | None:
+        """Where the UI loads this recording's poster from, or None without one.
+
+        The provider-neutral API path, not the third-party image URL: the
+        browser never talks to the poster's host. The ``v`` tag changes when
+        the poster does, so a refreshed poster is not served from cache.
+        """
+        if not self.poster_url:
+            return None
+        shown = self.poster_thumb_url or self.poster_url
+        version = hashlib.sha256(shown.encode("utf-8")).hexdigest()[:10]
+        return f"/api/downloads/{self.id}/poster?v={version}"
 
     def to_dict(self):
         return {
@@ -110,6 +134,7 @@ class Download(Base):
             "duration_analysis_status": self.duration_analysis_status,
             "duration_analysis_reason": self.duration_analysis_reason,
             "interruption_reason": self.interruption_reason,
+            "poster": self.poster_path,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

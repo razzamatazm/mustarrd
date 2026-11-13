@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
         register_notification_subscriber,
     )
     from services.update_check import update_checker
+    from services.poster_art import register_poster_art_subscriber
 
     # Drains the recording lifecycle event queue. Started before recovery so
     # the events recovery publishes are delivered rather than sitting in the
@@ -84,6 +85,9 @@ async def lifespan(app: FastAPI):
     # starts so nothing published during recovery is missed.
     register_webhook_subscriber(recording_events)
     register_notification_subscriber(recording_events)
+    # Last on purpose: a poster lookup can take a few seconds, and the
+    # consumers above should not wait behind it.
+    register_poster_art_subscriber(recording_events)
     recording_event_task = asyncio.create_task(recording_events.run())
     await download_manager.recover_incomplete_downloads()
     download_task = asyncio.create_task(download_manager.process_queue())

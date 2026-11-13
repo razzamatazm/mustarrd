@@ -37,8 +37,8 @@ NEGATIVE_CACHE_SECONDS = 15 * 60
 _FALLBACK_CONTENT_TYPE = "application/octet-stream"
 
 
-def _cache_dir() -> Path:
-    cache_dir = ensure_config_files() / "logo_cache"
+def _cache_dir(name: str = "logo_cache") -> Path:
+    cache_dir = ensure_config_files() / name
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
@@ -76,6 +76,13 @@ async def _validate_logo_url(url: str) -> bool:
 
 
 class LogoCache:
+    # Subclasses (services/poster_art.py) keep a different kind of image in a
+    # folder of their own, with their own size cap and their own way of
+    # introducing themselves. Everything else - the disk cache, the SSRF
+    # guard on every hop, the negative cache - is shared.
+    cache_subdir = "logo_cache"
+    max_bytes = LOGO_MAX_BYTES
+
     def __init__(self):
         # url hash -> in-flight fetch, so concurrent requests for the same
         # logo (a fresh guide render fires dozens at once) share one fetch.
@@ -111,8 +118,24 @@ class LogoCache:
             self._negative[key] = time.monotonic() + NEGATIVE_CACHE_SECONDS
             return None
 
+    def forget(self, url: str) -> None:
+        """Drop everything remembered about ``url`` so the next request refetches."""
+        key = _cache_key(url)
+        self._negative.pop(key, None)
+        try:
+            cache_dir = _cache_dir(self.cache_subdir)
+            for suffix in (".img", ".ct"):
+                (cache_dir / f"{key}{suffix}").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not clear cached image url_hash=%s", key, exc_info=True)
+
+    def _open_session(self) -> aiohttp.ClientSession:
+        return aiohttp.ClientSession(
+            timeout=LOGO_FETCH_TIMEOUT, headers=provider_request_headers()
+        )
+
     def _read_cached(self, key: str) -> tuple[bytes, str] | None:
-        cache_dir = _cache_dir()
+        cache_dir = _cache_dir(self.cache_subdir)
         image_path = cache_dir / f"{key}.img"
         if not image_path.exists():
             return None
@@ -133,9 +156,7 @@ class LogoCache:
             self._negative[key] = time.monotonic() + NEGATIVE_CACHE_SECONDS
             return None
 
-        async with aiohttp.ClientSession(
-            timeout=LOGO_FETCH_TIMEOUT, headers=provider_request_headers()
-        ) as http_session:
+        async with self._open_session() as http_session:
             current_url = url
             for _hop in range(LOGO_MAX_REDIRECTS + 1):
                 async with http_session.get(current_url, allow_redirects=False) as response:
@@ -153,13 +174,13 @@ class LogoCache:
                         break
 
                     declared = response.content_length
-                    if declared is not None and declared > LOGO_MAX_BYTES:
+                    if declared is not None and declared > self.max_bytes:
                         break
 
                     content = bytearray()
                     async for chunk in response.content.iter_chunked(64 * 1024):
                         content.extend(chunk)
-                        if len(content) > LOGO_MAX_BYTES:
+                        if len(content) > self.max_bytes:
                             self._negative[key] = time.monotonic() + NEGATIVE_CACHE_SECONDS
                             return None
 
@@ -178,7 +199,7 @@ class LogoCache:
         return None
 
     def _write_cached(self, key: str, content: bytes, content_type: str) -> None:
-        cache_dir = _cache_dir()
+        cache_dir = _cache_dir(self.cache_subdir)
         try:
             # Write-then-rename so a crash mid-write never leaves a truncated
             # image that would be served as-is forever.
