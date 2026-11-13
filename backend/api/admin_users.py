@@ -15,6 +15,7 @@ from models import (
     User, UserIdentity, UserSetupToken,
 )
 from services.download_manager import download_manager
+from services.recording_rule_service import recording_rule_service
 
 
 router = APIRouter()
@@ -175,8 +176,12 @@ async def delete_user(
     )
     active_dl_ids = [d.id for d in dl_result.scalars().all()]
 
-    await session.delete(user)
-    await session.commit()
+    # Their recording rules go with them. A rule left behind would keep
+    # scheduling recordings for a user who no longer exists.
+    async with recording_rule_service.lock:
+        await recording_rule_service.delete_rules(session, user_id=user.id)
+        await session.delete(user)
+        await session.commit()
 
     for dl_id in active_dl_ids:
         await download_manager.cancel_download(dl_id)

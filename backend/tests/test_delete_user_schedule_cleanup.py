@@ -35,6 +35,24 @@ from api.admin_users import delete_user
 from models import Download, DownloadStatus, ScheduledRecording, ScheduledStatus, User
 
 
+# These tests script the exact queries a delete makes. Recording rules are
+# cleaned up on the same path and have their own tests
+# (tests/test_recording_rules.py), so that step is stubbed out here.
+from services.recording_rule_service import recording_rule_service as _recording_rule_service
+
+_rules_cleanup_stub = patch.object(
+    _recording_rule_service, "delete_rules", AsyncMock(return_value=0)
+)
+
+
+def setUpModule():
+    _rules_cleanup_stub.start()
+
+
+def tearDownModule():
+    _rules_cleanup_stub.stop()
+
+
 def _scalar_one(value):
     class R:
         def scalar_one_or_none(self):

@@ -104,6 +104,22 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "scheduled_recordings", "provider_stop"):
         await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN provider_stop VARCHAR(255)"))
 
+    if not await _column_exists(conn, "scheduled_recordings", "recording_rule_id"):
+        await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN recording_rule_id INTEGER"))
+
+    if not await _column_exists(conn, "scheduled_recordings", "rule_airing_key"):
+        await conn.execute(text("ALTER TABLE scheduled_recordings ADD COLUMN rule_airing_key VARCHAR(255)"))
+
+    # recording_rules is created by create_all() on every startup with all of its
+    # current columns, so there is no legacy schema to ALTER here.
+
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_scheduled_recordings_rule_airing_key "
+            "ON scheduled_recordings (rule_airing_key)"
+        )
+    )
+
     if not await _column_exists(conn, "downloads", "start_timestamp"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN start_timestamp INTEGER DEFAULT 0"))
 

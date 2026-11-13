@@ -49,7 +49,7 @@ def _make_session_ctx(delete_tracker):
 
     async def tracking_execute(stmt, *args, **kwargs):
         stmt_str = str(stmt)
-        if "DELETE" in stmt_str.upper():
+        if stmt_str.lstrip().upper().startswith("DELETE "):
             delete_tracker.append(stmt_str)
         result = MagicMock()
         result.scalars.return_value.all.return_value = []
