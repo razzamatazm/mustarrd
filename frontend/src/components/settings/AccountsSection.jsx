@@ -15,6 +15,7 @@ import {
   Loader,
   Alert,
   NumberInput,
+  Select,
   Box,
   Tooltip,
 } from '@mantine/core'
@@ -63,6 +64,22 @@ function getCatchupLabel(account) {
     : `Catchup: ${channels}`
 }
 
+export const CATCHUP_URL_STYLE_OPTIONS = [
+  { value: 'auto', label: 'Automatic' },
+  { value: 'path', label: 'Path (/timeshift/...)' },
+  { value: 'query', label: 'Query (/streaming/timeshift.php)' },
+]
+
+export function catchupStyleLabel(account) {
+  const style = account?.catchup_url_style || 'auto'
+  if (style === 'path') return 'Catchup URL: path style'
+  if (style === 'query') return 'Catchup URL: query style'
+  const resolved = account?.catchup_url_style_resolved
+  if (resolved === 'query') return 'Automatic — using query style'
+  if (resolved === 'path') return 'Automatic — using path style'
+  return 'Automatic — style not yet determined'
+}
+
 function AccountForm({ account, onSubmit, onCancel, isLoading }) {
   const [formData, setFormData] = useState({
     name: account?.name || '',
@@ -70,6 +87,7 @@ function AccountForm({ account, onSubmit, onCancel, isLoading }) {
     username: account?.username || '',
     password: account?.password || '',
     guide_offset_hours: account?.guide_offset_hours || 0,
+    catchup_url_style: account?.catchup_url_style || 'auto',
   })
 
   const handleSubmit = (e) => {
@@ -126,6 +144,18 @@ function AccountForm({ account, onSubmit, onCancel, isLoading }) {
             setFormData({
               ...formData,
               guide_offset_hours: typeof value === 'number' ? value : 0,
+            })}
+        />
+        <Select
+          label="Catchup URL style"
+          description="Most providers work on Automatic. Only change this if your recordings keep failing and your provider needs one specific link format."
+          data={CATCHUP_URL_STYLE_OPTIONS}
+          allowDeselect={false}
+          value={formData.catchup_url_style}
+          onChange={(value) =>
+            setFormData({
+              ...formData,
+              catchup_url_style: value || 'auto',
             })}
         />
         <Group justify="flex-end" mt="md">
@@ -210,6 +240,9 @@ function AccountCard({ account, isDefault, onSetDefault, onEdit, onDelete, onTes
             {account.vod_available ? 'VOD ✓' : 'VOD ✗'}
           </Badge>
         )}
+        <Badge variant="light" size="sm" color="indigo">
+          {catchupStyleLabel(account)}
+        </Badge>
         {Number(account?.guide_offset_hours || 0) !== 0 && (
           <Badge variant="light" size="sm" color="grape">
             {getGuideOffsetLabel(account)}

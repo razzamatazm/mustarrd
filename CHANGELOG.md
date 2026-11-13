@@ -4,15 +4,121 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-11-12
+
+### Added: Trim extra time from the end of a recording
+
+**What you would notice:** **Settings > Post-Processing** has a new switch, **Trim extra time from the end**, off by default. Some sources hand back more than was asked for; Dispatcharr, for example, adds buffer time to catchup recordings. With the switch on, a catchup recording that measures longer than the time you requested, including your padding, has the extra cut off its end before Commercial Skip or conversion. It works with Keep .ts. It applies to every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. In History, a recording this step touched says so next to its expected length: trimmed, already the right length, or not trimmed because the trim failed. If a trim fails for any reason the original recording is kept and the recording finishes with a warning. Thanks to @matrix2669.
+
+**What changed:** The cut is a stream copy to a temporary file, which is checked for audio/video and the right length before it replaces the original. Nothing is cut unless the measured length is reliable and more than 5 seconds over what was requested; a recording whose length cannot be trusted is left alone. Provider files sometimes skip their clock ahead by a few seconds, which makes them measure long without being long, so the cut closes those skips first and counts real footage. The outcome is saved on the recording (`buffer_trim_status`), and VOD is excluded. The Keep .ts description now reads "Keep the recording in its original .ts format", since trimming can apply to it.
+
+### Added: Poster art for finished recordings
+
+**What you would notice:** When a recording finishes, Mustarrd now looks for its poster. You see it as a small thumbnail beside the recording in **Downloads > History**, and a copy is saved into your library next to the recording. If a recording has the wrong poster or none, the new picture button on its History row looks it up again. It works with no setup for TV shows. To get posters for films as well, paste a free TMDB key into the new **Settings > Poster Art** page, which also has a **Check key** button and two switches: one to turn poster art off entirely, one to keep the thumbnails but stop saving files into your library. A recording with no poster is left as it is, and looking for one can never delay or fail a recording. Recordings you already have do not get posters automatically; use the button on any you want one for. On-demand (VOD) downloads are not covered yet.
+
+**What changed:** Posters come from TMDB when a key is saved, then from TVMaze, which needs no key but only knows TV shows. To find one, Mustarrd sends the show's name, and its TMDB, TVDB or IMDb ID when your guide publishes one, to those two services and nothing else. A match by ID is always trusted; a match by name is only accepted when the name is the same, so a near miss gives no poster rather than the wrong one. In the library, a show that sits in its own folder gets `poster.jpg` in that folder, which is where Kodi and Jellyfin look for a show's poster. An existing one is left alone unless an admin presses the refresh button. Anything else gets a file named after the recording ending in `-poster.jpg`, which those apps use for films but not for single episodes. So with the default flat file naming, the thumbnails in History work but your library will not pick up show posters; put the show in its own folder in **Settings > File Naming** if you want that. A film that shares its name with a TV show can get the show's poster when no TMDB key is saved, because TVMaze only knows shows. The TMDB key is stored encrypted and is never shown again after saving. Webhook messages are unchanged.
+
+### Fixed: Processing no longer looks stuck on recordings with broken timestamps
+
+**What you would notice:** Some provider recordings carry timestamps that jump partway through, which made a one-hour show look about 26 hours long to ffprobe. The progress bar would crawl as if the job had stalled. Mustarrd now checks the measured length against how long the recording was scheduled for, and uses the scheduled length when the measurement is clearly wrong. When a quick remux fails and Mustarrd falls back to a full re-encode, the status now says so and names the encoder (for example "Remux failed; re-encoding with NVENC (h264_nvenc)."), and the log ends with "Re-encode complete" instead of "Remux complete". Separately, if ffprobe cannot measure a recording at all, commercial removal is now skipped: the recording is kept uncut with a warning explaining why, and it is still converted to your chosen format. Before, the whole download failed. Thanks to @geoffwatts, from #438.
+
+**What changed:** Post-processing gets the requested recording length (including padding; not used for VOD). A probe is replaced by the scheduled length when it is more than twice the schedule or more than 30 minutes over, whichever is lower. When ffprobe returns no duration, the scheduled length is used for progress only, never for commercial cut points, since cutting against a guess risks removing the wrong parts of a show.
+
+### Added: A notification bell for problems you would otherwise miss
+
+**What you would notice:** There is a bell next to the Mustarrd logo (top right on a phone). A red number on it means something needs your attention: an IPTV account expiring within 7 days or already expired, an account Mustarrd could not connect to on its last guide refresh or Test, or a recording that failed. Click one to jump to the right page, or click the X to dismiss it. Dismissing only hides it for you. Notifications clear themselves when the problem is fixed, for example when an account is renewed or a failed recording is retried successfully, and they come back if the problem returns. Download-only users see only failures of recordings they asked for; account problems go to admins.
+
+**What changed:** New `notifications` and `notification_dismissals` tables, created automatically on startup. Recording failures are picked up the moment a recording is marked failed. Connection failures come from the guide refresh and the account Test button, which now also updates the account's connection status. Each guide refresh re-reads the account's expiry date from the provider, so renewing clears the warning on its own; an hourly background check handles the countdown. Old recording-failure notifications are deleted after 30 days. Nothing is sent outside Mustarrd; use webhooks for that.
+
+### Fixed: Accounts that work in other apps no longer fail with "Provider connection failed"
+
+**What you would notice:** Some providers hang up on anything that does not introduce itself as a video player. Mustarrd was not introducing itself as one, so adding an account on those providers failed with "Provider connection failed" even though the same login worked everywhere else. Mustarrd now identifies itself as a media player on everything it asks a provider for: signing in, the guide, channel logos, previews, and the recordings themselves. If your provider insists on one particular player, you can set it with the `CATCHUP_PROVIDER_USER_AGENT` environment variable.
+
+**What changed:** Every request to a provider now sends a player-style `User-Agent` (`VLC/3.0.21 LibVLC/3.0.21` by default) instead of the HTTP library's own name. Requests to Plex and webhooks are unaffected.
+
+### Added: Scheduled recordings can wait for catchup to become ready
+
+**What you would notice:** **Settings > Recording** now has a **Wait after recording** option. It defaults to 5 minutes, giving a provider time to publish a just-finished show to its catchup archive before Mustarrd starts the download. Set it to 0 for the previous immediate behavior. The wait begins after any **End late** padding, and changing it also updates the timing of recordings that are already scheduled but have not started downloading.
+
+**What changed:** A global `scheduled_download_delay_minutes` setting (0–120) now controls scheduled-recording readiness. The scheduler reads the current value on each pass, and schedule APIs include it in `available_at` so countdowns and expected start times match the actual dispatch time. Ad-hoc downloads and already-ended time-slot downloads remain immediate.
+
+### Added: Mustarrd can now tell other apps when a recording happens
+
+**What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
+
+**What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
+
+### Added: See the downloaded length before processing changes it
+
+**What you would notice:** Downloads History now compares a catchup recording's original downloaded length with the requested length, including your padding. Beside the downloaded time it says whether the file is shorter than expected, longer than expected, or matches (within five seconds of the request). Commercial removal no longer makes that comparison use the shortened final file. If the original length cannot be measured reliably, History says so instead of guessing.
+
+**What changed:** Raw catchup duration is measured with ffprobe before post-processing and saved separately from the final file duration. Missing, invalid, or implausibly large measurements are recorded as uncertain. Restart recovery preserves the original observation; retries clear it for the next capture. This change reports the measurement without trimming media or automatically retrying it. Existing completed recordings and VOD are not retrospectively analyzed.
+
+### Added: Choose how long a recording keeps trying through a provider outage
+
+**What you would notice:** **Settings > Recording** has a new **Keep retrying for** option under Provider outages. When your provider drops the connection partway through a recording, Mustarrd already waits and reconnects, picking up where it left off, but it used to give up after about 30 seconds of waiting. You can now stretch that to as much as an hour, so a recording survives a longer outage instead of ending early. It stays at 30 seconds unless you change it, so nothing is different after updating.
+
+**What changed:** A new `download_retry_window_seconds` setting (0-3600, default 30) replaces the hard-coded retry limit and backoff. The window is the total time one download spends waiting between retries, spent in growing waits of 5s, 10s, 15s and so on, capped at 30s each. The default is worked out from the old constants and yields the same three retries after 5, 10 and 15 seconds. The setting is read when a download first hits a network error, not on every download.
+
+### Added: Mustarrd tells you when a newer version is out
+
+**What you would notice:** If you run the published Docker image, the notification bell now shows "Update available" when a newer Mustarrd has been published, with how many changes there are since yours. Clicking it opens the list of changes on GitHub. To update, pull the latest image and restart the container; the notice goes away on its own once you are up to date. Admins see it, download-only users do not. If you would rather not be told, turn off **Check for updates** in the new **Settings > Updates** section, which also shows which build you are running.
+
+**What changed:** Published images now carry the commit they were built from (`CATCHUP_BUILD_SHA`). About a minute after startup and then once a day, Mustarrd asks GitHub's public API how far the main branch is ahead of that commit. The request sends nothing about you, your server or your recordings. If GitHub cannot be reached, or the build is not one from the main branch, nothing happens. Local and desktop builds have no build commit, so they never check.
+
+---
+
+## 2026-09-04
+
+### Fixed: A brief database hiccup no longer loses a scheduled recording
+
+**What you would notice:** If the database was momentarily busy at the exact moment a scheduled recording was due to start, that recording used to be marked Failed straight away with a cryptic technical message, and it was never tried again even though the programme was still available. Now Mustarrd retries within a second or so, and if it still cannot start, the recording stays scheduled with a note saying it will retry, so the next check picks it up. Recordings that fail for a real reason (the program cannot be built, the provider refuses it) still fail immediately, and the reason now reads as a sentence instead of a raw error.
+
+**What changed:** Schedule dispatch classifies its errors. Infrastructure-level database failures get a small number of retries with a short backoff inside the same poll, and leave the schedule dispatchable if they all fail; everything else stays terminal on the first attempt. The download row is still staged and committed with the schedule update, so a retried attempt cannot leave a duplicate recording behind.
+
+---
+
 ## 2026-09-03
 
-### Added: Recurring recording rules
+### Added: Recordings now come with a .nfo file so Plex and Jellyfin match them properly
 
-**What you would notice:** Opening a programme in Browse now offers **Record every airing** alongside the one-off options. A rule can match a show's title exactly, by "contains", or by a regular expression, and can be limited to certain days of the week and given its own padding. The new **Recurring** tab on the Scheduled page lists your rules and lets you enable, edit, or delete each one. Rules are checked when you create or edit them and after every guide refresh, so future episodes are scheduled automatically. If a rule is created while an episode is already on air, that airing is still captured as long as it is inside the channel's catchup window. The same episode is never scheduled twice, even across a guide refresh.
+**What you would notice:** Every finished recording now gets a small `.nfo` file saved next to it, with the same name. Plex and Jellyfin read that file to work out what the recording actually is, so a show whose provider name is slightly off - "Detectorists S2" instead of "Detectorists" - stops landing in your library unmatched or attached to the wrong series. Where your guide supplies them, the file also carries the season and episode numbers, the episode title, the description, and the TMDB / TVDB / IMDb ids that pin the match exactly.
 
-Optionally, a rule can delete its recordings a set number of days after they finish. This is off by default: nothing is deleted until an admin turns on **Enable rule-based retention cleanup** on the Recurring tab. When it runs, only the media file is removed — the entry stays in your download history, marked with the date its file was deleted.
+The details are captured the moment you press record, so a guide refresh between the recording starting and finishing cannot scramble them.
 
-**What changed:** A new `recording_rules` table and `/api/recording-rules` endpoints back the feature. Rule evaluation builds a stable per-airing key from the provider's channel and unpadded start/stop times and enforces it with a unique index, so re-running evaluation on every refresh cannot create duplicates. The day-of-week test uses the guide's wall clock (UTC plus the account guide offset plus the global EPG offset). Retention is gated behind a global setting, runs at most once per day per account, and preserves the `Download` row.
+You can switch this off under **Settings > Post-Processing > Pipeline > Write .nfo files**. It is on by default. If a `.nfo` cannot be written - a read-only completed folder, say - the recording still finishes normally and the problem is logged.
+
+This covers catchup and scheduled recordings. Downloaded movies and series episodes from your provider's on-demand library do not get one yet.
+
+### Added: Catchup works with providers that use the other URL format
+
+**What you would notice:** If your provider is one of the ones where every catchup recording failed, recordings should now simply work. Xtream providers hand out catchup links in one of two shapes, and Mustarrd only ever asked for the first one. It now tries the first shape, and if the provider turns it down, immediately asks again in the second shape and remembers the answer, so the rest of your recordings go straight to the one that works.
+
+Each account in **Settings > Accounts** has a new **Catchup URL style** picker, left on **Automatic**. You only need to touch it if you want to pin an account to one shape. The account card shows which shape is actually in use, so if you are chasing a provider problem you can see what Mustarrd is asking for. Changing the picker also forgets what it worked out before, which is how you make it try again.
+
+Nothing changes for providers that already worked: the very same link is sent as before, and the fallback only ever fires after the provider has refused.
+
+**What changed:** `build_timeshift_url` can emit either the path form (`/timeshift/...`) or the query form (`/streaming/timeshift.php?...`), both carrying the same start token and duration. `XtreamAccount` gained `catchup_url_style` (the user's choice) and `catchup_url_style_resolved` (what probing settled on). A refused initial request now raises `ProviderStatusError`, which the download manager catches to retry once in the other form before any bytes hit disk; if both forms fail, the provider's original error is what surfaces.
+
+### Added: Recordings that cut off early are kept instead of thrown away
+
+**What you would notice:** If a recording loses its connection partway through and cannot be resumed, Mustarrd now keeps what it captured instead of deleting it. You recorded 54 minutes of a 60 minute program, you keep those 54 minutes. The recording shows up in History as **Interrupted** with the amount captured next to the scheduled length ("Interrupted - 54 min of 60 min"), sits in your completed recordings folder like any other, and can be played, downloaded or retried. Retrying re-records the program from scratch rather than trying to continue the file you already have, and the partial stays on disk while the new attempt runs. If the retry succeeds it takes the partial's place in your recordings folder.
+
+Commercial skip and re-encoding still run on an interrupted recording, and Plex is still told to refresh, so the file lands in your library the same way a full recording does.
+
+Nothing is kept if there is nothing worth keeping: if the file is empty, or the app cannot open it at all, it is deleted and the recording is marked Failed exactly as before.
+
+**What changed:** A seventh download status, `interrupted`, was added. When the downloader exhausts its retries it now probes the partial file with ffprobe and only deletes it when ffprobe cannot open it. The reason the capture stopped is stored in a new `interruption_reason` column so it can sit alongside an existing "Completed with warnings" integrity note without either message overwriting the other. Post-processing, the move to the completed folder and restart recovery all preserve the interrupted status instead of promoting it to completed. Retrying an interrupted recording rewinds its output path to a fresh `.ts` capture in the download folder, so the new attempt is neither appended to the post-processed file nor mistaken for one that has already been converted.
+
+### Added: Commercial Skip can use your GPU to speed up detection
+
+**What you would notice:** **Settings > Commercial Skip > Advanced** has a new **Hardware decoding** option. Leave it on **None (software)** and nothing changes. Pick **Hardware assist** or **NVIDIA (CUVID)** and Mustarrd asks the detector to decode video on the graphics hardware instead of the CPU, which can cut a noticeable chunk off detection time on long recordings.
+
+Options your machine does not appear to support are still listed, marked "(not detected)", because there is no reliable way to ask up front which decoders are available. Choosing one is safe either way: if detection fails with the hardware option, it re-runs automatically on the CPU and the recording still completes. The download log shows which mode was used and says so when it falls back.
+
+There is deliberately no separate Intel Quick Sync option. Hardware assist covers Intel and other non-NVIDIA hardware.
+
+**What changed:** A new `comskip_hw_decode_mode` setting (default `none`) adds `--hwassist` or `--cuvid` to the Comskip command line. A non-zero exit with a hardware flag present triggers exactly one retry without it before the failure is treated as real. Existing installs migrate to `none`.
 
 ### Fixed: Your chosen GPU is used when commercial skip is on
 

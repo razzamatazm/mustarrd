@@ -50,6 +50,8 @@ const baseSettings = {
   min_free_space_gb: 25,
   default_pre_padding_minutes: 1,
   default_post_padding_minutes: 2,
+  scheduled_download_delay_minutes: 5,
+  download_retry_window_seconds: 30,
   transcode_enabled: true,
   remux_only: true,
   transcode_format: 'mkv',
@@ -198,6 +200,42 @@ describe('Settings page', () => {
     })
   })
 
+  it('shows and saves the scheduled download delay', async () => {
+    renderSettings()
+    await screen.findByText('Wait after recording')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Scheduled download delay' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ scheduled_download_delay_minutes: 6 })
+  })
+
+  it('shows the retry window at its default and saves a longer one', async () => {
+    renderSettings()
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('30 seconds (default)')
+
+    fireEvent.click(input)
+    fireEvent.click(await screen.findByRole('option', { name: '10 minutes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ download_retry_window_seconds: 600 })
+  })
+
+  it('shows a retry window saved outside the app instead of a blank box', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, download_retry_window_seconds: 45 })
+    renderSettings()
+
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('45 seconds')
+  })
+
   it('discards edits from the save bar', async () => {
     renderSettings()
     await screen.findByText('Max concurrent downloads')
@@ -236,6 +274,7 @@ describe('Settings page', () => {
       comskip_use_custom_ini: false,
       comskip_custom_ini_path: null,
       comskip_connect_blocks_with_logo: true,
+      comskip_hw_decode_mode: 'none',
     })
   })
 
@@ -320,6 +359,104 @@ describe('Settings page', () => {
     expect(
       screen.getByText(/Pinned by CATCHUP_VAAPI_RENDER_DEVICE/),
     ).toBeInTheDocument()
+  })
+
+  it('turns .nfo sidecars off and saves only that field', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Post-Processing'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Write .nfo files' })
+    // Defaults to on: the fixture has no write_nfo_files key at all.
+    expect(toggle).toBeChecked()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ write_nfo_files: false })
+  })
+
+  it('turns the update check off and saves only that field', async () => {
+    settingsApi.get.mockResolvedValue({
+      ...baseSettings,
+      update_check_enabled: true,
+      build_sha: '0123456789abcdef0123456789abcdef01234567',
+    })
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Check for updates' })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText('0123456')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ update_check_enabled: false })
+  })
+
+  it('says when this build has no commit to check against', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    expect(await screen.findByRole('switch', { name: 'Check for updates' })).toBeChecked()
+    expect(screen.getByText('Local build')).toBeInTheDocument()
+  })
+
+  it('enables buffer trimming independently while keeping the original .ts format', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, transcode_enabled: false })
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.click(screen.getByText('Post-Processing'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Trim extra time from the end' })
+    expect(screen.getByText(/applies to every catchup recording on every account/)).toBeInTheDocument()
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Keep .ts' })).toBeChecked()
+    expect(screen.getByText(/assumes the extra is at the end/)).toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(screen.getByRole('radio', { name: 'Keep .ts' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Off' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => expect(settingsApi.update).toHaveBeenCalled())
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ trim_dispatcharr_buffer: true })
+    const description = screen.getByText(/applies to every catchup recording on every account/)
+    expect(description).not.toHaveTextContent('Off by default.')
+  })
+
+  it('finds buffer trimming in search and can turn the saved option off', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, trim_dispatcharr_buffer: true })
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'Dispatcharr' } })
+    fireEvent.click(await screen.findByText('Trim extra time from the end'))
+    const toggle = await screen.findByRole('switch', { name: 'Trim extra time from the end' })
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(settingsApi.update).toHaveBeenCalled())
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ trim_dispatcharr_buffer: false })
+  })
+
+  it('warns that trimming needs FFmpeg even with Keep .ts', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, transcode_enabled: false, trim_dispatcharr_buffer: true })
+    settingsApi.getTools.mockResolvedValue({ ffmpeg: { available: false }, comskip: { available: false } })
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.click(screen.getByText('Post-Processing'))
+    expect(await screen.findByText(/Buffer trimming also requires FFmpeg/)).toBeInTheDocument()
   })
 
   it('maps the two-step format picker onto the transcode fields', async () => {

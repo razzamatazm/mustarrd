@@ -19,7 +19,7 @@ from database import async_session_maker
 from guide_metadata import GuideMetadata
 from models import EPGProgram, XtreamAccount
 from services.account_credentials import resolve_account_password
-from services.xtream_client import XtreamClient
+from services.xtream_client import XtreamClient, parse_expiration_date
 from services.epg_service import epg_service
 from services.log_stream import backend_log_stream
 
@@ -105,7 +105,7 @@ _NAMED_TZ_OFFSETS: Dict[str, int] = {
 }
 
 
-def _friendly_connection_error(e: Exception) -> str:
+def friendly_connection_error(e: Exception) -> str:
     """Translate a connection exception into a short, user-readable string."""
     import aiohttp
     msg = str(e)
@@ -200,7 +200,7 @@ class EPGIngestManager:
             except Exception as exc:
                 self._status["last_error"] = str(exc)
                 await self._log(f"Account EPG refresh failed: {exc}", level="error", account=account)
-                await self._update_connection_status(account.id, ok=False, error=_friendly_connection_error(exc))
+                await self._update_connection_status(account.id, ok=False, error=friendly_connection_error(exc))
                 raise
             finally:
                 self._status.update({
@@ -285,7 +285,7 @@ class EPGIngestManager:
                 })
                 logger.exception("Error refreshing XMLTV for account %s", account.id)
                 await self._log(f"EPG refresh failed: {exc}", level="error", account=account)
-                await self._update_connection_status(account.id, ok=False, error=_friendly_connection_error(exc))
+                await self._update_connection_status(account.id, ok=False, error=friendly_connection_error(exc))
 
         self._status.update({
             "running": False,
@@ -333,6 +333,13 @@ class EPGIngestManager:
                 vod_available = bool(vod_categories)
             except Exception:
                 logger.debug("VOD category probe failed for account %s", account.id, exc_info=True)
+
+            # Re-read the account's expiry so a renewal at the provider clears
+            # the bell's expiry warning without anyone pressing Test (#430).
+            try:
+                await self._update_account_info(account.id, await client.authenticate())
+            except Exception:
+                logger.debug("Account info probe failed for account %s", account.id, exc_info=True)
 
             await self._update_provider_capabilities(
                 account.id,
@@ -602,8 +609,44 @@ class EPGIngestManager:
                     account.last_connection_checked_at = datetime.now(timezone.utc)
                     account.last_connection_error = error if not ok else None
                     await session.commit()
+                    await self._sync_connection_notification(session, account)
         except Exception:
             logger.exception("Failed to update connection status for account %s", account_id)
+
+    async def _update_account_info(self, account_id: int, auth_data) -> None:
+        """Store the expiry and connection limits from a fresh authenticate()."""
+        user_info = auth_data.get("user_info") if isinstance(auth_data, dict) else None
+        if not isinstance(user_info, dict):
+            return
+        async with async_session_maker() as session:
+            account = await session.get(XtreamAccount, account_id)
+            if not account:
+                return
+            account.expiration_date = parse_expiration_date(user_info)
+            if user_info.get("max_connections") is not None:
+                account.max_connections = user_info.get("max_connections")
+            await session.commit()
+            try:
+                from services.notifications import sync_account_expiry
+
+                await sync_account_expiry(session, account)
+                await session.commit()
+            except Exception:
+                logger.exception("Failed to update expiry notification for account %s", account_id)
+
+    async def _sync_connection_notification(self, session, account) -> None:
+        """Raise or clear the bell's "can't connect" entry (#430).
+
+        Runs after the status commit, so a notification problem can never
+        lose the connection status itself.
+        """
+        try:
+            from services.notifications import sync_account_connection
+
+            await sync_account_connection(session, account)
+            await session.commit()
+        except Exception:
+            logger.exception("Failed to update connection notification for account %s", account.id)
 
     async def _update_provider_capabilities(
         self,

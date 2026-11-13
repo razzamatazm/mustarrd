@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -14,6 +15,7 @@ vi.mock('../api', () => ({
     diskSpace: vi.fn(),
     cancel: vi.fn(),
     retry: vi.fn(),
+    refreshPoster: vi.fn(),
     clearFinished: vi.fn(),
   },
   authApi: { status: vi.fn() },
@@ -60,6 +62,21 @@ const failedDownload = {
   start_time: dayjs().subtract(2, 'day').toISOString(),
   end_time: dayjs().subtract(2, 'day').add(30, 'minute').toISOString(),
   error_message: 'Provider returned 404',
+}
+
+const interruptedDownload = {
+  id: 4,
+  status: 'interrupted',
+  program_title: 'Championship Final',
+  channel_name: 'Sports HD',
+  account_id: 1,
+  duration_minutes: 60,
+  recorded_duration_seconds: 3240,
+  start_time: dayjs().subtract(3, 'day').toISOString(),
+  end_time: dayjs().subtract(3, 'day').add(60, 'minute').toISOString(),
+  output_path: '/completed/championship-final.mkv',
+  file_size: 1024 * 1024 * 900,
+  interruption_reason: 'Connection to the provider was lost.',
 }
 
 async function renderDownloads({ downloads = [], initialEntries = ['/downloads'] } = {}) {
@@ -124,6 +141,183 @@ describe('Downloads page', () => {
     expect(screen.getByRole('button', { name: 'Cancel download' })).toBeInTheDocument()
   })
 
+  it('labels the final file duration for a legacy interrupted recording', async () => {
+    await renderDownloads({
+      downloads: [interruptedDownload],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    expect(await screen.findByText('Championship Final')).toBeInTheDocument()
+    expect(screen.getByText(/Interrupted.*Final file: 54m/)).toBeInTheDocument()
+    expect(screen.getByText(/Connection to the provider was lost/)).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['matched', 3600, '1h', 'Matches expected length'],
+    ['short', 3590, '59m 50s', 'Shorter than expected'],
+    ['long', 3900, '1h 5m', 'Longer than expected'],
+  ])('shows the raw %s duration without changing the recording status or actions', async (status, raw, formatted, label) => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        duration_minutes: 60,
+        raw_duration_seconds: raw,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: status,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText(`Downloaded before processing: ${formatted} · ${label}`)).toBeInTheDocument()
+    expect(screen.getByText('Expected: 1h (including padding)')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Completed' }))
+    expect(screen.getByText('Nature Documentary')).toBeInTheDocument()
+  })
+
+  it('uses the raw duration and padded expectation instead of the processed file duration', async () => {
+    await renderDownloads({
+      downloads: [{
+        ...interruptedDownload,
+        duration_minutes: 66,
+        raw_duration_seconds: 3840,
+        expected_duration_seconds: 3960,
+        recorded_duration_seconds: 2700,
+        duration_analysis_status: 'short',
+        error_message: 'Completed with warnings: unusual stream metadata.',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('Downloaded before processing: 1h 4m · Shorter than expected')).toBeInTheDocument()
+    expect(screen.getByText(/Expected: 1h 6m \(including padding\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/45m/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Connection to the provider was lost/)).toBeInTheDocument()
+    expect(screen.getByText(/Completed with warnings: unusual stream metadata/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['trimmed', 'Successfully trimmed to expected length'],
+    ['failed', 'Not trimmed — trim failed'],
+    ['already_matched', 'Already at expected length (no trim needed)'],
+    ['in_progress', 'Trim outcome not confirmed'],
+  ])('shows saved trim outcome %s after Expected, independently of final file length', async (outcome, label) => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        duration_minutes: 122,
+        raw_duration_seconds: 7617,
+        expected_duration_seconds: 7320,
+        recorded_duration_seconds: 5400,
+        duration_analysis_status: 'long',
+        buffer_trim_status: outcome,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    expect(await screen.findByText('Downloaded before processing: 2h 6m 57s · Longer than expected')).toBeInTheDocument()
+    expect(screen.getByText(`Expected: 2h 2m (including padding) · ${label}`)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
+  })
+
+  // Most installs never turn the end-trim option on. Their long recordings,
+  // and everyone's from before the option existed, get no trim note.
+  it.each([['not_run'], [null], [undefined], ['future_status']])(
+    'adds no trim note to a long recording when the trim step has nothing to report (%s)',
+    async (outcome) => {
+      await renderDownloads({
+        downloads: [{
+          ...completedDownload,
+          duration_minutes: 122,
+          raw_duration_seconds: 7617,
+          expected_duration_seconds: 7320,
+          duration_analysis_status: 'long',
+          buffer_trim_status: outcome,
+        }],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      expect(await screen.findByText('Downloaded before processing: 2h 6m 57s · Longer than expected')).toBeInTheDocument()
+      expect(screen.getByText('Expected: 2h 2m (including padding)')).toBeInTheDocument()
+      expect(screen.queryByText(/trim/i)).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    ['unavailable', null, 'Download length unavailable', 'The raw recording was no longer available.'],
+    ['unreliable', 93600, 'Download length could not be verified', 'The recording timestamps are inconsistent.'],
+  ])('explains %s analysis without substituting the final file duration', async (status, raw, label, reason) => {
+    await renderDownloads({
+      downloads: [{
+        ...interruptedDownload,
+        raw_duration_seconds: raw,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: status,
+        duration_analysis_reason: reason,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText(label)).toBeInTheDocument()
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Expected:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Final file:/)).not.toBeInTheDocument()
+  })
+
+  it('does not display invalid analysis values as measured duration', async () => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        raw_duration_seconds: null,
+        expected_duration_seconds: 3600,
+        recorded_duration_seconds: 2700,
+        duration_analysis_status: 'matched',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('Download length unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Matches expected length/)).not.toBeInTheDocument()
+  })
+
+  it('does not add catchup duration analysis to VOD or legacy completed recordings', async () => {
+    await renderDownloads({
+      downloads: [completedDownload, {
+        ...completedDownload,
+        id: 5,
+        program_title: 'VOD Movie',
+        is_vod: true,
+        raw_duration_seconds: 3900,
+        expected_duration_seconds: 3600,
+        duration_analysis_status: 'long',
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+
+    expect(await screen.findByText('VOD Movie')).toBeInTheDocument()
+    expect(screen.getByText('Nature Documentary')).toBeInTheDocument()
+    expect(screen.queryByText(/Downloaded before processing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Download length unavailable/)).not.toBeInTheDocument()
+  })
+
+  it('offers a filter and a retry for interrupted recordings', async () => {
+    await renderDownloads({
+      downloads: [completedDownload, interruptedDownload],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    await screen.findByText('Championship Final')
+
+    const filter = screen.getByRole('radio', { name: 'Interrupted' })
+    fireEvent.click(filter)
+
+    await waitFor(() => {
+      expect(screen.queryByText('Nature Documentary')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('Championship Final')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
   it('shows compact history rows with a segmented status filter', async () => {
     await renderDownloads({
       downloads: [completedDownload, failedDownload],
@@ -147,5 +341,91 @@ describe('Downloads page', () => {
       expect(screen.queryByText('Nature Documentary')).not.toBeInTheDocument()
     })
     expect(screen.getByText('Late Show')).toBeInTheDocument()
+  })
+
+  describe('poster art', () => {
+    const withPoster = { ...completedDownload, poster: '/api/downloads/2/poster?v=abc123' }
+
+    it('shows the poster beside a recording that has one', async () => {
+      await renderDownloads({
+        downloads: [withPoster, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const slots = screen.getAllByTestId('history-poster-slot')
+      expect(slots).toHaveLength(2)
+      expect(slots[0].querySelector('img')).toHaveAttribute('src', '/api/downloads/2/poster?v=abc123')
+      // The row without a poster keeps an empty slot so the titles line up.
+      expect(slots[1].querySelector('img')).toBeNull()
+    })
+
+    it('leaves History exactly as it was when nothing has a poster', async () => {
+      await renderDownloads({
+        downloads: [completedDownload, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      expect(screen.queryByTestId('history-poster-slot')).not.toBeInTheDocument()
+    })
+
+    it('drops a poster that fails to load instead of showing a broken image', async () => {
+      await renderDownloads({
+        downloads: [withPoster],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const slot = screen.getByTestId('history-poster-slot')
+      fireEvent.error(slot.querySelector('img'))
+
+      expect(slot.querySelector('img')).toBeNull()
+    })
+
+    it('offers Refresh artwork on a finished recording and says what happened', async () => {
+      const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
+      downloadsApi.refreshPoster.mockResolvedValue({ found: true, download: withPoster })
+      await renderDownloads({
+        downloads: [completedDownload, failedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      const buttons = screen.getAllByRole('button', { name: 'Refresh artwork' })
+      expect(buttons).toHaveLength(1)
+      fireEvent.click(buttons[0])
+
+      await waitFor(() => expect(downloadsApi.refreshPoster).toHaveBeenCalledWith(2))
+      await waitFor(() =>
+        expect(show).toHaveBeenCalledWith(expect.objectContaining({ title: 'Artwork Updated' }))
+      )
+    })
+
+    it('says so plainly when a refresh finds no poster', async () => {
+      const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
+      downloadsApi.refreshPoster.mockResolvedValue({ found: false, download: completedDownload })
+      await renderDownloads({
+        downloads: [completedDownload],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh artwork' }))
+
+      await waitFor(() =>
+        expect(show).toHaveBeenCalledWith(expect.objectContaining({ title: 'No Artwork Found' }))
+      )
+    })
+
+    it('does not offer it for on-demand downloads', async () => {
+      await renderDownloads({
+        downloads: [{ ...completedDownload, is_vod: true }],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      await screen.findByText('Nature Documentary')
+
+      expect(screen.queryByRole('button', { name: 'Refresh artwork' })).not.toBeInTheDocument()
+    })
   })
 })

@@ -26,3 +26,6 @@ desktop-electron/backend-bin/*
 !desktop-electron/backend-bin/.gitkeep
 desktop-electron/tools/darwin-*/
 desktop-electron/tools/win32-*/
+
+# Dispatch scratch (agent ledgers, not project state)
+.scratch/

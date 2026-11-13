@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   Group,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -27,6 +28,7 @@ export const COMSKIP_DEFAULTS = {
   comskip_connect_blocks_with_logo: true,
   comskip_dynamic_ticker_tape: false,
   comskip_thread_count: 1,
+  comskip_hw_decode_mode: 'none',
   comskip_use_custom_ini: false,
   comskip_custom_ini_path: null,
 }
@@ -87,7 +89,13 @@ function RecordingTimeline() {
   )
 }
 
-export default function ComskipSection({ formData, onChange, onResetDefaults, onNavigateToProcessing }) {
+const HW_DECODE_FALLBACK_MODES = [
+  { id: 'none', name: 'None (software)', available: true },
+  { id: 'hwassist', name: 'Hardware assist', available: false },
+  { id: 'nvidia', name: 'NVIDIA (CUVID)', available: false },
+]
+
+export default function ComskipSection({ formData, onChange, onResetDefaults, onNavigateToProcessing, hwDecodeModes }) {
   const enabled = Boolean(formData?.comskip_enabled)
   const useCustomIni = Boolean(formData?.comskip_use_custom_ini)
   const managedDisabled = !enabled || useCustomIni
@@ -318,6 +326,25 @@ export default function ComskipSection({ formData, onChange, onResetDefaults, on
                 disabled={managedDisabled}
                 value={formData?.comskip_thread_count ?? COMSKIP_DEFAULTS.comskip_thread_count}
                 onChange={(val) => onChange('comskip_thread_count', typeof val === 'number' ? val : COMSKIP_DEFAULTS.comskip_thread_count)}
+              />
+            </SettingRow>
+            <SettingRow
+              label="Hardware decoding"
+              description="Let the GPU decode video during commercial detection, which can cut detection time noticeably on long recordings."
+              tooltip="Comskip cannot report which decoders it supports, so unavailable options stay listed. If the selected mode does not work, detection automatically re-runs on the CPU and the recording still completes."
+            >
+              {/* A command-line flag, not an INI key, so a custom INI does not
+                  take this over the way it does the tunables above. */}
+              <Select
+                aria-label="Hardware decoding"
+                disabled={!enabled}
+                allowDeselect={false}
+                value={formData?.comskip_hw_decode_mode ?? COMSKIP_DEFAULTS.comskip_hw_decode_mode}
+                onChange={(val) => onChange('comskip_hw_decode_mode', val || COMSKIP_DEFAULTS.comskip_hw_decode_mode)}
+                data={(hwDecodeModes?.length ? hwDecodeModes : HW_DECODE_FALLBACK_MODES).map((mode) => ({
+                  value: mode.id,
+                  label: mode.available ? mode.name : `${mode.name} (not detected)`,
+                }))}
               />
             </SettingRow>
           </Stack>

@@ -1,8 +1,8 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -10,13 +10,19 @@ from auth import require_admin, require_admin_or_download_user, AuthContext
 from database import get_session
 from models import AppSettings, EPGProgram, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
 from services.download_manager import download_manager
-from services.epg_ingest_manager import epg_ingest_manager
+from services.epg_ingest_manager import epg_ingest_manager, friendly_connection_error
 from services.epg_service import epg_service
+from services import notifications as notification_service
 from services.account_credentials import (
     encrypt_account_password,
     resolve_account_password_with_migration,
 )
-from services.xtream_client import XtreamClient
+from services.xtream_client import (
+    XtreamClient,
+    TIMESHIFT_STYLE_AUTO,
+    TIMESHIFT_STYLE_SETTINGS,
+    parse_expiration_date,
+)
 
 
 router = APIRouter()
@@ -30,12 +36,27 @@ def _log_task_result(task: asyncio.Task):
         logger.exception("EPG refresh task failed: %s", exc)
 
 
+def _validate_catchup_url_style(value: str | None) -> str | None:
+    """Accept only the three styles the app knows, normalised."""
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in TIMESHIFT_STYLE_SETTINGS:
+        raise ValueError(
+            "catchup_url_style must be one of: " + ", ".join(TIMESHIFT_STYLE_SETTINGS)
+        )
+    return normalized
+
+
 class AccountCreate(BaseModel):
     name: str
     server_url: str
     username: str
     password: str
     guide_offset_hours: int = 0
+    catchup_url_style: str = TIMESHIFT_STYLE_AUTO
+
+    _check_style = field_validator("catchup_url_style")(_validate_catchup_url_style)
 
 
 class AccountUpdate(BaseModel):
@@ -45,6 +66,9 @@ class AccountUpdate(BaseModel):
     password: str | None = None
     is_active: bool | None = None
     guide_offset_hours: int | None = None
+    catchup_url_style: str | None = None
+
+    _check_style = field_validator("catchup_url_style")(_validate_catchup_url_style)
 
 
 @router.get("")
@@ -77,6 +101,23 @@ async def list_accounts_public(
     ]
 
 
+def _record_connection_check(account: XtreamAccount, ok: bool, error: str | None = None) -> None:
+    account.last_connection_ok = ok
+    account.last_connection_checked_at = datetime.now(timezone.utc)
+    account.last_connection_error = None if ok else error
+
+
+async def _sync_account_notifications(session: AsyncSession, account: XtreamAccount) -> None:
+    """Re-check the bell for this account after a save. Never fails the save."""
+    try:
+        await notification_service.sync_account_expiry(session, account)
+        await notification_service.sync_account_connection(session, account)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not update notifications for account_id=%s", account.id)
+        await session.rollback()
+
+
 @router.post("")
 async def create_account(
     account: AccountCreate,
@@ -103,13 +144,7 @@ async def create_account(
     user_info = auth_data.get("user_info", {})
     server_info = auth_data.get("server_info", {})
 
-    # Parse expiration date
-    exp_date = None
-    if user_info.get("exp_date"):
-        try:
-            exp_date = datetime.fromtimestamp(int(user_info["exp_date"]))
-        except (ValueError, TypeError):
-            pass
+    exp_date = parse_expiration_date(user_info)
 
     # Create account
     db_account = XtreamAccount(
@@ -122,11 +157,13 @@ async def create_account(
         active_connections=user_info.get("active_cons"),
         expiration_date=exp_date,
         guide_offset_hours=int(account.guide_offset_hours or 0),
+        catchup_url_style=account.catchup_url_style,
     )
 
     session.add(db_account)
     await session.commit()
     await session.refresh(db_account)
+    await _sync_account_notifications(session, db_account)
 
     refresh_task = asyncio.create_task(epg_ingest_manager.refresh_account_by_id(db_account.id))
     refresh_task.add_done_callback(_log_task_result)
@@ -179,10 +216,18 @@ async def update_account(
             continue
         if field == "guide_offset_hours" and value is not None:
             value = int(value)
+        if field == "catchup_url_style":
+            if value is None:
+                continue
+            # Changing the picker also clears what probing remembered, so it
+            # doubles as the way to force a fresh probe.
+            if value != (account.catchup_url_style or "auto"):
+                account.catchup_url_style_resolved = None
         setattr(account, field, value)
 
     await session.commit()
     await session.refresh(account)
+    await _sync_account_notifications(session, account)
 
     return account.to_dict()
 
@@ -241,9 +286,19 @@ async def delete_account(
         delete(EPGProgram).where(EPGProgram.account_id == account.id)
     )
 
+    deleted_account_id = account.id
     await session.delete(account)
     await session.commit()
     epg_service.clear_cache()
+
+    # Best effort: the hourly sweep also removes notifications whose account
+    # is gone, so a failure here only delays their disappearance.
+    try:
+        await notification_service.clear_for_account(session, deleted_account_id)
+        await session.commit()
+    except Exception:
+        logger.exception("Could not clear notifications for deleted account_id=%s", deleted_account_id)
+        await session.rollback()
 
     for dl_id in active_dl_ids:
         await download_manager.cancel_download(dl_id)
@@ -279,19 +334,14 @@ async def test_account(
         # Update cached info
         user_info = auth_data.get("user_info", {})
 
-        exp_date = None
-        if user_info.get("exp_date"):
-            try:
-                exp_date = datetime.fromtimestamp(int(user_info["exp_date"]))
-            except (ValueError, TypeError):
-                pass
-
         account.max_connections = user_info.get("max_connections")
         account.active_connections = user_info.get("active_cons")
-        account.expiration_date = exp_date
+        account.expiration_date = parse_expiration_date(user_info)
         account.last_used = datetime.utcnow()
+        _record_connection_check(account, ok=True)
 
         await session.commit()
+        await _sync_account_notifications(session, account)
 
         return {
             "status": "connected",
@@ -299,8 +349,17 @@ async def test_account(
             "server_info": auth_data.get("server_info", {}),
         }
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Account test failed account_id=%s", account_id)
+        # The Test button is a connection check like a guide refresh, so it
+        # updates the same status and the bell's "can't connect" entry.
+        try:
+            _record_connection_check(account, ok=False, error=friendly_connection_error(exc))
+            await session.commit()
+            await _sync_account_notifications(session, account)
+        except Exception:
+            logger.exception("Could not record failed test for account_id=%s", account_id)
+            await session.rollback()
         raise HTTPException(status_code=400, detail="Provider connection failed")
     finally:
         await client.close()

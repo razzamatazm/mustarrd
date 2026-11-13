@@ -7,14 +7,55 @@ import platform
 import subprocess
 import shlex
 import re
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Tuple
 from enum import Enum
 
 from services.process_runner import ProcessRunner
+from services.download_analysis import analyze_duration
 
 logger = logging.getLogger(__name__)
+
+
+# Comskip hardware-decode modes. The fancybits Comskip build registers exactly
+# two relevant options: --hwassist (generic hardware assisted decoding) and
+# --cuvid (NVIDIA). There is deliberately no Intel Quick Sync specific mode.
+COMSKIP_HW_DECODE_FLAGS: Dict[str, Optional[str]] = {
+    "none": None,
+    "hwassist": "--hwassist",
+    "nvidia": "--cuvid",
+}
+
+COMSKIP_HW_DECODE_MODES = (
+    {
+        "id": "none",
+        "name": "None (software)",
+        "description": "Comskip decodes on the CPU. Always works.",
+    },
+    {
+        "id": "hwassist",
+        "name": "Hardware assist",
+        "description": "Generic hardware assisted decoding (Intel, AMD, VA-API).",
+    },
+    {
+        "id": "nvidia",
+        "name": "NVIDIA (CUVID)",
+        "description": "NVIDIA video decoder, for NVIDIA GPUs.",
+    },
+)
+
+
+def normalize_comskip_hw_decode_mode(mode: Optional[str]) -> str:
+    """Coerce anything unrecognised to 'none' rather than failing."""
+    candidate = (mode or "").strip().lower()
+    return candidate if candidate in COMSKIP_HW_DECODE_FLAGS else "none"
+
+
+def comskip_hw_decode_flag(mode: Optional[str]) -> Optional[str]:
+    """Translate a stored mode into the Comskip CLI flag, or None."""
+    return COMSKIP_HW_DECODE_FLAGS[normalize_comskip_hw_decode_mode(mode)]
 
 
 def _is_no_commercials_result(returncode: int, output: str) -> bool:
@@ -61,6 +102,13 @@ ENCODER_MAP = {
         "hevc": "hevc_vaapi",
     },
 }
+
+
+class CommercialRemovalSkipped(Exception):
+    """Commercial removal was skipped on purpose; the recording is left uncut.
+
+    The message is user-facing and explains why.
+    """
 
 
 class PostProcessor:
@@ -528,6 +576,32 @@ class PostProcessor:
 
         return available
 
+    def get_comskip_hw_decode_modes(self) -> List[Dict]:
+        """Best-effort availability for the Comskip hardware-decode modes.
+
+        Reuses the encoder probe: Comskip has no way to report its own decoder
+        support, so an NVIDIA or VA-API capable FFmpeg stack is taken as a hint
+        that the matching Comskip decoder is worth offering. Unavailable modes
+        are still listed (shown disabled in Settings) rather than hidden, and
+        picking one is never fatal - detection falls back to software decode.
+        """
+        available_ids = {
+            accel.get("id")
+            for accel in self.get_available_hardware_accels()
+            if accel.get("available")
+        }
+        availability = {
+            "none": True,
+            # fancybits --hwassist is a VA-API path, so only a Linux VA-API
+            # capable stack counts as a hint that it is worth offering.
+            "hwassist": HardwareAccel.VAAPI.value in available_ids,
+            "nvidia": HardwareAccel.NVIDIA.value in available_ids,
+        }
+        return [
+            {**mode, "available": availability[mode["id"]]}
+            for mode in COMSKIP_HW_DECODE_MODES
+        ]
+
     def resolve_hw_accel(self, hw_accel: HardwareAccel) -> tuple[HardwareAccel, Optional[str]]:
         """Fall back to CPU when the selected hardware encoder is unavailable.
 
@@ -609,6 +683,19 @@ class PostProcessor:
             return "hevc"
         return "h264"
 
+    def _encoder_description(self, hw_accel: HardwareAccel) -> str:
+        """Human-readable effective encoder used after a remux fallback."""
+        labels = {
+            HardwareAccel.CPU: "CPU",
+            HardwareAccel.APPLE_SILICON: "VideoToolbox",
+            HardwareAccel.NVIDIA: "NVENC",
+            HardwareAccel.AMD: "AMF",
+            HardwareAccel.VAAPI: "VA-API",
+        }
+        codec = self._preferred_video_codec(hw_accel)
+        encoder = ENCODER_MAP.get(hw_accel, {}).get(codec, "libx264")
+        return f"{labels.get(hw_accel, hw_accel.value)} ({encoder})"
+
     def _parse_ffmpeg_time(self, key: str, value: str) -> Optional[float]:
         """Parse ffmpeg progress time values into seconds."""
         try:
@@ -642,6 +729,18 @@ class PostProcessor:
         if not log_callback:
             return
         result = log_callback(message)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _notify_status(
+        self,
+        status_callback: Optional[Callable[[str], None]],
+        message: str,
+    ):
+        """Safely call a processing-status callback which may be sync or async."""
+        if not status_callback:
+            return
+        result = status_callback(message)
         if asyncio.iscoroutine(result):
             await result
 
@@ -947,7 +1046,9 @@ class PostProcessor:
         log_callback: Optional[Callable[[str], None]] = None,
         remove_original: bool = False,
         remux_only: bool = False,
-        render_device: Optional[str] = None
+        render_device: Optional[str] = None,
+        expected_duration_seconds: Optional[float] = None,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         Transcode a video file to a different format.
@@ -959,6 +1060,9 @@ class PostProcessor:
             quality: Quality preset (fast, balanced, quality)
             progress_callback: Optional callback for progress updates
             remove_original: Whether to delete the original file after transcoding
+            expected_duration_seconds: Scheduled length used to reject broken
+                FFprobe duration values.
+            status_callback: Called when a remux falls back to full encoding.
 
         Returns:
             Path to the transcoded file
@@ -1038,7 +1142,11 @@ class PostProcessor:
             )
 
         # Run ffmpeg with progress
-        duration = await self._get_duration(input_path, log_callback=log_callback)
+        duration = await self._resolve_duration(
+            input_path,
+            expected_duration_seconds=expected_duration_seconds,
+            log_callback=log_callback,
+        )
         try:
             returncode, stderr = await self._run_ffmpeg_with_progress(
                 cmd,
@@ -1048,9 +1156,17 @@ class PostProcessor:
             )
             if returncode != 0:
                 if remux_only and output_format in [OutputFormat.MP4, OutputFormat.MKV]:
+                    fallback_message = (
+                        "Remux failed; re-encoding with "
+                        f"{self._encoder_description(hw_accel)}."
+                    )
                     await self._notify_log(
                         log_callback,
-                        "ffmpeg remux failed; retrying with full transcode (video+audio)."
+                        fallback_message,
+                    )
+                    await self._notify_status(
+                        status_callback,
+                        fallback_message,
                     )
                     if output_path.exists():
                         try:
@@ -1118,7 +1234,8 @@ class PostProcessor:
         input_path: str,
         ini_path: Optional[str] = None,
         log_callback: Optional[Callable[[str], None]] = None,
-        progress_callback: Optional[Callable[[float], None]] = None
+        progress_callback: Optional[Callable[[float], None]] = None,
+        hw_decode_mode: Optional[str] = None
     ) -> Optional[str]:
         """
         Run Comskip to detect commercials and generate EDL file.
@@ -1127,6 +1244,10 @@ class PostProcessor:
             input_path: Path to video file
             ini_path: Optional path to comskip.ini config file
             progress_callback: Optional callback for progress updates
+            hw_decode_mode: Hardware decode mode ('none', 'hwassist', 'nvidia').
+                Unknown values are treated as 'none'. If Comskip fails while a
+                hardware flag is set, it is retried once with software decode so
+                an unsupported flag can never lose a recording.
 
         Returns:
             Path to the EDL file, or None if no commercials detected
@@ -1137,8 +1258,17 @@ class PostProcessor:
         input_file = Path(input_path)
         output_dir = input_file.parent
 
-        async def run_comskip_once(source_path: str, progress_prefix: str = "Comskip") -> tuple[int, str]:
+        requested_hw_mode = normalize_comskip_hw_decode_mode(hw_decode_mode)
+        hw_flag = comskip_hw_decode_flag(requested_hw_mode)
+
+        async def run_comskip_once(
+            source_path: str,
+            progress_prefix: str = "Comskip",
+            hardware_flag: Optional[str] = None
+        ) -> tuple[int, str]:
             cmd = [self._comskip_path]
+            if hardware_flag:
+                cmd.append(hardware_flag)
             if ini_path:
                 ini_file = Path(ini_path)
                 if not ini_file.is_file():
@@ -1159,9 +1289,14 @@ class PostProcessor:
                 str(source_path)
             ])
 
+            # The flag itself is in cmd, so the existing log line stays
+            # byte-for-byte unchanged for anyone who has not opted in.
+            mode_note = (
+                f" [hardware decode: {requested_hw_mode}]" if hardware_flag else ""
+            )
             await self._notify_log(
                 log_callback,
-                f"{progress_prefix} cmd: {' '.join(str(c) for c in cmd)}"
+                f"{progress_prefix} cmd:{mode_note} {' '.join(str(c) for c in cmd)}"
             )
 
             process = await asyncio.create_subprocess_exec(
@@ -1250,7 +1385,29 @@ class PostProcessor:
             prep_returncode = prep_process.returncode if prep_process.returncode is not None else -1
             return prep_returncode, prep_stderr or b""
 
-        returncode, combined_output = await run_comskip_once(input_path)
+        returncode, combined_output = await run_comskip_once(
+            input_path, hardware_flag=hw_flag
+        )
+
+        # Safety net: a hardware flag this build or machine does not support must
+        # never cost a recording. One silent retry on software decode first.
+        if (
+            hw_flag
+            and returncode != 0
+            and not _is_no_commercials_result(returncode, combined_output)
+        ):
+            await self._notify_log(
+                log_callback,
+                f"Comskip failed (exit {returncode}) with hardware decode "
+                f"'{requested_hw_mode}' ({hw_flag}); retrying with software decode."
+            )
+            hw_flag = None
+            returncode, combined_output = await run_comskip_once(
+                input_path,
+                progress_prefix="Comskip retry (software decode)",
+                hardware_flag=None
+            )
+
         active_input_file = input_file
         temp_probe_file: Optional[Path] = None
 
@@ -1312,6 +1469,9 @@ class PostProcessor:
 
                 if prep_returncode == 0:
                     active_input_file = temp_probe_file
+                    # Deliberately software: this retry already exists because
+                    # the first attempt failed, so it must not reintroduce a
+                    # hardware flag.
                     returncode, combined_output = await run_comskip_once(
                         str(temp_probe_file),
                         progress_prefix="Comskip retry"
@@ -1379,7 +1539,9 @@ class PostProcessor:
         progress_callback: Optional[Callable[[float], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
         remux_only: bool = False,
-        render_device: Optional[str] = None
+        render_device: Optional[str] = None,
+        expected_duration_seconds: Optional[float] = None,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         Remove commercials from video using EDL file.
@@ -1390,6 +1552,9 @@ class PostProcessor:
             output_format: Output format
             hw_accel: Hardware acceleration method
             remove_original: Whether to delete original after processing
+            expected_duration_seconds: Scheduled length used to reject broken
+                FFprobe duration values.
+            status_callback: Called when a remux falls back to full encoding.
 
         Returns:
             Path to the commercial-free video
@@ -1412,7 +1577,9 @@ class PostProcessor:
                 log_callback=log_callback,
                 remove_original=remove_original,
                 remux_only=remux_only,
-                render_device=render_device
+                render_device=render_device,
+                expected_duration_seconds=expected_duration_seconds,
+                status_callback=status_callback,
             )
             self._cleanup_comskip_outputs(input_path, edl_path)
             return output
@@ -1431,18 +1598,28 @@ class PostProcessor:
                 except Exception:
                     pass
 
-        # Get video duration
-        duration = await self._get_duration(input_path, log_callback=log_callback)
+        # Get video duration. Cutting needs the file's real length to place the
+        # last boundary, so a missing ffprobe reading skips the cut rather than
+        # falling back to the scheduled length: that is a guess about the file,
+        # and cutting against a guess risks removing the wrong parts.
+        probed_duration = await self._get_duration(input_path, log_callback=log_callback)
+        if probed_duration <= 0:
+            self._cleanup_comskip_outputs(input_path, edl_path)
+            raise CommercialRemovalSkipped(
+                "Commercial removal skipped: ffprobe could not measure the "
+                "recording's length, so it was kept uncut rather than risk "
+                "cutting the wrong parts. Make sure ffprobe is installed "
+                "alongside ffmpeg."
+            )
+        duration = await self._sanity_check_duration(
+            probed_duration,
+            expected_duration_seconds=expected_duration_seconds,
+            log_callback=log_callback,
+        )
         await self._notify_log(
             log_callback,
             f"Commercial removal: duration={duration:.3f}s"
         )
-        if duration <= 0:
-            raise Exception(
-                "Commercial removal requires ffprobe to determine video duration, "
-                "but ffprobe was not found or returned no duration. "
-                "Please ensure ffprobe is installed alongside ffmpeg."
-            )
 
         # Build keep segments (inverse of commercial segments)
         keep_segments = self._invert_segments(segments, duration)
@@ -1460,7 +1637,9 @@ class PostProcessor:
                 log_callback=log_callback,
                 remove_original=remove_original,
                 remux_only=remux_only,
-                render_device=render_device
+                render_device=render_device,
+                expected_duration_seconds=expected_duration_seconds,
+                status_callback=status_callback,
             )
             self._cleanup_comskip_outputs(input_path, edl_path)
             return output
@@ -1593,9 +1772,17 @@ class PostProcessor:
 
             if returncode != 0:
                 if remux_only and output_format in [OutputFormat.MP4, OutputFormat.MKV]:
+                    fallback_message = (
+                        "Remux failed; re-encoding with "
+                        f"{self._encoder_description(hw_accel)}."
+                    )
                     await self._notify_log(
                         log_callback,
-                        "ffmpeg concat remux failed; retrying with full transcode (video+audio)."
+                        fallback_message,
+                    )
+                    await self._notify_status(
+                        status_callback,
+                        fallback_message,
                     )
                     if work_output_path.exists():
                         try:
@@ -1927,6 +2114,92 @@ class PostProcessor:
 
         return keep_segments
 
+    async def trim_buffer_tail(
+        self,
+        input_path: str,
+        expected_seconds: float,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> bool:
+        """Keep the beginning of a long recording, replacing only validated output.
+
+        The caller must first authorize this using the original raw analysis.
+        Re-probing here makes recovery safe after a successful atomic replace
+        that happened before the processing job's database commit.
+        """
+        current = analyze_duration(
+            expected_seconds, await self._get_duration(input_path, log_callback)
+        )
+        if current.status == "matched":
+            await self._notify_log(log_callback, "Buffer trim: the file already matches the requested length.")
+            return False
+        if current.status != "long":
+            raise RuntimeError("The current file has no reliably measured excess tail; it was kept unchanged.")
+
+        ffmpeg = self.get_ffmpeg_path()
+        ffprobe = self._resolve_ffprobe_path()
+        if not ffmpeg or not ffprobe:
+            raise RuntimeError("Buffer trimming requires FFmpeg and ffprobe; the original was kept.")
+
+        source = Path(input_path)
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{source.stem}.buffer-trim-", suffix=source.suffix, dir=source.parent
+        )
+        os.close(descriptor)
+        candidate = Path(temporary_path)
+        try:
+            # No seek or leading cut: -t bounds only the output's end. Initial
+            # non-key packets must survive when a TS starts mid-GOP. Mapping
+            # every stream avoids silently dropping audio/subtitle tracks.
+            #
+            # -dts_delta_threshold 1: -t counts by the clock in the file, and
+            # provider files sometimes skip that clock ahead by a few seconds.
+            # FFmpeg only closes skips over 10s by default, so a smaller one
+            # made the file measure long and the cut then removed real
+            # footage to "fix" it. Closing every skip over 1s makes -t count
+            # footage, so only a genuinely extra tail is removed.
+            result = await self._runner.run_capture([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-dts_delta_threshold", "1",
+                "-i", str(source), "-map", "0", "-c", "copy", "-copyinkf",
+                "-t", f"{expected_seconds:.6f}", "-y", str(candidate),
+            ])
+            if result.timed_out or result.returncode != 0:
+                detail = result.stderr_text.strip()[-500:]
+                raise RuntimeError(f"FFmpeg could not trim the buffer{': ' + detail if detail else '.'}")
+            if not candidate.is_file() or candidate.stat().st_size == 0:
+                raise RuntimeError("Buffer trimming produced no usable file.")
+
+            probe = await self._runner.run_capture([
+                ffprobe, "-v", "error", "-print_format", "json",
+                "-show_entries", "format=duration:stream=codec_type", str(candidate),
+            ], timeout=self.FFPROBE_TIMEOUT_SECONDS)
+            if probe.timed_out or probe.returncode != 0:
+                raise RuntimeError("The trimmed file could not be verified by ffprobe.")
+            try:
+                media = json.loads(probe.stdout_text)
+                measured = float(media.get("format", {}).get("duration", 0))
+                has_media = any(
+                    stream.get("codec_type") in ("audio", "video")
+                    for stream in media.get("streams", [])
+                )
+            except (ValueError, TypeError, AttributeError):
+                raise RuntimeError("ffprobe returned invalid data for the trimmed file.")
+            if not has_media or analyze_duration(expected_seconds, measured).status != "matched":
+                raise RuntimeError("The trimmed file did not pass the stream and duration checks.")
+
+            shutil.copymode(source, candidate)
+            os.replace(candidate, source)
+            await self._notify_log(
+                log_callback,
+                f"Buffer trim complete: kept {measured:.1f}s of the requested {expected_seconds:.1f}s "
+                "including padding; removed only the excess tail.",
+            )
+            return True
+        finally:
+            # Cancellation and all validation failures clean only our own temp.
+            # The original is untouched until the successful atomic replacement.
+            self._remove_partial_output(candidate)
+
     async def _get_duration(
         self,
         input_path: str,
@@ -1978,6 +2251,75 @@ class PostProcessor:
         except ValueError:
             await self._notify_log(log_callback, "ffprobe returned invalid duration.")
             return 0
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        total_seconds = max(0, int(round(seconds)))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m"
+        if minutes:
+            return f"{minutes}m {secs}s"
+        return f"{secs}s"
+
+    async def _resolve_duration(
+        self,
+        input_path: str,
+        expected_duration_seconds: Optional[float] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> float:
+        """Use the schedule when ffprobe returns an impossible IPTV duration.
+
+        MPEG-TS timestamps wrap about every 26.5 hours and provider streams can
+        contain timestamp resets. ffprobe may therefore report a one-hour file
+        as roughly 26 hours long, making progress appear stuck and extending
+        commercial-removal segment boundaries far beyond the recording.
+        """
+        probed_duration = await self._get_duration(input_path, log_callback=log_callback)
+        return await self._sanity_check_duration(
+            probed_duration,
+            expected_duration_seconds=expected_duration_seconds,
+            log_callback=log_callback,
+        )
+
+    async def _sanity_check_duration(
+        self,
+        probed_duration: float,
+        expected_duration_seconds: Optional[float] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> float:
+        """Check an ffprobe duration against the scheduled recording length."""
+        try:
+            expected_duration = float(expected_duration_seconds or 0)
+        except (TypeError, ValueError):
+            expected_duration = 0
+        if expected_duration <= 0:
+            return probed_duration
+
+        if probed_duration <= 0:
+            await self._notify_log(
+                log_callback,
+                "ffprobe duration is unavailable; using the scheduled recording length "
+                f"({self._format_duration(expected_duration)}).",
+            )
+            return expected_duration
+
+        # Provider URLs request a fixed recording length. Allow normal timestamp
+        # slop, but reject a probe that is either more than twice the schedule or
+        # over 30 minutes longer (whichever threshold is reached first).
+        maximum_reasonable = min(expected_duration * 2, expected_duration + 1800)
+        if probed_duration > maximum_reasonable:
+            await self._notify_log(
+                log_callback,
+                "ffprobe reported an implausible duration "
+                f"({self._format_duration(probed_duration)}) for a scheduled "
+                f"{self._format_duration(expected_duration)} recording; using the "
+                "scheduled length for progress and segment boundaries.",
+            )
+            return expected_duration
+
+        return probed_duration
 
     async def probe_media_integrity(
         self,

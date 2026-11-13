@@ -27,6 +27,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   IconTrash,
   IconAlertCircle,
+  IconAlertTriangle,
   IconCheck,
   IconX,
   IconClock,
@@ -113,6 +114,7 @@ function getStatusBadge(status) {
     completed: { color: 'green', icon: IconCheck, label: 'Completed' },
     failed: { color: 'red', icon: IconX, label: 'Failed' },
     cancelled: { color: 'orange', icon: IconX, label: 'Cancelled' },
+    interrupted: { color: 'grape', icon: IconAlertTriangle, label: 'Interrupted' },
     paused_low_space: { color: 'yellow', icon: IconAlertCircle, label: 'Paused — low space' },
   }
 
@@ -749,7 +751,7 @@ export default function Scheduled() {
   ) || []).sort((a, b) => new Date(a.program_start || 0) - new Date(b.program_start || 0))
 
   const historySchedules = localItems?.filter((s) =>
-    ['completed', 'failed', 'cancelled'].includes(s.status)
+    ['completed', 'failed', 'cancelled', 'interrupted'].includes(s.status)
   ) || []
   const filteredHistorySchedules = historyFilter === 'all'
     ? historySchedules
@@ -1082,6 +1084,7 @@ export default function Scheduled() {
                   { value: 'completed', label: 'Completed' },
                   { value: 'failed', label: 'Failed' },
                   { value: 'cancelled', label: 'Cancelled' },
+                  { value: 'interrupted', label: 'Interrupted' },
                 ]}
                 style={{ alignSelf: 'flex-start' }}
               />

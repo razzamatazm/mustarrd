@@ -31,7 +31,9 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 import DownloadPlayer from './pages/DownloadPlayer'
 import Onboarding from './pages/Onboarding'
+import NotificationBell from './components/NotificationBell'
 import { authApi, downloadsApi, epgApi, onboardingApi, createDownloadWebSocket } from './api'
+import { TERMINAL_DOWNLOAD_STATUSES } from './constants/downloadStatus'
 
 function ProtectedRoute({ authStatus, authLoading }) {
   const location = useLocation()
@@ -310,7 +312,7 @@ function App() {
     if (!authStatus?.authenticated) return undefined
     const ws = createDownloadWebSocket((data) => {
       if (data.type === 'progress') {
-        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        if (TERMINAL_DOWNLOAD_STATUSES.includes(data.status)) {
           setActiveDownloads((prev) => Math.max(0, prev - 1))
         }
       }
@@ -364,19 +366,22 @@ function App() {
           >
             MUSTARRD
           </Text>
-          <Group gap={5} align="center" style={{ visibility: activeDownloads > 0 ? 'visible' : 'hidden' }}>
-            <Box
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: '#fa5252',
-                animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
-              }}
-            />
-            <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
-              REC
-            </Text>
+          <Group gap={8} align="center" wrap="nowrap">
+            <Group gap={5} align="center" style={{ visibility: activeDownloads > 0 ? 'visible' : 'hidden' }}>
+              <Box
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#fa5252',
+                  animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
+                }}
+              />
+              <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
+                REC
+              </Text>
+            </Group>
+            {authStatus?.authenticated && isMobile ? <NotificationBell onNavigate={close} /> : null}
           </Group>
         </Group>
       </AppShell.Header>
@@ -395,22 +400,25 @@ function App() {
             >
               MUSTARRD
             </Text>
-            {activeDownloads > 0 && (
-              <Group gap={5} align="center">
-                <Box
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: '#fa5252',
-                    animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
-                  }}
-                />
-                <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
-                  REC
-                </Text>
-              </Group>
-            )}
+            <Group gap={8} align="center" wrap="nowrap">
+              {activeDownloads > 0 && (
+                <Group gap={5} align="center">
+                  <Box
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: '#fa5252',
+                      animation: 'mustarrd-rec-pulse 1.5s ease-in-out infinite',
+                    }}
+                  />
+                  <Text size="xs" fw={700} c="red" style={{ letterSpacing: '0.12em' }}>
+                    REC
+                  </Text>
+                </Group>
+              )}
+              {authStatus?.authenticated && !isMobile ? <NotificationBell /> : null}
+            </Group>
           </Group>
           <Divider mb={4} />
           {navItems.map((item) => (

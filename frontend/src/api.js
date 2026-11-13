@@ -128,6 +128,7 @@ export const downloadsApi = {
   create: (data) => request('/downloads', { method: 'POST', body: data }),
   cancel: (id) => request(`/downloads/${id}`, { method: 'DELETE' }),
   retry: (id) => request(`/downloads/${id}/retry`, { method: 'POST' }),
+  refreshPoster: (id) => request(`/downloads/${id}/poster/refresh`, { method: 'POST' }),
   previewFilename: (data) => request('/downloads/preview-filename', { method: 'POST', body: data }),
   diskSpace: () => request('/downloads/disk-space'),
   clearFinished: () => request('/downloads/finished', { method: 'DELETE' }),
@@ -216,6 +217,12 @@ export const settingsApi = {
   getTemplates: () => request('/settings/templates'),
   getTools: () => request('/settings/tools'),
   getFoldersStatus: () => request('/settings/folders/status'),
+  // apiKey is the key as typed; leave it out to check the saved one.
+  checkPosterArtKey: (apiKey) =>
+    request('/settings/poster-art/check-key', {
+      method: 'POST',
+      body: apiKey ? { api_key: apiKey } : {},
+    }),
 }
 
 // Authentication
@@ -288,6 +295,13 @@ export const onboardingApi = {
       body: { enabled, acknowledge_unavailable: acknowledgeUnavailable },
     }),
   dismiss: () => request('/onboarding/dismiss', { method: 'POST' }),
+}
+
+// Notification centre (the bell)
+export const notificationsApi = {
+  list: () => request('/notifications'),
+  dismiss: (id) => request(`/notifications/${id}/dismiss`, { method: 'POST' }),
+  dismissAll: () => request('/notifications/dismiss-all', { method: 'POST' }),
 }
 
 // Backend Logs

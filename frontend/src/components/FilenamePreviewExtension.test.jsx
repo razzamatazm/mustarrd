@@ -19,6 +19,7 @@ vi.mock('../api', () => ({
     getPublic: vi.fn().mockResolvedValue({
       default_pre_padding_minutes: 1,
       default_post_padding_minutes: 5,
+      scheduled_download_delay_minutes: 7,
     }),
   },
 }))
@@ -65,5 +66,15 @@ describe('recording filename previews', () => {
     // Mantine's Select renders a hidden input alongside the visible one, so
     // match the visible field by its displayed value rather than the label.
     expect(screen.getByDisplayValue('Keep recordings forever')).toBeInTheDocument()
+  })
+
+  it('includes the scheduled download delay in the expected start time', async () => {
+    renderWithQuery(
+      <ScheduleModal opened onClose={() => {}} program={program} channel={channel} accountId="1" />
+    )
+
+    expect(
+      await screen.findByText(/Expected start: Aug 18, 2026 9:12 PM\./)
+    ).toBeTruthy()
   })
 })

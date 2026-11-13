@@ -4,11 +4,12 @@ import aiofiles
 import errno
 import glob as glob_module
 import logging
+import math
 import os
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Callable, Dict, Set, Any
+from typing import Optional, Callable, Dict, List, Set, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
@@ -18,15 +19,54 @@ from database import async_session_maker
 from services.log_stream import backend_log_stream
 from services.credential_crypto import credential_crypto
 from services.disk_space import get_free_space_shortfall
+from services import nfo_writer
+from services.download_analysis import DURATION_ANALYSIS_STATUSES, DurationAnalysis, analyze_duration
+from download_retry_window import (
+    TRANSIENT_RETRY_LIMIT,  # noqa: F401 - re-exported; tests pin the default against it
+    resolve_retry_window_seconds,
+    retry_delays_for_window,
+)
 from services.plex_service import plex_service
+from services.provider_http import provider_request_headers
+from services.recording_events import (
+    POSTPROCESSING_COMPLETED,
+    RECORDING_CANCELLED,
+    RECORDING_COMPLETED,
+    RECORDING_FAILED,
+    RECORDING_STARTED,
+    RecordingEvent,
+    recording_events,
+)
+from services.xtream_client import (
+    other_timeshift_style,
+    restyle_timeshift_url,
+    timeshift_style_is_automatic,
+    timeshift_style_of_url,
+)
 
 logger = logging.getLogger(__name__)
 
 # Bounded retry for transient network errors mid-download. A single provider
 # hiccup (connection reset, read timeout) should not permanently fail the
 # download; each retry resumes from the bytes already on disk via HTTP Range.
-TRANSIENT_RETRY_LIMIT = 3  # retries after the initial attempt
-TRANSIENT_RETRY_BACKOFF_SECONDS = 5.0  # base delay, multiplied by attempt number
+# How long that goes on is the user's retry window: see
+# download_retry_window.py, where TRANSIENT_RETRY_LIMIT now lives as
+# the constant the default window is worked out from.
+
+# A recording that is usable but suspect is a completion, not a failure. The
+# prefix is how that is written to ``error_message``; the seam reads it back
+# out into the event payload's ``warning`` field.
+COMPLETED_WITH_WARNINGS_PREFIX = "Completed with warnings: "
+
+# The extra fields on the WebSocket frame for "queued for post-processing",
+# which four paths reach: a fresh download, an interrupted one, and two
+# restart-recovery branches.
+QUEUED_FOR_POST_PROCESSING_FRAME = {
+    "progress": 0.0,
+    "message": "Queued for post-processing...",
+    "indeterminate": False,
+    "download_progress": 100.0,
+}
 
 # Default minimum free space to preserve when the AppSettings row has no value;
 # matches the default used by services.disk_space.check_disk_space.
@@ -44,11 +84,26 @@ CHUNKED_PROGRESS_INTERVAL_BYTES = 8 * 1024 * 1024
 DOWNLOAD_READ_BUFFER_BYTES = 4 * 1024 * 1024
 
 
+class ProviderStatusError(Exception):
+    """The provider refused the request with a status we cannot stream.
+
+    Raised only where the response headers are in hand and nothing has been
+    written to disk, which is what lets the catchup URL-style fallback retry
+    the same recording in the other form. The message is deliberately identical
+    to the plain ``Exception("HTTP ...")`` it replaced.
+    """
+
+    def __init__(self, status, reason):
+        super().__init__(f"HTTP {status}: {reason}")
+        self.status = status
+        self.reason = reason
+
+
 def _is_transient_network_error(e: BaseException) -> bool:
     """True for network-level errors worth retrying (disconnects, timeouts).
 
-    HTTP status errors are raised by _download_file_once as plain
-    ``Exception("HTTP ...")`` and disk errors (e.g. ENOSPC) are plain
+    HTTP status errors are raised by _download_file_once as
+    ``ProviderStatusError`` and disk errors (e.g. ENOSPC) are plain
     ``OSError``, so neither matches here: they fail fast.
     """
     if isinstance(e, asyncio.TimeoutError):
@@ -89,6 +144,31 @@ def _friendly_error(e: Exception) -> str:
     return msg
 
 
+class TransitionBatch:
+    """Events staged by transitions that share a single commit.
+
+    Restart recovery writes many rows and commits once at the end. A helper
+    that published as it went would announce transitions that a failed commit
+    then rolled back, so it stages its events here instead and the caller
+    publishes the batch once its commit succeeds -- or drops the whole batch
+    if it does not.
+    """
+
+    def __init__(self) -> None:
+        self.events: List[RecordingEvent] = []
+
+    def stage(self, events: List[RecordingEvent]) -> None:
+        self.events.extend(events)
+
+    def publish_all(self) -> None:
+        for event in self.events:
+            recording_events.publish_event(event)
+        self.events.clear()
+
+    def discard(self) -> None:
+        self.events.clear()
+
+
 class DownloadManager:
     def __init__(self):
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -106,6 +186,11 @@ class DownloadManager:
         self._max_concurrent_post_processing = 1
         self._running = False
         self._loop_error_logged_at: Dict[str, datetime] = {}
+        # Downloads requeued by restart recovery. Consumed by the transition
+        # into DOWNLOADING so the event it publishes can say it came from
+        # recovery; whether a restart should ping the user again is the
+        # subscriber's policy, not ours.
+        self._recovered_download_ids: Set[int] = set()
 
     def set_max_concurrent(self, max_concurrent: int):
         try:
@@ -209,7 +294,8 @@ class DownloadManager:
         if status in [
             DownloadStatus.COMPLETED.value,
             DownloadStatus.FAILED.value,
-            DownloadStatus.CANCELLED.value
+            DownloadStatus.CANCELLED.value,
+            DownloadStatus.INTERRUPTED.value
         ]:
             self._stage_progress.pop(download_id, None)
             self._download_owners.pop(download_id, None)
@@ -259,24 +345,341 @@ class DownloadManager:
         indeterminate: bool = False,
         **extra
     ):
-        """Update processing status/progress and broadcast to clients."""
+        """Re-assert PROCESSING as post-processing ticks along.
+
+        Part of the transition-helper family -- it writes ``Download.status``
+        -- but not a lifecycle transition: the row is already PROCESSING and
+        this is the progress heartbeat, so it publishes nothing. It takes an
+        id rather than an ORM instance because that is all its callers have.
+        """
         await session.execute(
             update(Download)
             .where(Download.id == download_id)
-            .values(
-                status=DownloadStatus.PROCESSING.value,
-                progress=progress
-            )
+            .values(status=DownloadStatus.PROCESSING.value, progress=progress)
         )
-        await session.commit()
+        await self._finish_transition(
+            session,
+            [],
+            download_id=download_id,
+            status=DownloadStatus.PROCESSING.value,
+            frame={
+                "progress": progress,
+                "message": message,
+                "indeterminate": indeterminate,
+                **extra,
+            },
+        )
 
-        await self._broadcast_progress(
-            download_id,
-            progress,
-            DownloadStatus.PROCESSING.value,
-            message=message,
-            indeterminate=indeterminate,
-            **extra
+    # ------------------------------------------------------------------
+    # State transitions
+    #
+    # These helpers are the only writers of ``Download.status``. (The two row
+    # constructors in ``download_builder`` and ``vod_service`` start a fresh
+    # row at PENDING; that is creating a recording, not moving one.)
+    #
+    # Each helper performs one transition end to end: write the row, sync any
+    # linked schedule, commit, push the existing WebSocket frame, publish the
+    # lifecycle event. Publication happens after a successful commit, inside
+    # the helper, so no call site can announce a change that then rolls back
+    # -- the class of bug ``tests/test_dispatch_rollback_expiry.py`` guards
+    # against. No call site can get the ordering wrong because no call site
+    # does the ordering.
+    #
+    # ``batch`` defers the commit to the caller (restart recovery writes many
+    # rows behind one commit); the events are staged and published as a unit
+    # once that commit lands.
+    #
+    # ``frame=None`` means the call site keeps its own WebSocket frame. Three
+    # error handlers broadcast whether or not there is a row left to
+    # transition, so their frame cannot move inside the helper without
+    # changing what the Downloads page sees.
+    # ------------------------------------------------------------------
+
+    def _event_payload(
+        self,
+        download: Download,
+        *,
+        recovered: bool = False,
+        post_processed: bool = False,
+        warning: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build the recording payload for an event.
+
+        ``to_dict()`` deliberately omits ``source_url``: the provider URL
+        embeds the account username and password, and a subscriber may forward
+        an event straight off the box. Building the payload must also never be
+        able to fail a recording, so an unreadable row yields an empty payload
+        rather than raising into the pipeline.
+        """
+        try:
+            payload = download.to_dict()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            payload = {}
+        # The poster is an in-app path that needs a signed-in browser, and it
+        # is looked up after this event is sent. It means nothing off the box.
+        payload.pop("poster", None)
+        payload["recovered"] = bool(recovered)
+        payload["post_processed"] = bool(post_processed)
+        payload["warning"] = warning
+        return payload
+
+    async def _finish_transition(
+        self,
+        session: AsyncSession,
+        events: List[RecordingEvent],
+        *,
+        download_id: Optional[int] = None,
+        status: Optional[str] = None,
+        frame: Optional[dict] = None,
+        batch: Optional["TransitionBatch"] = None,
+        swallow_commit_errors: bool = False,
+    ) -> bool:
+        """Commit the staged row write, broadcast, then publish.
+
+        ``frame`` holds only the parts of the WebSocket message the call site
+        knows that the helper does not -- progress and any message, error or
+        stage extras. The download id and the status come from the transition
+        itself, so no call site can broadcast a status it did not write.
+
+        Returns whether the transition survived: committed, or staged into a
+        batch whose commit the caller owns. Nothing is published for a
+        transition that did not commit.
+        """
+        if batch is not None:
+            batch.stage(events)
+            committed = True
+        else:
+            try:
+                await session.commit()
+                committed = True
+            except Exception:
+                if not swallow_commit_errors:
+                    raise
+                committed = False
+
+        if frame is not None:
+            extras = {k: v for k, v in frame.items() if k != "progress"}
+            await self._broadcast_progress(
+                download_id, frame.get("progress", 0), status, **extras
+            )
+
+        if committed and batch is None:
+            for event in events:
+                recording_events.publish_event(event)
+        return committed
+
+    async def _transition_downloading(
+        self,
+        session: AsyncSession,
+        download: Download,
+        *,
+        batch: Optional["TransitionBatch"] = None,
+    ) -> bool:
+        """The capture started. Publishes ``recording.started``."""
+        download.status = DownloadStatus.DOWNLOADING.value
+        download.progress = 0.0
+        download.downloaded_bytes = 0
+        recovered = download.id in self._recovered_download_ids
+        self._recovered_download_ids.discard(download.id)
+        events = [
+            recording_events.build(
+                RECORDING_STARTED, self._event_payload(download, recovered=recovered)
+            )
+        ]
+        return await self._finish_transition(
+            session,
+            events,
+            download_id=download.id,
+            status=DownloadStatus.DOWNLOADING.value,
+            frame={"progress": 0},
+            batch=batch,
+        )
+
+    async def _transition_processing(
+        self,
+        session: AsyncSession,
+        download: Download,
+        *,
+        progress: float = 0.0,
+        frame: Optional[dict] = None,
+        batch: Optional["TransitionBatch"] = None,
+    ) -> bool:
+        """Queued for, or running, post-processing.
+
+        No lifecycle event: the recording has not reached a terminal state,
+        and "post-processing started" is a second name for a fact subscribers
+        already have from ``recording.started``.
+        """
+        download.status = DownloadStatus.PROCESSING.value
+        download.progress = progress
+        return await self._finish_transition(
+            session,
+            [],
+            download_id=download.id,
+            status=DownloadStatus.PROCESSING.value,
+            frame=frame,
+            batch=batch,
+        )
+
+    async def _transition_pending(
+        self,
+        session: AsyncSession,
+        download: Download,
+        *,
+        schedule_status: Optional[str] = None,
+        batch: Optional["TransitionBatch"] = None,
+    ) -> bool:
+        """Back to the queue -- restart recovery, or a user retry.
+
+        No event of its own: the ``recording.started`` that follows carries the
+        news, and its ``retry_count`` says which attempt it is.
+        """
+        download.status = DownloadStatus.PENDING.value
+        if schedule_status is not None:
+            await self._sync_schedule_status(session, download.id, schedule_status)
+        return await self._finish_transition(session, [], batch=batch)
+
+    async def _transition_completed(
+        self,
+        session: AsyncSession,
+        download: Download,
+        *,
+        status: Optional[str] = None,
+        completed_path: Optional[str] = None,
+        warning: Optional[str] = None,
+        post_processed: bool = False,
+        recovered: bool = False,
+        frame: Optional[dict] = None,
+        batch: Optional["TransitionBatch"] = None,
+    ) -> bool:
+        """The recording finished with a file worth keeping.
+
+        ``status`` is the terminal status the call site computed with
+        ``_terminal_status_for()``: COMPLETED, or INTERRUPTED for a capture
+        that stopped early. Both publish ``recording.completed``. An
+        interrupted recording takes the whole completed path -- post-
+        processing, the move to the completed folder, the NFO sidecar, the
+        Plex refresh -- and leaves a playable file; the only difference is
+        that it is short. A sixth event name would mean every subscriber had
+        to learn two names to hear "a file landed", and one written against
+        the five would silently ignore every recording from a flaky provider.
+        The payload says which: ``status`` and ``interruption_reason``.
+
+        Warnings ride in the payload for the same reason: a marginal but
+        usable recording is a completion, not a failure.
+
+        ``post_processed`` adds a ``postprocessing.completed`` immediately
+        before the completion, for consumers that care that Comskip or FFmpeg
+        actually ran.
+        """
+        status = status or DownloadStatus.COMPLETED.value
+        if completed_path:
+            download.output_path = completed_path
+        download.status = status
+        download.progress = 100.0
+        if not download.completed_at:
+            download.completed_at = datetime.utcnow()
+        download.error_message = (
+            f"{COMPLETED_WITH_WARNINGS_PREFIX}{warning}" if warning else None
+        )
+        await self._sync_schedule_status(session, download.id, status)
+        payload = self._event_payload(
+            download,
+            recovered=recovered,
+            post_processed=post_processed,
+            warning=warning,
+        )
+        events = []
+        if post_processed:
+            events.append(recording_events.build(POSTPROCESSING_COMPLETED, payload))
+        events.append(recording_events.build(RECORDING_COMPLETED, payload))
+        return await self._finish_transition(
+            session,
+            events,
+            download_id=download.id,
+            status=status,
+            frame=frame,
+            batch=batch,
+        )
+
+    async def _transition_failed(
+        self,
+        session: AsyncSession,
+        download: Download,
+        error_message: Optional[str],
+        *,
+        recovered: bool = False,
+        frame: Optional[dict] = None,
+        batch: Optional["TransitionBatch"] = None,
+        swallow_commit_errors: bool = False,
+    ) -> bool:
+        """The recording failed. Publishes ``recording.failed`` immediately.
+
+        Every transition into FAILED publishes, with no notion of
+        "permanently failed": auto-retry is off by default and gives up in an
+        in-memory set that a restart loses, so "final" is not observable here.
+        A recording that fails and is later retried into success publishes
+        both, in order, with ``retry_count`` telling them apart.
+        """
+        download.status = DownloadStatus.FAILED.value
+        if not download.completed_at:
+            download.completed_at = datetime.utcnow()
+        download.error_message = error_message
+        self._recovered_download_ids.discard(download.id)
+        await self._sync_schedule_status(
+            session, download.id, DownloadStatus.FAILED.value
+        )
+        events = [
+            recording_events.build(
+                RECORDING_FAILED, self._event_payload(download, recovered=recovered)
+            )
+        ]
+        return await self._finish_transition(
+            session,
+            events,
+            download_id=download.id,
+            status=DownloadStatus.FAILED.value,
+            frame=frame,
+            batch=batch,
+            swallow_commit_errors=swallow_commit_errors,
+        )
+
+    async def _transition_cancelled(
+        self,
+        session: AsyncSession,
+        download: Download,
+        *,
+        frame: Optional[dict] = None,
+        batch: Optional["TransitionBatch"] = None,
+    ) -> bool:
+        """The user stopped the recording. Publishes ``recording.cancelled``.
+
+        A cancelled recording neither completes nor fails; without this event
+        a subscriber cannot tell a cancellation from one still in flight.
+
+        A cancel can reach the row twice -- ``cancel_download`` writes
+        CANCELLED for a running task and that task's ``CancelledError``
+        handler writes it again on its own session. Both are reported. The
+        seam reports transitions rather than deduplicating them; suppressing a
+        repeat is subscriber policy.
+        """
+        download.status = DownloadStatus.CANCELLED.value
+        self._recovered_download_ids.discard(download.id)
+        await self._sync_schedule_status(
+            session, download.id, DownloadStatus.CANCELLED.value
+        )
+        events = [
+            recording_events.build(RECORDING_CANCELLED, self._event_payload(download))
+        ]
+        return await self._finish_transition(
+            session,
+            events,
+            download_id=download.id,
+            status=DownloadStatus.CANCELLED.value,
+            frame=frame,
+            batch=batch,
         )
 
     async def find_active_output_conflicts(self, session: AsyncSession, output_paths: list) -> list:
@@ -346,7 +749,11 @@ class DownloadManager:
             return False
         if not settings:
             return False
-        return settings.transcode_enabled or settings.comskip_enabled
+        return (
+            settings.transcode_enabled
+            or settings.comskip_enabled
+            or getattr(settings, "trim_dispatcharr_buffer", False) is True
+        )
 
     def _processed_output_candidates(self, input_path: str, settings: Optional[AppSettings]) -> list[str]:
         input_file = Path(input_path)
@@ -548,6 +955,10 @@ class DownloadManager:
 
             recovered_download_ids: list[int] = []
             recovered_post_ids: list[int] = []
+            # Every status write below shares the single commit at the end of
+            # this function, so the events are staged and published as one
+            # batch once that commit lands -- or dropped with it.
+            batch = TransitionBatch()
 
             for download in downloads:
                 input_path = download.output_path
@@ -581,32 +992,32 @@ class DownloadManager:
                         is_complete = False
 
                     if is_complete:
+                        await self._analyze_downloaded_file(download)
                         if self._needs_post_processing(download, settings):
-                            download.status = DownloadStatus.PROCESSING.value
-                            download.progress = 0.0
                             recovered_post_ids.append(download.id)
-                            await self._broadcast_progress(
-                                download.id,
-                                0.0,
-                                DownloadStatus.PROCESSING.value,
-                                message="Queued for post-processing...",
-                                indeterminate=False,
-                                download_progress=100.0,
+                            await self._transition_processing(
+                                session,
+                                download,
+                                frame=QUEUED_FOR_POST_PROCESSING_FRAME,
+                                batch=batch,
                             )
                             await self._broadcast_log(download.id, "Recovered after restart: queued for post-processing.")
                         else:
                             completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
-                            download.status = DownloadStatus.COMPLETED.value
-                            download.progress = 100.0
-                            if not download.completed_at:
-                                download.completed_at = datetime.utcnow()
-                            download.error_message = None
-                            await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
+                            await self._write_nfo_sidecar(download, completed_path, settings)
+                            terminal_status = self._terminal_status_for(download)
+                            await self._transition_completed(
+                                session,
+                                download,
+                                status=terminal_status,
+                                recovered=True,
+                                batch=batch,
+                            )
                             await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
-                    download.status = DownloadStatus.PENDING.value
+                    await self._transition_pending(session, download, batch=batch)
                     download.progress = 0.0
                     if download.file_size == 0 and input_file.is_file():
                         try:
@@ -622,6 +1033,10 @@ class DownloadManager:
                     continue
 
                 if download.status == DownloadStatus.PROCESSING.value:
+                    # A legacy processing row may already point at media that
+                    # Commercial Skip transformed. Missing raw evidence cannot
+                    # be reconstructed from that final file.
+                    await self._analyze_downloaded_file(download, raw_available=False)
                     # Only trust "file already in the completed folder" as proof
                     # that post-processing finished when the completed folder is
                     # distinct from the download folder. With equal folders the
@@ -631,18 +1046,26 @@ class DownloadManager:
                         and self._path_is_under(str(input_file), completed_folder)
                         and not (folders_equal and self._needs_post_processing(download, settings))
                     ):
-                        download.status = DownloadStatus.COMPLETED.value
-                        download.progress = 100.0
-                        if not download.completed_at:
-                            download.completed_at = datetime.utcnow()
-                        download.error_message = None
-                        await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
+                        await self._write_nfo_sidecar(download, str(input_file), settings)
+                        terminal_status = self._terminal_status_for(download)
+                        await self._transition_completed(
+                            session,
+                            download,
+                            status=terminal_status,
+                            # The row was PROCESSING and its file is already in
+                            # the completed folder, so post-processing ran.
+                            post_processed=self._needs_post_processing(download, settings),
+                            recovered=True,
+                            batch=batch,
+                        )
                         await self._broadcast_log(download.id, "Recovered after restart: marked completed.")
                         continue
 
                     if input_file.is_file():
                         if self._needs_post_processing(download, settings):
                             recovered_post_ids.append(download.id)
+                            # The row is already PROCESSING; this is a
+                            # re-announce, not a transition.
                             await self._broadcast_progress(
                                 download.id,
                                 0.0,
@@ -655,12 +1078,15 @@ class DownloadManager:
                         else:
                             completed_path = await self._move_to_completed_async(str(input_file), completed_folder, download_folder)
                             download.output_path = completed_path
-                            download.status = DownloadStatus.COMPLETED.value
-                            download.progress = 100.0
-                            if not download.completed_at:
-                                download.completed_at = datetime.utcnow()
-                            download.error_message = None
-                            await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
+                            await self._write_nfo_sidecar(download, completed_path, settings)
+                            terminal_status = self._terminal_status_for(download)
+                            await self._transition_completed(
+                                session,
+                                download,
+                                status=terminal_status,
+                                recovered=True,
+                                batch=batch,
+                            )
                             await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
@@ -668,21 +1094,26 @@ class DownloadManager:
                     processed_found = self._find_processed_output(input_path, settings)
                     if processed_found:
                         completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
-                        download.output_path = completed_path
-                        download.status = DownloadStatus.COMPLETED.value
-                        download.progress = 100.0
-                        if not download.completed_at:
-                            download.completed_at = datetime.utcnow()
-                        download.error_message = None
-                        await self._sync_schedule_status(session, download.id, DownloadStatus.COMPLETED.value)
+                        await self._write_nfo_sidecar(download, completed_path, settings)
+                        terminal_status = self._terminal_status_for(download)
+                        await self._transition_completed(
+                            session,
+                            download,
+                            status=terminal_status,
+                            completed_path=completed_path,
+                            recovered=True,
+                            batch=batch,
+                        )
                         await self._broadcast_log(download.id, "Recovered after restart: finalized completed output.")
                         continue
 
-                    download.status = DownloadStatus.FAILED.value
-                    if not download.completed_at:
-                        download.completed_at = datetime.utcnow()
-                    download.error_message = "Recovery failed: missing input file for post-processing."
-                    await self._sync_schedule_status(session, download.id, DownloadStatus.FAILED.value)
+                    await self._transition_failed(
+                        session,
+                        download,
+                        "Recovery failed: missing input file for post-processing.",
+                        recovered=True,
+                        batch=batch,
+                    )
                     await self._broadcast_log(download.id, download.error_message, level="error")
 
             if recovered_download_ids:
@@ -699,14 +1130,14 @@ class DownloadManager:
                         for dl_id in list(recovered_download_ids):
                             dl = download_by_id.get(dl_id)
                             if dl:
-                                dl.status = DownloadStatus.FAILED.value
-                                dl.error_message = (
+                                await self._transition_failed(
+                                    session,
+                                    dl,
                                     f"Disk space below minimum at startup "
-                                    f"({free_gb:.1f} GB free, {min_free_gb} GB required)."
+                                    f"({free_gb:.1f} GB free, {min_free_gb} GB required).",
+                                    recovered=True,
+                                    batch=batch,
                                 )
-                                if not dl.completed_at:
-                                    dl.completed_at = datetime.utcnow()
-                                await self._sync_schedule_status(session, dl.id, DownloadStatus.FAILED.value)
                                 await self._broadcast_log(
                                     dl_id,
                                     dl.error_message,
@@ -714,8 +1145,18 @@ class DownloadManager:
                                 )
                         recovered_download_ids.clear()
 
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception:
+                # Nothing was persisted, so nothing happened as far as a
+                # subscriber is concerned.
+                batch.discard()
+                raise
+            batch.publish_all()
 
+        # Tag the requeued rows so the recording.started each one publishes
+        # when it runs says it came from recovery.
+        self._recovered_download_ids.update(recovered_download_ids)
         for download_id in recovered_download_ids:
             await self._queue.put(download_id)
         for download_id in recovered_post_ids:
@@ -750,6 +1191,7 @@ class DownloadManager:
                     DownloadStatus.COMPLETED.value,
                     DownloadStatus.FAILED.value,
                     DownloadStatus.CANCELLED.value,
+                    DownloadStatus.INTERRUPTED.value,
                 ]:
                     return
 
@@ -764,25 +1206,18 @@ class DownloadManager:
 
                 # Preserve any recovered partial-file offset for Range resume attempt.
                 recovery_offset = download.downloaded_bytes or 0
+                self._reset_duration_analysis(download)
 
                 # Update status to downloading
-                download.status = DownloadStatus.DOWNLOADING.value
-                download.progress = 0.0
-                download.downloaded_bytes = 0
-                await session.commit()
-
-                await self._broadcast_progress(
-                    download_id, 0, DownloadStatus.DOWNLOADING.value
-                )
+                await self._transition_downloading(session, download)
                 await self._broadcast_log(
                     download_id,
                     f"Download started: {os.path.basename(download.output_path)}"
                 )
 
                 # Start download
-                downloaded_bytes = await self._download_file(
-                    download.source_url,
-                    download.output_path,
+                downloaded_bytes = await self._download_catchup_stream(
+                    download,
                     download_id,
                     session,
                     offset=recovery_offset,
@@ -794,22 +1229,16 @@ class DownloadManager:
                     )
                 transfer_complete = True
                 await self._broadcast_log(download_id, "Download transfer complete.")
+                await self._analyze_downloaded_file(download)
 
                 settings_result = await session.execute(select(AppSettings))
                 settings = settings_result.scalar_one_or_none()
 
                 if self._needs_post_processing(download, settings):
-                    download.status = DownloadStatus.PROCESSING.value
-                    download.progress = 0.0
-                    await session.commit()
-
-                    await self._broadcast_progress(
-                        download_id,
-                        0.0,
-                        DownloadStatus.PROCESSING.value,
-                        message="Queued for post-processing...",
-                        indeterminate=False,
-                        download_progress=100.0,
+                    await self._transition_processing(
+                        session,
+                        download,
+                        frame=QUEUED_FOR_POST_PROCESSING_FRAME,
                     )
                     await self._broadcast_log(download_id, "Queued for post-processing.")
                     await self._post_queue.put(download_id)
@@ -831,20 +1260,12 @@ class DownloadManager:
                         )
                     else:
                         msg = _friendly_error(move_err)
-                    download.status = DownloadStatus.FAILED.value
-                    if not download.completed_at:
-                        download.completed_at = datetime.utcnow()
-                    download.error_message = msg
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
-                    try:
-                        await session.commit()
-                    except Exception:
-                        pass
-                    await self._broadcast_progress(
-                        download_id,
-                        download.progress,
-                        DownloadStatus.FAILED.value,
-                        error=msg,
+                    await self._transition_failed(
+                        session,
+                        download,
+                        msg,
+                        frame={"progress": download.progress, "error": msg},
+                        swallow_commit_errors=True,
                     )
                     await self._broadcast_log(download_id, f"Download failed: {msg}", level="error")
                     return
@@ -852,18 +1273,15 @@ class DownloadManager:
                 moved_completed_path = completed_path
 
                 await self._store_recorded_duration(download, completed_path)
+                await self._write_nfo_sidecar(download, completed_path, settings)
                 integrity_warning = await self._integrity_check_warning(completed_path, settings)
-                download.status = DownloadStatus.COMPLETED.value
-                download.progress = 100.0
-                download.completed_at = datetime.utcnow()
-                download.error_message = (
-                    f"Completed with warnings: {integrity_warning}" if integrity_warning else None
-                )
-                await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                await session.commit()
-
-                await self._broadcast_progress(
-                    download_id, 100, DownloadStatus.COMPLETED.value
+                terminal_status = self._terminal_status_for(download)
+                await self._transition_completed(
+                    session,
+                    download,
+                    status=terminal_status,
+                    warning=integrity_warning,
+                    frame={"progress": 100},
                 )
                 await self._broadcast_log(
                     download_id,
@@ -911,7 +1329,10 @@ class DownloadManager:
                     # and leave the file untouched.
                     self._cancelled.discard(download_id)
                     await self._finalize_completed_after_interrupt(
-                        session, download_id, completed_path
+                        session,
+                        download_id,
+                        completed_path,
+                        status=self._terminal_status_for(download),
                     )
                     await self._broadcast_log(
                         download_id,
@@ -920,9 +1341,9 @@ class DownloadManager:
                     await self._trigger_plex_refresh(completed_path)
                     return
                 if download:
-                    download.status = DownloadStatus.CANCELLED.value
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
-                    await session.commit()
+                    # The frame below fires whether or not there is a row left
+                    # to transition, so it stays out here.
+                    await self._transition_cancelled(session, download)
                     if download.output_path and os.path.exists(download.output_path):
                         try:
                             os.unlink(download.output_path)
@@ -941,7 +1362,10 @@ class DownloadManager:
                     # a failed commit leaving the session pending rollback: the
                     # finalize helper retries on a fresh session.
                     await self._finalize_completed_after_interrupt(
-                        session, download_id, moved_completed_path
+                        session,
+                        download_id,
+                        moved_completed_path,
+                        status=self._terminal_status_for(download),
                     )
                     await self._broadcast_log(
                         download_id,
@@ -955,13 +1379,19 @@ class DownloadManager:
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
+                if download and await self._partial_is_playable(download.output_path):
+                    # The capture stopped early, but what reached disk is a file
+                    # ffprobe can open. Keep it and finish it like a completed
+                    # recording, under the INTERRUPTED status. Anything ffprobe
+                    # cannot open falls through to the delete-and-fail path below.
+                    await self._finalize_interrupted(
+                        session, download, download_id, settings, _friendly_error(e)
+                    )
+                    return
                 if download:
-                    download.status = DownloadStatus.FAILED.value
-                    if not download.completed_at:
-                        download.completed_at = datetime.utcnow()
-                    download.error_message = _friendly_error(e)
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
-                    await session.commit()
+                    # The frame below fires whether or not there is a row left
+                    # to transition, so it stays out here.
+                    await self._transition_failed(session, download, _friendly_error(e))
                     try:
                         if download.output_path and os.path.exists(download.output_path):
                             os.unlink(download.output_path)
@@ -982,7 +1412,12 @@ class DownloadManager:
         # cancel/error handling never marks a surviving recording CANCELLED or
         # FAILED (which would expose it to later cleanup/retry deletion).
         moved_completed_path: Optional[str] = None
+        # Set once Comskip/FFmpeg has actually run, so a late failure still
+        # announces postprocessing.completed for work that really happened.
+        post_processing_ran = False
         async with async_session_maker() as session:
+            download: Optional[Download] = None
+            interrupted_reason: Optional[str] = None
             working_input_path: Optional[str] = None
             completed_output_path: Optional[str] = None
             post_processed_path: Optional[str] = None
@@ -998,6 +1433,11 @@ class DownloadManager:
 
                 if download.status != DownloadStatus.PROCESSING.value:
                     return
+
+                # Captured while the session is known good: the error handlers
+                # below may run against a session poisoned by a failed commit.
+                await self._analyze_downloaded_file(download, raw_available=False)
+                interrupted_reason = self._interruption_reason(download)
 
                 if download_id in self._cancelled:
                     self._cancelled.discard(download_id)
@@ -1016,18 +1456,22 @@ class DownloadManager:
                     if processed_found:
                         completed_path = await self._move_to_completed_async(processed_found, completed_folder, download_folder)
                         moved_completed_path = completed_path
-                        download.output_path = completed_path
                         await self._store_recorded_duration(download, completed_path)
+                        await self._write_nfo_sidecar(download, completed_path, settings)
                         integrity_warning = await self._integrity_check_warning(completed_path, settings)
-                        download.status = DownloadStatus.COMPLETED.value
-                        download.progress = 100.0
-                        download.completed_at = datetime.utcnow()
-                        download.error_message = (
-                            f"Completed with warnings: {integrity_warning}" if integrity_warning else None
+                        terminal_status = self._terminal_status_for(download)
+                        await self._transition_completed(
+                            session,
+                            download,
+                            status=terminal_status,
+                            completed_path=completed_path,
+                            warning=integrity_warning,
+                            # A processed output was found on disk, so the
+                            # Comskip/FFmpeg work did happen before the crash.
+                            post_processed=True,
+                            recovered=True,
+                            frame={"progress": 100},
                         )
-                        await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                        await session.commit()
-                        await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
                         await self._broadcast_log(download_id, "Post-processing recovery: finalized completed output.")
                         await self._trigger_plex_refresh(completed_path)
                         return
@@ -1037,18 +1481,18 @@ class DownloadManager:
                 if not self._needs_post_processing(download, settings):
                     completed_path = await self._move_to_completed_async(original_path, completed_folder, download_folder)
                     moved_completed_path = completed_path
-                    download.output_path = completed_path
                     await self._store_recorded_duration(download, completed_path)
+                    await self._write_nfo_sidecar(download, completed_path, settings)
                     integrity_warning = await self._integrity_check_warning(completed_path, settings)
-                    download.status = DownloadStatus.COMPLETED.value
-                    download.progress = 100.0
-                    download.completed_at = datetime.utcnow()
-                    download.error_message = (
-                        f"Completed with warnings: {integrity_warning}" if integrity_warning else None
+                    terminal_status = self._terminal_status_for(download)
+                    await self._transition_completed(
+                        session,
+                        download,
+                        status=terminal_status,
+                        completed_path=completed_path,
+                        warning=integrity_warning,
+                        frame={"progress": 100},
                     )
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                    await session.commit()
-                    await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
                     await self._broadcast_log(download_id, "Post-processing disabled; finalized completed output.")
                     await self._trigger_plex_refresh(completed_path)
                     return
@@ -1059,8 +1503,10 @@ class DownloadManager:
                     original_path,
                     download_id,
                     session,
-                    settings
+                    settings,
+                    expected_duration_seconds=download.expected_duration_seconds,
                 )
+                post_processing_ran = True
 
                 final_path = self._select_final_path(original_path, final_path)
                 post_processed_path = final_path
@@ -1074,18 +1520,17 @@ class DownloadManager:
                 )
                 download.output_path = completed_path
                 await self._store_recorded_duration(download, completed_path)
+                await self._write_nfo_sidecar(download, completed_path, settings)
                 integrity_warning = await self._integrity_check_warning(completed_path, settings)
                 if integrity_warning:
                     warnings.append(integrity_warning)
-                if warnings:
-                    download.error_message = f"Completed with warnings: {'; '.join(warnings)}"
+                warning_text = "; ".join(warnings) if warnings else None
+                if warning_text:
                     await self._broadcast_log(
                         download_id,
-                        f"Completed with warnings: {'; '.join(warnings)}",
+                        f"Completed with warnings: {warning_text}",
                         level="warning"
                     )
-                else:
-                    download.error_message = None
 
                 delete_original = (settings.delete_original_after_transcode if settings is not None else True)
                 self._cleanup_working_files(
@@ -1096,13 +1541,15 @@ class DownloadManager:
                     keep_paths=[moved_sidecar_path] if moved_sidecar_path else None,
                 )
 
-                download.status = DownloadStatus.COMPLETED.value
-                download.progress = 100.0
-                download.completed_at = datetime.utcnow()
-                await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
-                await session.commit()
-
-                await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
+                terminal_status = self._terminal_status_for(download)
+                await self._transition_completed(
+                    session,
+                    download,
+                    status=terminal_status,
+                    warning=warning_text,
+                    post_processed=True,
+                    frame={"progress": 100},
+                )
                 await self._broadcast_log(
                     download_id,
                     f"Post-processing completed: {os.path.basename(completed_path)}"
@@ -1116,7 +1563,11 @@ class DownloadManager:
                     # left as PROCESSING/CANCELLED with an orphaned file.
                     self._cancelled.discard(download_id)
                     await self._finalize_completed_after_interrupt(
-                        session, download_id, moved_completed_path
+                        session,
+                        download_id,
+                        moved_completed_path,
+                        status=self._terminal_status_for_reason(interrupted_reason),
+                        post_processed=post_processing_ran,
                     )
                     return
                 result = await session.execute(
@@ -1128,11 +1579,10 @@ class DownloadManager:
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.PROCESSING.value,
                 ]:
-                    download.status = DownloadStatus.CANCELLED.value
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
-                    await session.commit()
-                    await self._broadcast_progress(
-                        download_id, download.progress, DownloadStatus.CANCELLED.value
+                    await self._transition_cancelled(
+                        session,
+                        download,
+                        frame={"progress": download.progress},
                     )
                     await self._broadcast_log(download_id, "Post-processing cancelled.", level="warning")
                 # Always clean up working files regardless of DB status: cancel_download
@@ -1157,7 +1607,9 @@ class DownloadManager:
                         session,
                         download_id,
                         moved_completed_path,
-                        error_message=f"Completed with warnings: {_friendly_error(e)}",
+                        error_message=f"{COMPLETED_WITH_WARNINGS_PREFIX}{_friendly_error(e)}",
+                        status=self._terminal_status_for_reason(interrupted_reason),
+                        post_processed=post_processing_ran,
                     )
                     await self._broadcast_log(
                         download_id,
@@ -1172,12 +1624,9 @@ class DownloadManager:
                 )
                 download = result.scalar_one_or_none()
                 if download:
-                    download.status = DownloadStatus.FAILED.value
-                    if not download.completed_at:
-                        download.completed_at = datetime.utcnow()
-                    download.error_message = _friendly_error(e)
-                    await self._sync_schedule_status(session, download_id, DownloadStatus.FAILED.value)
-                    await session.commit()
+                    # The frame below fires whether or not there is a row left
+                    # to transition, so it stays out here.
+                    await self._transition_failed(session, download, _friendly_error(e))
 
                 # Remove Comskip artifacts and partial transcode outputs left by
                 # the failed run. Logs are kept for debugging and the original
@@ -1208,7 +1657,10 @@ class DownloadManager:
                 dl = result.scalar_one_or_none()
                 # Never delete a recording that was already finalized: a stale
                 # cancel flag must not destroy a COMPLETED file.
-                if dl and dl.output_path and dl.status != DownloadStatus.COMPLETED.value:
+                if dl and dl.output_path and dl.status not in (
+                    DownloadStatus.COMPLETED.value,
+                    DownloadStatus.INTERRUPTED.value,
+                ):
                     path = Path(dl.output_path)
                     if path.is_file():
                         path.unlink()
@@ -1243,6 +1695,91 @@ class DownloadManager:
         if duration and duration > 0:
             download.recorded_duration_seconds = int(round(duration))
 
+    @staticmethod
+    def _reset_duration_analysis(download: Download) -> None:
+        """A new capture must never inherit the previous attempt's evidence."""
+        download.raw_duration_seconds = None
+        download.duration_analysis_status = None
+        download.duration_analysis_reason = None
+        download.buffer_trim_status = "not_run"
+
+    async def _analyze_downloaded_file(
+        self, download: Download, *, raw_available: bool = True
+    ) -> None:
+        """Observe raw catchup media once, before it can be transformed.
+
+        The caller's existing transition commits the observation before a
+        processing worker can run. Recovery batches keep their single commit.
+        Probe failures are informational and never enter file-deletion paths.
+        """
+        if download.is_vod:
+            return
+        if download.duration_analysis_status in DURATION_ANALYSIS_STATUSES:
+            return
+        minutes = download.duration_minutes
+        valid_expected = (
+            not isinstance(minutes, bool)
+            and isinstance(minutes, (int, float))
+            and math.isfinite(minutes)
+            and minutes > 0
+        )
+        expected = minutes * 60 if valid_expected else 0
+        if not valid_expected:
+            analysis = analyze_duration(0, None)
+        elif not raw_available:
+            analysis = DurationAnalysis(
+                expected, None, "unavailable",
+                "The raw download was not measured before post-processing began.",
+            )
+        else:
+            try:
+                from services.post_processor import post_processor
+
+                measured = await post_processor._get_duration(download.output_path)
+            except Exception:
+                measured = None
+            analysis = analyze_duration(expected, measured)
+        download.raw_duration_seconds = analysis.actual_seconds
+        download.duration_analysis_status = analysis.status
+        download.duration_analysis_reason = analysis.reason
+        if analysis.actual_seconds is None:
+            message = f"Raw download duration unavailable: {analysis.reason}"
+        else:
+            message = (
+                f"Raw download duration: {analysis.actual_seconds:.1f}s; "
+                f"expected {analysis.expected_seconds:.1f}s including padding "
+                f"({analysis.status})."
+            )
+            if analysis.reason:
+                message += f" {analysis.reason}"
+        await self._broadcast_log(download.id, message)
+
+    async def _write_nfo_sidecar(
+        self,
+        download: Download,
+        file_path: str,
+        settings: Optional[AppSettings],
+    ) -> None:
+        """Write the Kodi .nfo sidecar next to a finished recording.
+
+        Best-effort, like the integrity check: an unwritable completed folder
+        must not turn a finished recording into a failed one, so every failure
+        is logged and swallowed. Disabled via AppSettings.write_nfo_files
+        (default on). VOD downloads are skipped - their rows carry no guide
+        metadata to write.
+        """
+        try:
+            if settings is not None and settings.write_nfo_files is False:
+                return
+            if getattr(download, "is_vod", False):
+                return
+            if not file_path:
+                return
+            details = nfo_writer.details_from_download(download)
+            await asyncio.to_thread(nfo_writer.write_sidecar, file_path, details)
+        except Exception as exc:
+            logger.warning("NFO sidecar step failed for %s: %s", file_path, exc)
+
     async def _integrity_check_warning(
         self,
         file_path: str,
@@ -1270,14 +1807,198 @@ class DownloadManager:
             return f"file may be corrupt ({reason})"
         return None
 
+    @staticmethod
+    def _interruption_reason(download: Optional[Download]) -> Optional[str]:
+        """Read interruption_reason without trusting the session.
+
+        Error handlers call this on an ORM instance whose session may be in the
+        pending-rollback state left by a failed commit, where attribute access
+        can raise. An unreadable row is treated as not interrupted, which is
+        the pre-existing behaviour.
+        """
+        try:
+            reason = getattr(download, "interruption_reason", None) if download is not None else None
+        except Exception:
+            return None
+        return reason if isinstance(reason, str) and reason.strip() else None
+
+    @staticmethod
+    def _terminal_status_for_reason(reason: Optional[str]) -> str:
+        return (
+            DownloadStatus.INTERRUPTED.value if reason else DownloadStatus.COMPLETED.value
+        )
+
+    def _terminal_status_for(self, download: Optional[Download]) -> str:
+        """COMPLETED, unless the capture stopped early.
+
+        An interrupted recording goes through exactly the same finishing steps
+        as a completed one - post-processing, the move to the completed folder,
+        the Plex refresh - so every finalize site asks this rather than writing
+        COMPLETED directly. Reaching the completed folder must not promote a
+        short recording to COMPLETED.
+        """
+        return self._terminal_status_for_reason(self._interruption_reason(download))
+
+    async def _partial_is_playable(self, file_path: Optional[str]) -> bool:
+        """Can ffprobe open what is on disk?
+
+        This is the keep-or-delete decision for a capture that ended early. A
+        missing, empty, or unopenable file is junk and keeps the historical
+        delete-and-fail behaviour; anything ffprobe can parse is a short
+        recording worth keeping. A verdict is required: when ffprobe itself is
+        unavailable the file is not kept, so an unverifiable partial can never
+        accumulate silently.
+        """
+        try:
+            if not file_path or not os.path.isfile(file_path):
+                return False
+            if os.path.getsize(file_path) <= 0:
+                return False
+            from services.post_processor import post_processor
+
+            result = await post_processor.probe_media_integrity(file_path)
+        except Exception:
+            return False
+        return bool(result.get("checked")) and bool(result.get("ok"))
+
+    async def _recapture_path(self, download: Download) -> Optional[str]:
+        """Where a retry of a kept interrupted recording should capture to.
+
+        A kept interrupted recording has been through the whole finishing path,
+        so output_path points at a post-processed file in the completed folder.
+        Two things have to be undone before it can be re-recorded:
+
+        - the folder, so the fresh capture does not stream on top of the file
+          the user still has (subfolders from the naming template are kept);
+        - the extension, because a catchup capture is always MPEG-TS. Left as
+          the post-processed container, the new .ts bytes would carry an .mkv
+          name and post-processing would skip them as already-converted.
+
+        VOD keeps the provider's extension: it is downloaded in whatever
+        container the provider serves, not remuxed from TS.
+        """
+        path = download.output_path
+        if not path:
+            return path
+        try:
+            settings = await self._load_app_settings()
+            completed_folder = self._resolve_completed_folder(settings)
+            download_folder = self._resolve_download_folder(settings)
+            if self._path_is_under(path, completed_folder) and not self._folders_equal(
+                completed_folder, download_folder
+            ):
+                path = os.path.join(download_folder, os.path.relpath(path, completed_folder))
+            if not download.is_vod:
+                path = os.path.splitext(path)[0] + ".ts"
+            return path
+        except Exception:
+            return download.output_path
+
+    async def _finalize_interrupted(
+        self,
+        session: AsyncSession,
+        download: Download,
+        download_id: int,
+        settings: Optional[AppSettings],
+        reason: str,
+    ) -> None:
+        """Finish a capture that stopped early but left a playable file.
+
+        The recording follows the completed path from here: post-processing if
+        it is configured, otherwise straight to the completed folder and a Plex
+        refresh. Only the status differs. The reason lives in its own column so
+        an integrity warning can sit alongside it in error_message without
+        either message clobbering the other.
+        """
+        download.interruption_reason = reason
+        await self._analyze_downloaded_file(download)
+        if settings is None:
+            settings = await self._load_app_settings()
+
+        if self._needs_post_processing(download, settings):
+            await self._transition_processing(
+                session,
+                download,
+                frame=QUEUED_FOR_POST_PROCESSING_FRAME,
+            )
+            await self._broadcast_log(
+                download_id,
+                f"Recording interrupted ({reason}). The partial recording was kept "
+                f"and queued for post-processing.",
+                level="warning",
+            )
+            await self._post_queue.put(download_id)
+            return
+
+        completed_path = download.output_path
+        try:
+            completed_path = await self._move_to_completed_async(
+                download.output_path,
+                self._resolve_completed_folder(settings),
+                self._resolve_download_folder(settings),
+            )
+        except OSError:
+            # The move failed (e.g. no space on the completed folder mount).
+            # Keep the partial where it is rather than losing it.
+            completed_path = download.output_path
+        download.output_path = completed_path
+
+        await self._store_recorded_duration(download, completed_path)
+        await self._write_nfo_sidecar(download, completed_path, settings)
+        integrity_warning = await self._integrity_check_warning(completed_path, settings)
+        try:
+            await self._transition_completed(
+                session,
+                download,
+                status=DownloadStatus.INTERRUPTED.value,
+                warning=integrity_warning,
+                frame={"progress": download.progress or 0, "error": reason},
+            )
+        except Exception:
+            # Never raise back into the error handler that called us. The file
+            # is safe on disk, but a lost commit would leave the row reading
+            # DOWNLOADING with an orphan in the completed folder, so retry on a
+            # fresh session exactly as the completed path does.
+            await self._finalize_completed_after_interrupt(
+                session,
+                download_id,
+                completed_path,
+                error_message=download.error_message,
+                status=DownloadStatus.INTERRUPTED.value,
+            )
+            await self._broadcast_progress(
+                download_id,
+                download.progress or 0,
+                DownloadStatus.INTERRUPTED.value,
+                error=reason,
+            )
+        await self._broadcast_log(
+            download_id,
+            f"Recording interrupted ({reason}). Kept the partial recording: "
+            f"{os.path.basename(completed_path)}",
+            level="warning",
+        )
+        if integrity_warning:
+            await self._broadcast_log(
+                download_id,
+                f"Completed with warnings: {integrity_warning}",
+                level="warning",
+            )
+        await self._trigger_plex_refresh(completed_path)
+
     async def _finalize_completed_after_interrupt(
         self,
         session: AsyncSession,
         download_id: int,
         completed_path: str,
         error_message: Optional[str] = None,
+        status: Optional[str] = None,
+        post_processed: bool = False,
     ) -> None:
-        """Persist COMPLETED for a recording whose file already survived on disk.
+        """Persist a terminal status for a recording whose file survived on disk.
+
+        Writes COMPLETED unless the caller passes INTERRUPTED for a capture
+        that stopped early.
 
         Called from cancel/error handlers once the full recording has been
         written (and usually moved to the completed folder). The file must
@@ -1285,19 +2006,22 @@ class DownloadManager:
         failed commit left it pending rollback), so this retries once on a
         fresh session and never raises a DB error back to the caller.
         """
+        status = status or DownloadStatus.COMPLETED.value
         values = {
-            "status": DownloadStatus.COMPLETED.value,
+            "status": status,
             "output_path": completed_path,
             "progress": 100.0,
             "completed_at": datetime.utcnow(),
             "error_message": error_message,
         }
+        persisted = False
         try:
             await session.execute(
                 update(Download).where(Download.id == download_id).values(**values)
             )
-            await self._sync_schedule_status(session, download_id, DownloadStatus.COMPLETED.value)
+            await self._sync_schedule_status(session, download_id, status)
             await session.commit()
+            persisted = True
         except Exception:
             try:
                 await session.rollback()
@@ -1309,17 +2033,64 @@ class DownloadManager:
                         update(Download).where(Download.id == download_id).values(**values)
                     )
                     await self._sync_schedule_status(
-                        fresh_session, download_id, DownloadStatus.COMPLETED.value
+                        fresh_session, download_id, status
                     )
                     await fresh_session.commit()
+                    persisted = True
             except Exception:
                 logger.exception(
-                    "Could not persist COMPLETED state for download %s; "
+                    "Could not persist terminal state for download %s; "
                     "file preserved at %s",
                     download_id,
                     completed_path,
                 )
         await self._broadcast_progress(download_id, 100, DownloadStatus.COMPLETED.value)
+        # The broadcast above is optimistic by design -- a WebSocket frame that
+        # overstates the row corrects itself on the next refresh. An event does
+        # not: a webhook fired for a state that was never persisted points a
+        # library refresh at a recording the database does not have. So this
+        # publishes only when one of the two write attempts actually committed.
+        if persisted:
+            await self._publish_finalized(
+                download_id, error_message, post_processed=post_processed
+            )
+
+    async def _publish_finalized(
+        self,
+        download_id: int,
+        error_message: Optional[str] = None,
+        *,
+        post_processed: bool = False,
+    ) -> None:
+        """Announce a completion written by the bulk-update finalize path.
+
+        That path has no ORM instance to build a payload from -- it is reached
+        with a session that may be unusable -- so the row is re-read on a fresh
+        session. A payload that cannot be read is not worth failing a
+        recording over, so a failure here is logged and swallowed.
+        """
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(Download).where(Download.id == download_id)
+                )
+                download = result.scalar_one_or_none()
+                if download is None:
+                    return
+                warning = None
+                if error_message and error_message.startswith(COMPLETED_WITH_WARNINGS_PREFIX):
+                    warning = error_message[len(COMPLETED_WITH_WARNINGS_PREFIX):]
+                payload = self._event_payload(
+                    download, post_processed=post_processed, warning=warning
+                )
+        except Exception:
+            logger.warning(
+                "Could not build the completion event for download %s", download_id
+            )
+            return
+        if post_processed:
+            recording_events.publish(POSTPROCESSING_COMPLETED, payload)
+        recording_events.publish(RECORDING_COMPLETED, payload)
 
     async def _resolve_download_owner(self, download_id: int) -> int | None:
         if download_id in self._download_owners:
@@ -1702,6 +2473,86 @@ class DownloadManager:
         )
         return downloaded
 
+    async def _load_download_account(self, session: AsyncSession, account_id):
+        if not account_id:
+            return None
+        result = await session.execute(
+            select(XtreamAccount).where(XtreamAccount.id == account_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def _download_catchup_stream(
+        self,
+        download: Download,
+        download_id: int,
+        session: AsyncSession,
+        offset: int = 0,
+    ):
+        """Fetch a recording, settling which catchup URL form the provider wants.
+
+        Providers serve catchup either as a path (``/timeshift/...``) or as a
+        query (``/streaming/timeshift.php?...``). With the account left on
+        "auto" we send the form we currently believe in; if the provider
+        refuses the request outright we retry the same recording once in the
+        other form and remember whichever worked, so no later recording on this
+        account has to probe again. An account pinned to "path" or "query" is
+        taken at its word and never probed. Anything that is not a catchup URL
+        (VOD, series) passes straight through.
+
+        Probing only runs on a fresh transfer. A non-zero *offset* means we are
+        resuming a recording that already streamed bytes in this style, so a
+        refusal there is the provider's problem, not the URL form's, and
+        restyling would throw away the partial file for nothing.
+        """
+        url = download.source_url
+        style = timeshift_style_of_url(url)
+        if style is None:
+            return await self._download_file(
+                url, download.output_path, download_id, session, offset=offset
+            )
+
+        account = await self._load_download_account(session, download.account_id)
+        probing = offset == 0 and account is not None and timeshift_style_is_automatic(account)
+
+        try:
+            downloaded = await self._download_file(
+                url, download.output_path, download_id, session, offset=offset
+            )
+        except ProviderStatusError as refusal:
+            alternate_style = other_timeshift_style(style)
+            alternate_url = restyle_timeshift_url(url, alternate_style) if probing else None
+            if not alternate_url:
+                raise
+            await self._broadcast_log(
+                download_id,
+                f"Provider refused the {style}-style catchup URL ({refusal}). "
+                f"Retrying with the {alternate_style}-style URL.",
+                level="warning",
+            )
+            try:
+                # The refusal happened before any bytes were written, and the
+                # other form is a different URL, so this restarts from zero.
+                downloaded = await self._download_file(
+                    alternate_url, download.output_path, download_id, session, offset=0
+                )
+            except ProviderStatusError:
+                # The provider's own complaint about the form we started with
+                # is more use than its complaint about the one we guessed.
+                raise refusal from None
+            download.source_url = alternate_url
+            account.catchup_url_style_resolved = alternate_style
+            await session.commit()
+            await self._broadcast_log(
+                download_id,
+                f"Catchup URL style for this account resolved to {alternate_style}.",
+            )
+            return downloaded
+
+        if probing and account.catchup_url_style_resolved != style:
+            account.catchup_url_style_resolved = style
+            await session.commit()
+        return downloaded
+
     async def _download_file(
         self,
         url: str,
@@ -1718,31 +2569,53 @@ class DownloadManager:
         when the provider supports it, or restarts from byte 0 otherwise.
         Non-network errors (HTTP status errors, disk errors) propagate
         immediately.
+
+        How many retries there are, and how long each waits, comes from the
+        user's retry window. It is read on the first network error rather than
+        up front, so a clean download never touches the settings row, and it
+        is read once, so a recording keeps the window it started failing with.
         """
         attempt = 0
         current_offset = offset
+        delays: Optional[List[float]] = None
         while True:
             try:
                 return await self._download_file_once(
                     url, output_path, download_id, session, offset=current_offset
                 )
             except Exception as e:
-                if not _is_transient_network_error(e) or attempt >= TRANSIENT_RETRY_LIMIT:
+                if not _is_transient_network_error(e):
                     raise
+                if delays is None:
+                    delays = await self._transient_retry_delays()
+                if attempt >= len(delays):
+                    raise
+                delay = delays[attempt]
                 attempt += 1
                 try:
                     current_offset = os.path.getsize(output_path)
                 except OSError:
                     current_offset = 0
-                delay = TRANSIENT_RETRY_BACKOFF_SECONDS * attempt
                 await self._broadcast_log(
                     download_id,
                     f"Network error during download: {type(e).__name__}: {e}. "
                     f"Retrying in {delay:.0f}s from byte {current_offset:,} "
-                    f"(attempt {attempt}/{TRANSIENT_RETRY_LIMIT}).",
+                    f"(attempt {attempt}/{len(delays)}).",
                     level="warning",
                 )
                 await asyncio.sleep(delay)
+
+    async def _transient_retry_delays(self) -> List[float]:
+        """The wait before each retry, from the user's retry window.
+
+        Unreadable settings fall back to the default window rather than
+        failing a download that is already in trouble.
+        """
+        settings = await self._load_app_settings()
+        window = resolve_retry_window_seconds(
+            getattr(settings, "download_retry_window_seconds", None)
+        )
+        return retry_delays_for_window(window)
 
     async def _download_file_once(
         self,
@@ -1768,7 +2641,9 @@ class DownloadManager:
             request_headers["Range"] = f"bytes={offset}-"
 
         async with aiohttp.ClientSession(
-            timeout=timeout, read_bufsize=DOWNLOAD_READ_BUFFER_BYTES
+            timeout=timeout,
+            read_bufsize=DOWNLOAD_READ_BUFFER_BYTES,
+            headers=provider_request_headers(),
         ) as http_session:
             needs_restart = False
 
@@ -1803,7 +2678,7 @@ class DownloadManager:
                 if needs_restart:
                     pass  # fall through to the re-request block below
                 elif response.status not in (200, 206):
-                    raise Exception(f"HTTP {response.status}: {response.reason}")
+                    raise ProviderStatusError(response.status, response.reason)
 
                 content_type = response.headers.get("Content-Type", "")
                 _ct_lower = content_type.lower()
@@ -1930,7 +2805,7 @@ class DownloadManager:
             # Only reached when needs_restart is True: re-request from byte 0.
             async with http_session.get(url) as response:
                 if response.status not in (200, 206):
-                    raise Exception(f"HTTP {response.status}: {response.reason}")
+                    raise ProviderStatusError(response.status, response.reason)
                 restart_ct = response.headers.get("Content-Type", "")
                 _rct_lower = restart_ct.lower()
                 if (
@@ -1948,15 +2823,78 @@ class DownloadManager:
                     total_size, download_id, session
                 )
 
+    async def _trim_dispatcharr_buffer(
+        self,
+        file_path: str,
+        download_id: int,
+        session: AsyncSession,
+        settings: AppSettings,
+    ) -> Optional[str]:
+        """Best-effort first step, authorized only by the original raw evidence."""
+        if getattr(settings, "trim_dispatcharr_buffer", False) is not True:
+            return None
+        result = await session.execute(select(Download).where(Download.id == download_id))
+        download = result.scalar_one_or_none()
+        if not download or download.is_vod or download.duration_analysis_status != "long":
+            return None
+        expected = download.expected_duration_seconds
+        if analyze_duration(expected, download.raw_duration_seconds).status != "long":
+            return None
+        # A successful trim is a fact about this capture, not the later file
+        # length. Do not redo it on a recovered processing job (Commercial Skip
+        # may already have shortened the same input).
+        if download.buffer_trim_status == "trimmed":
+            return None
+        download.buffer_trim_status = "in_progress"
+        await session.commit()
+
+        async def log_callback(message: str):
+            await self._broadcast_log(download_id, message)
+
+        try:
+            from services.post_processor import post_processor
+
+            min_free_gb = settings.min_free_space_gb if settings.min_free_space_gb is not None else 25
+            shortfall = await get_free_space_shortfall(str(Path(file_path).parent), min_free_gb)
+            if shortfall:
+                free_gb, required_gb = shortfall
+                raise RuntimeError(
+                    f"Not enough space for a temporary trimmed file "
+                    f"({free_gb:.1f} GB free, {required_gb} GB required)."
+                )
+            await self._update_processing(
+                session, download_id, 0, "Trimming extra time from the end...",
+                indeterminate=True, download_progress=100.0,
+            )
+            await log_callback(f"Checking the excess tail against the requested {expected:.1f}s including padding.")
+            trimmed = await post_processor.trim_buffer_tail(file_path, expected, log_callback=log_callback)
+        except Exception as exc:
+            download.buffer_trim_status = "failed"
+            await session.commit()
+            warning = f"Buffer trim failed: {exc}"
+            await self._broadcast_log(download_id, warning, level="warning")
+            return warning
+        # False means a recovery probe already found the target length. It is
+        # not proof that this attempt performed a trim, so keep it distinct.
+        download.buffer_trim_status = "trimmed" if trimmed else "already_matched"
+        await session.commit()
+        return None
+
     async def _post_process(
         self,
         file_path: str,
         download_id: int,
         session: AsyncSession,
-        settings: Optional[AppSettings] = None
+        settings: Optional[AppSettings] = None,
+        expected_duration_seconds: Optional[float] = None,
     ) -> tuple[str, list[str]]:
         """Run post-processing on downloaded file (transcoding, commercial removal)."""
-        from services.post_processor import post_processor, OutputFormat, HardwareAccel
+        from services.post_processor import (
+            post_processor,
+            CommercialRemovalSkipped,
+            OutputFormat,
+            HardwareAccel,
+        )
 
         warnings: list[str] = []
 
@@ -1964,6 +2902,12 @@ class DownloadManager:
             return file_path, warnings
 
         current_path = file_path
+
+        # This must precede even Comskip's input normalization, and it must run
+        # for Keep .ts when every other processing option is disabled.
+        trim_warning = await self._trim_dispatcharr_buffer(file_path, download_id, session, settings)
+        if trim_warning:
+            warnings.append(trim_warning)
 
         if settings.comskip_path:
             post_processor.set_comskip_path(settings.comskip_path)
@@ -2028,6 +2972,7 @@ class DownloadManager:
         transcode_progress: Optional[float] = None
         comskip_indeterminate = False
         transcode_indeterminate = False
+        remux_fell_back = False
 
         async def broadcast_processing(progress: float, message: Optional[str], indeterminate: bool = False):
             await self._update_processing(
@@ -2055,6 +3000,17 @@ class DownloadManager:
                 last_progress = p
                 transcode_progress = p
                 await broadcast_processing(p, current_message, indeterminate=transcode_indeterminate)
+
+        async def processing_status_callback(message: str):
+            nonlocal current_message, remux_fell_back
+            current_message = message
+            if message.startswith("Remux failed;"):
+                remux_fell_back = True
+            await broadcast_processing(
+                transcode_progress or 0.0,
+                current_message,
+                indeterminate=transcode_indeterminate,
+            )
 
         # log_callback defined above to also persist logs
 
@@ -2107,7 +3063,8 @@ class DownloadManager:
                         current_path,
                         comskip_ini_path,
                         log_callback=log_callback,
-                        progress_callback=comskip_progress_callback
+                        progress_callback=comskip_progress_callback,
+                        hw_decode_mode=settings.comskip_hw_decode_mode
                     )
                 if comskip_progress is None or comskip_progress < 100:
                     comskip_progress = 100.0
@@ -2138,19 +3095,28 @@ class DownloadManager:
                         f"Comskip: commercials detected. Removing commercials and outputting {output_format.value}."
                     )
 
-                    current_path = await post_processor.remove_commercials(
-                        current_path,
-                        edl_path,
-                        output_format,
-                        hw_accel=hw_accel,
-                        remove_original=settings.delete_original_after_transcode,
-                        progress_callback=transcode_progress_callback,
-                        log_callback=log_callback,
-                        remux_only=remux_only,
-                        render_device=render_device
-                    )
-                    commercials_removed = True
-                    await log_callback(f"Commercial removal complete: {current_path}")
+                    try:
+                        current_path = await post_processor.remove_commercials(
+                            current_path,
+                            edl_path,
+                            output_format,
+                            hw_accel=hw_accel,
+                            remove_original=settings.delete_original_after_transcode,
+                            progress_callback=transcode_progress_callback,
+                            log_callback=log_callback,
+                            remux_only=remux_only,
+                            render_device=render_device,
+                            expected_duration_seconds=expected_duration_seconds,
+                            status_callback=processing_status_callback,
+                        )
+                    except CommercialRemovalSkipped as skipped:
+                        # Recording stays uncut; the transcode/remux step below
+                        # still produces the chosen output format.
+                        await log_callback(str(skipped))
+                        warnings.append(str(skipped))
+                    else:
+                        commercials_removed = True
+                        await log_callback(f"Commercial removal complete: {current_path}")
                 else:
                     await log_callback("Comskip: no commercials detected.")
             except Exception as e:
@@ -2183,9 +3149,16 @@ class DownloadManager:
                     log_callback=log_callback,
                     remove_original=settings.delete_original_after_transcode,
                     remux_only=remux_only,
-                    render_device=render_device
+                    render_device=render_device,
+                    expected_duration_seconds=expected_duration_seconds,
+                    status_callback=processing_status_callback,
                 )
-                await log_callback(f"{'Remux' if remux_only else 'Transcode'} complete: {current_path}")
+                completed_operation = (
+                    "Re-encode" if remux_fell_back
+                    else "Remux" if remux_only
+                    else "Transcode"
+                )
+                await log_callback(f"{completed_operation} complete: {current_path}")
             except Exception as e:
                 await log_callback(f"Transcode error: {e}")
                 warnings.append(f"Transcode failed: {e}")
@@ -2248,9 +3221,7 @@ class DownloadManager:
                 DownloadStatus.DOWNLOADING.value,
                 DownloadStatus.PROCESSING.value,
             ]:
-                download.status = DownloadStatus.CANCELLED.value
-                await self._sync_schedule_status(session, download_id, DownloadStatus.CANCELLED.value)
-                await session.commit()
+                await self._transition_cancelled(session, download)
                 return True
 
         return cancelled_task
@@ -2271,7 +3242,7 @@ class DownloadManager:
         return dest
 
     async def retry_download(self, download_id: int) -> bool:
-        """Retry a failed download."""
+        """Retry a failed, cancelled or interrupted download."""
         async with async_session_maker() as session:
             result = await session.execute(
                 select(Download).where(Download.id == download_id)
@@ -2280,15 +3251,24 @@ class DownloadManager:
 
             if download and download.status in [
                 DownloadStatus.FAILED.value,
-                DownloadStatus.CANCELLED.value
+                DownloadStatus.CANCELLED.value,
+                DownloadStatus.INTERRUPTED.value
             ]:
-                download.status = DownloadStatus.PENDING.value
+                self._reset_duration_analysis(download)
+                if download.status == DownloadStatus.INTERRUPTED.value:
+                    # The kept partial already lives in the completed folder.
+                    # Re-recording writes a fresh capture into the download
+                    # folder so the partial the user still has is not clobbered.
+                    download.output_path = await self._recapture_path(download)
+                    download.interruption_reason = None
+                    download.recorded_duration_seconds = None
                 download.progress = 0
                 download.downloaded_bytes = 0
                 download.error_message = None
                 download.completed_at = None
-                await self._sync_schedule_status(session, download_id, ScheduledStatus.QUEUED.value)
-                await session.commit()
+                await self._transition_pending(
+                    session, download, schedule_status=ScheduledStatus.QUEUED.value
+                )
 
                 self._cancelled.discard(download_id)
                 await self._queue.put(download_id)
@@ -2318,7 +3298,8 @@ class DownloadManager:
                     Download.status.in_([
                         DownloadStatus.COMPLETED.value,
                         DownloadStatus.FAILED.value,
-                        DownloadStatus.CANCELLED.value
+                        DownloadStatus.CANCELLED.value,
+                        DownloadStatus.INTERRUPTED.value
                     ])
                 ).order_by(Download.created_at.desc())
             )

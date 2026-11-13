@@ -8,9 +8,14 @@ ffmpeg to copy from the segment start to end-of-file instead of to the
 commercial boundary. The commercial is never cut and the output contains the
 same content as the input. Status is marked COMPLETED with no error.
 
-Fix: remove_commercials now raises an Exception when duration <= 0, so the
-download is marked FAILED with a clear message instead of completing silently
-with commercials intact.
+First fix: remove_commercials raised when duration <= 0, failing the whole
+download.
+
+Current behavior: remove_commercials raises CommercialRemovalSkipped instead.
+The download manager keeps the recording uncut, records a warning naming
+ffprobe, and finishes the rest of post-processing. A scheduled recording
+length is NOT used as a stand-in here: it is a guess about the file, and
+cutting against a guess risks removing the wrong parts of the show.
 """
 
 import importlib.util
@@ -29,10 +34,11 @@ SPEC.loader.exec_module(POST_PROCESSOR_MODULE)
 HardwareAccel = POST_PROCESSOR_MODULE.HardwareAccel
 OutputFormat = POST_PROCESSOR_MODULE.OutputFormat
 PostProcessor = POST_PROCESSOR_MODULE.PostProcessor
+CommercialRemovalSkipped = POST_PROCESSOR_MODULE.CommercialRemovalSkipped
 
 
 class CommercialRemovalFfprobeRequiredTests(unittest.IsolatedAsyncioTestCase):
-    """remove_commercials must fail loudly when ffprobe duration is unavailable."""
+    """remove_commercials must skip the cut when ffprobe duration is unavailable."""
 
     def setUp(self):
         self.processor = PostProcessor()
@@ -47,24 +53,21 @@ class CommercialRemovalFfprobeRequiredTests(unittest.IsolatedAsyncioTestCase):
         f = tempfile.NamedTemporaryFile(mode="w", suffix=".edl", delete=False)
         f.write(content)
         f.close()
-        self.addCleanup(os.unlink, f.name)
+        # A skipped cut cleans up Comskip's outputs, the EDL included.
+        self.addCleanup(lambda: os.path.exists(f.name) and os.unlink(f.name))
         return f.name
 
-    async def test_raises_when_duration_zero_ffprobe_missing(self):
-        """When _get_duration returns 0 (ffprobe absent), remove_commercials must raise.
+    async def test_skips_when_duration_zero_ffprobe_missing(self):
+        """When _get_duration returns 0 (ffprobe absent), the cut is skipped.
 
-        Before the fix: duration=0 caused every ffmpeg segment to copy from its
-        start timestamp to end-of-file (omit_to=True for all segments). A single
-        commercial at 20-30min produced output starting at 0 with no -to: the
-        entire original file, commercials included. Status: COMPLETED.
-
-        After the fix: Exception raised. Download marked FAILED with a clear
-        message so the operator knows ffprobe is required.
+        duration=0 used to make every ffmpeg segment copy from its start to
+        end-of-file, so nothing was cut. The skip signal must name ffprobe so
+        the operator knows what to install.
         """
         edl = self._write_edl("1200.000000 1800.000000 0\n")  # commercial at 20-30min
 
         with patch.object(self.processor, "_get_duration", new=AsyncMock(return_value=0.0)):
-            with self.assertRaises(Exception) as ctx:
+            with self.assertRaises(CommercialRemovalSkipped) as ctx:
                 await self.processor.remove_commercials(
                     "/tmp/Show.ts",
                     edl,
@@ -77,17 +80,41 @@ class CommercialRemovalFfprobeRequiredTests(unittest.IsolatedAsyncioTestCase):
             "Error message must mention ffprobe so the operator knows what to install.",
         )
 
-    async def test_raises_when_duration_negative(self):
-        """Negative duration (edge case from ffprobe parse failure) must also raise."""
+    async def test_skips_when_duration_negative(self):
+        """Negative duration (edge case from ffprobe parse failure) must also skip."""
         edl = self._write_edl("600.000000 1200.000000 0\n")
 
         with patch.object(self.processor, "_get_duration", new=AsyncMock(return_value=-1.0)):
-            with self.assertRaises(Exception):
+            with self.assertRaises(CommercialRemovalSkipped):
                 await self.processor.remove_commercials(
                     "/tmp/Show.ts",
                     edl,
                     output_format=OutputFormat.TS,
                 )
+
+    async def test_scheduled_length_is_not_used_to_cut_when_ffprobe_missing(self):
+        """A scheduled length must not stand in for a missing ffprobe duration.
+
+        The schedule says how long the provider was asked for, not what is in
+        the file. Cutting against it could remove the wrong parts, so the cut
+        is skipped before any segment is extracted.
+        """
+        edl = self._write_edl("1200.000000 1800.000000 0\n")
+        select_maps = AsyncMock(return_value=["-map", "0:v:0"])
+
+        with (
+            patch.object(self.processor, "_get_duration", new=AsyncMock(return_value=0.0)),
+            patch.object(self.processor, "_select_best_av_map_args", select_maps),
+        ):
+            with self.assertRaises(CommercialRemovalSkipped):
+                await self.processor.remove_commercials(
+                    "/tmp/Show.ts",
+                    edl,
+                    output_format=OutputFormat.MKV,
+                    expected_duration_seconds=3600,
+                )
+
+        select_maps.assert_not_called()
 
     async def test_no_segments_skips_duration_check(self):
         """When EDL has no commercials, the duration check is never reached (transcode path).

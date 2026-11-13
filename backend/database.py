@@ -76,6 +76,14 @@ async def _apply_lightweight_migrations(conn) -> None:
         await conn.execute(
             text("ALTER TABLE xtream_accounts ADD COLUMN catchup_resolution_mode VARCHAR(32) DEFAULT 'auto'")
         )
+    if not await _column_exists(conn, "xtream_accounts", "catchup_url_style"):
+        await conn.execute(
+            text("ALTER TABLE xtream_accounts ADD COLUMN catchup_url_style VARCHAR(16) DEFAULT 'auto'")
+        )
+    if not await _column_exists(conn, "xtream_accounts", "catchup_url_style_resolved"):
+        await conn.execute(
+            text("ALTER TABLE xtream_accounts ADD COLUMN catchup_url_style_resolved VARCHAR(16)")
+        )
 
     if not await _column_exists(conn, "xtream_accounts", "catchup_fallback_offset_minutes"):
         await conn.execute(
@@ -150,6 +158,18 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "downloads", "recorded_duration_seconds"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN recorded_duration_seconds INTEGER"))
 
+    for column_name, column_type in (
+        ("raw_duration_seconds", "FLOAT"),
+        ("duration_analysis_status", "VARCHAR(32)"),
+        ("duration_analysis_reason", "TEXT"),
+        ("buffer_trim_status", "VARCHAR(32)"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_type}"))
+
+    if not await _column_exists(conn, "downloads", "interruption_reason"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN interruption_reason TEXT"))
+
     if not await _column_exists(conn, "app_settings", "integrity_check_enabled"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN integrity_check_enabled BOOLEAN DEFAULT 1")
@@ -158,6 +178,29 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "app_settings", "auto_retry_failed_downloads"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN auto_retry_failed_downloads BOOLEAN DEFAULT 0")
+        )
+
+    if not await _column_exists(conn, "app_settings", "update_check_enabled"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN update_check_enabled BOOLEAN DEFAULT 1")
+        )
+
+    if not await _column_exists(conn, "app_settings", "scheduled_download_delay_minutes"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN scheduled_download_delay_minutes INTEGER DEFAULT 5"
+            )
+        )
+
+    # 30 seconds is what the hard-coded retry constants added up to, so an
+    # existing install keeps retrying exactly as it did.
+    if not await _column_exists(conn, "app_settings", "download_retry_window_seconds"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN download_retry_window_seconds INTEGER DEFAULT 30"
+            )
         )
 
     if not await _column_exists(conn, "downloads", "retry_count"):
@@ -179,11 +222,29 @@ async def _apply_lightweight_migrations(conn) -> None:
         ("comskip_connect_blocks_with_logo", "BOOLEAN DEFAULT 1"),
         ("comskip_dynamic_ticker_tape", "BOOLEAN DEFAULT 0"),
         ("comskip_thread_count", "INTEGER DEFAULT 1"),
+        ("comskip_hw_decode_mode", "VARCHAR(20) DEFAULT 'none'"),
     )
     for column_name, column_spec in comskip_tunable_columns:
         if not await _column_exists(conn, "app_settings", column_name):
             await conn.execute(
                 text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_spec}")
+            )
+
+    # One webhook URL per recording lifecycle event; empty means off.
+    webhook_url_columns = (
+        "webhook_url_recording_started",
+        "webhook_url_recording_completed",
+        "webhook_url_recording_failed",
+        "webhook_url_recording_cancelled",
+        "webhook_url_postprocessing_completed",
+    )
+    for column_name in webhook_url_columns:
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(
+                    f"ALTER TABLE app_settings ADD COLUMN {column_name} "
+                    "VARCHAR(1000) DEFAULT ''"
+                )
             )
 
     if not await _column_exists(conn, "app_settings", "vaapi_render_device"):
@@ -215,6 +276,40 @@ async def _apply_lightweight_migrations(conn) -> None:
     if not await _column_exists(conn, "app_settings", "comskip_cut"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN comskip_cut BOOLEAN DEFAULT 1")
+        )
+
+    # Guide metadata captured when a recording is queued, for the NFO sidecar.
+    if not await _column_exists(conn, "downloads", "guide_metadata_json"):
+        await conn.execute(text("ALTER TABLE downloads ADD COLUMN guide_metadata_json TEXT"))
+
+    if not await _column_exists(conn, "app_settings", "write_nfo_files"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN write_nfo_files BOOLEAN DEFAULT 1")
+        )
+
+    # Poster art (#443): which image a recording's poster came from, the two
+    # switches, and the optional (encrypted) TMDB key.
+    for column_name, column_type in (
+        ("poster_url", "TEXT"),
+        ("poster_thumb_url", "TEXT"),
+        ("poster_source", "VARCHAR(32)"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_type}")
+            )
+    for column_name, column_type in (
+        ("poster_art_enabled", "BOOLEAN DEFAULT 1"),
+        ("poster_art_save_to_library", "BOOLEAN DEFAULT 1"),
+        ("tmdb_api_key_encrypted", "TEXT"),
+    ):
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_type}")
+            )
+    if not await _column_exists(conn, "app_settings", "trim_dispatcharr_buffer"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN trim_dispatcharr_buffer BOOLEAN DEFAULT 0")
         )
 
 

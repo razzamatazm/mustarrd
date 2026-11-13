@@ -52,8 +52,35 @@ import NumberStepper from '../components/settings/NumberStepper'
 import SaveBar from '../components/settings/SaveBar'
 import SettingsSearch from '../components/settings/SettingsSearch'
 import { SectionHeader, SettingRow, SubGroup } from '../components/settings/SettingsPrimitives'
+import WebhooksSection, { getWebhookErrors } from '../components/settings/WebhooksSection'
+import PosterArtSection from '../components/settings/PosterArtSection'
 import { SECTION_GROUPS, ADMIN_SECTIONS, DOWNLOAD_USER_SECTIONS } from '../components/settings/sections'
 import classes from './Settings.module.css'
+
+// 30 seconds is what Mustarrd always did before this was a setting.
+const DEFAULT_RETRY_WINDOW_SECONDS = 30
+const RETRY_WINDOW_CHOICES = [
+  { value: '30', label: '30 seconds (default)' },
+  { value: '60', label: '1 minute' },
+  { value: '120', label: '2 minutes' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+  { value: '3600', label: '1 hour' },
+]
+
+// A value saved outside the app (through the API) still has to show up as the
+// current choice rather than leaving the box blank.
+function retryWindowOptions(currentSeconds) {
+  const current = String(currentSeconds ?? DEFAULT_RETRY_WINDOW_SECONDS)
+  if (RETRY_WINDOW_CHOICES.some((choice) => choice.value === current)) return RETRY_WINDOW_CHOICES
+  const seconds = Number(current)
+  const label = seconds === 0 ? 'Do not retry' : `${seconds} seconds`
+  return [...RETRY_WINDOW_CHOICES, { value: current, label }].sort(
+    (a, b) => Number(a.value) - Number(b.value)
+  )
+}
 
 function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
@@ -849,7 +876,7 @@ export default function Settings() {
 
   const renderRecording = () => (
     <Stack gap="xl">
-      <SectionHeader title="Recording" description="Folders, concurrency, and default timing for recordings" />
+      <SectionHeader title="Recording" description="Folders, concurrency, and timing for recordings" />
 
       <SubGroup label="Storage">
         <TextInput
@@ -913,6 +940,43 @@ export default function Settings() {
         </Stack>
       </SubGroup>
 
+      <SubGroup label="Scheduled downloads">
+        <Stack gap={0}>
+          <SettingRow
+            label="Wait after recording"
+            description="Wait after the scheduled end, including End late padding, before downloading from catchup. Set to 0 to start immediately."
+          >
+            <NumberStepper
+              aria-label="Scheduled download delay"
+              min={0}
+              max={120}
+              unit="min"
+              value={formData.scheduled_download_delay_minutes}
+              onChange={(val) => handleChange('scheduled_download_delay_minutes', val)}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
+      <SubGroup label="Provider outages">
+        <Stack gap={0}>
+          <SettingRow
+            label="Keep retrying for"
+            description="If your provider drops out partway through a recording, Mustarrd waits and reconnects, picking up where it left off. This is how long one recording will spend waiting in total before it gives up. Whatever it captured is kept if it plays."
+          >
+            <Select
+              aria-label="Keep retrying for"
+              value={String(formData.download_retry_window_seconds ?? DEFAULT_RETRY_WINDOW_SECONDS)}
+              onChange={(val) => {
+                if (val !== null) handleChange('download_retry_window_seconds', Number(val))
+              }}
+              data={retryWindowOptions(formData.download_retry_window_seconds)}
+              allowDeselect={false}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
       <SubGroup label="Padding defaults">
         <Stack gap={0}>
           <SettingRow label="Start early" description="Begin recordings this many minutes before the scheduled start">
@@ -944,6 +1008,7 @@ export default function Settings() {
     const container = !formData.transcode_enabled ? 'ts' : formData.transcode_format === 'mp4' ? 'mp4' : 'mkv'
     const method = formData.remux_only ? 'remux' : 'encode'
     const isTs = container === 'ts'
+    const trimBuffer = Boolean(formData.trim_dispatcharr_buffer)
     const comskipOn = Boolean(formData.comskip_enabled)
     // Off / Mark / Cut. comskip_cut defaults to Cut (true) when comskip is on.
     const comskipMode = !comskipOn ? 'off' : (formData.comskip_cut === false ? 'mark' : 'cut')
@@ -951,7 +1016,7 @@ export default function Settings() {
     const comskipReady = toolsStatus?.comskip?.available
 
     const summary = isTs
-      ? 'No processing. The raw .ts file is kept as downloaded.'
+      ? 'Keep the recording in its original .ts format.'
       : method === 'remux'
         ? `The stream is wrapped in an ${container.toUpperCase()} file without re-encoding. Fast and lossless.`
         : container === 'mp4'
@@ -990,6 +1055,20 @@ export default function Settings() {
     return (
       <Stack gap="xl">
         <SectionHeader title="Post-Processing" description="What happens to a recording after the download finishes" />
+
+        <SubGroup label="Before other processing">
+          <SettingRow
+            label="Trim extra time from the end"
+            description="Some sources hand back more than was asked for. Dispatcharr, for example, adds buffer time to catchup recordings. When a recording measures longer than the time you requested, including your padding, this cuts the extra off the end before Commercial Skip, remuxing, or re-encoding. It applies to every catchup recording on every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. Works with Keep .ts. VOD is excluded."
+          >
+            <Switch
+              size={switchSize}
+              aria-label="Trim extra time from the end"
+              checked={trimBuffer}
+              onChange={(e) => handleChange('trim_dispatcharr_buffer', e.currentTarget.checked)}
+            />
+          </SettingRow>
+        </SubGroup>
 
         <SubGroup label="Output format">
           <Stack gap={0}>
@@ -1054,12 +1133,13 @@ export default function Settings() {
             </Alert>
           )}
 
-          {ffmpegReady === false && !isTs && (
+          {ffmpegReady === false && (!isTs || trimBuffer) && (
             <Alert color="yellow" variant="light">
               <Text size="sm">
                 ffmpeg is unavailable. The Docker image includes ffmpeg; install or fix it manually if running locally.
-                {' '}To save recordings without converting, switch the container above to{' '}
-                <Text component="span" fw={500}>Keep .ts</Text>.
+                {trimBuffer
+                  ? ' Buffer trimming also requires FFmpeg; the original is kept with a warning if trimming cannot run.'
+                  : <> To save recordings without converting, switch the container above to <Text component="span" fw={500}>Keep .ts</Text>.</>}
               </Text>
               {toolsStatus?.ffmpeg?.error && (
                 <Text size="xs" c="dimmed" mt={4}>{toolsStatus.ffmpeg.error}</Text>
@@ -1162,6 +1242,17 @@ export default function Settings() {
                 />
               </SettingRow>
             )}
+            <SettingRow
+              label="Write .nfo files"
+              description="Save a Kodi-style .nfo next to each finished recording so Plex and Jellyfin match it to the right show"
+            >
+              <Switch
+                size={switchSize}
+                aria-label="Write .nfo files"
+                checked={formData.write_nfo_files !== false}
+                onChange={(e) => handleChange('write_nfo_files', e.currentTarget.checked)}
+              />
+            </SettingRow>
           </Stack>
 
           {(formData.max_concurrent_post_processing ?? 1) > 1 && (
@@ -1330,6 +1421,38 @@ export default function Settings() {
               { value: 'light', label: 'Light' },
             ]}
           />
+        </SettingRow>
+      </Stack>
+    </Stack>
+  )
+
+  const renderUpdates = () => (
+    <Stack gap="xl">
+      <SectionHeader title="Updates" description="Find out when a newer version of Mustarrd is out" />
+
+      <Stack gap={0}>
+        <SettingRow
+          label="Check for updates"
+          description="Once a day, ask GitHub whether there is a newer Mustarrd image and say so under the bell. Sends nothing about you or your recordings."
+        >
+          <Switch
+            size={switchSize}
+            aria-label="Check for updates"
+            checked={formData.update_check_enabled !== false}
+            onChange={(e) => handleChange('update_check_enabled', e.currentTarget.checked)}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Running build"
+          description={
+            formData.build_sha
+              ? 'The code version this server was built from'
+              : 'Built outside the published Docker image, so there is nothing to compare against and no check runs'
+          }
+        >
+          <Text size="sm" ff="monospace" c={formData.build_sha ? undefined : 'dimmed'}>
+            {formData.build_sha ? formData.build_sha.slice(0, 7) : 'Local build'}
+          </Text>
         </SettingRow>
       </Stack>
     </Stack>
@@ -1661,16 +1784,26 @@ export default function Settings() {
   )
 
   const comskipErrors = getComskipErrors(formData)
+  const webhookErrors = getWebhookErrors(formData)
 
   const renderComskip = () => (
     <ComskipSection
       formData={formData}
       onChange={handleChange}
       onNavigateToProcessing={() => selectSection('processing')}
+      hwDecodeModes={toolsStatus?.comskip_hw_decode_modes}
       onResetDefaults={() => {
         applyChanges({ ...COMSKIP_DEFAULTS })
       }}
     />
+  )
+
+  const renderWebhooks = () => (
+    <WebhooksSection formData={formData} onChange={handleChange} />
+  )
+
+  const renderPosterArt = () => (
+    <PosterArtSection formData={formData} onChange={handleChange} switchSize={switchSize} />
   )
 
   const sectionContent = {
@@ -1681,8 +1814,11 @@ export default function Settings() {
     guide: renderGuide,
     appearance: renderAppearance,
     security: renderSecurity,
+    updates: renderUpdates,
     users: renderUsers,
     plex: renderPlex,
+    webhooks: renderWebhooks,
+    'poster-art': renderPosterArt,
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }
@@ -1880,7 +2016,7 @@ export default function Settings() {
         <SaveBar
           count={changedCount}
           saving={updateMutation.isPending}
-          disabled={Object.keys(comskipErrors).length > 0}
+          disabled={Object.keys(comskipErrors).length > 0 || Object.keys(webhookErrors).length > 0}
           onSave={handleSave}
           onDiscard={handleReset}
         />

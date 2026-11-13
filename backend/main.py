@@ -34,6 +34,7 @@ from api import (
     onboarding,
     admin_users,
     admin_plex,
+    notifications as notifications_api,
 )
 from models import AppSettings
 from security import CSRF_HEADER_NAME, CSRF_SESSION_KEY, origin_is_allowed
@@ -70,11 +71,30 @@ async def lifespan(app: FastAPI):
     from services.download_manager import download_manager
     from services.scheduled_manager import scheduled_manager
     from services.epg_ingest_manager import epg_ingest_manager
+    from services.recording_events import recording_events
+    from services.webhook_dispatcher import register_webhook_subscriber
+    from services.notifications import (
+        notification_sweeper,
+        register_notification_subscriber,
+    )
+    from services.update_check import update_checker
+    from services.poster_art import register_poster_art_subscriber
+
+    # Drains the recording lifecycle event queue. Started before recovery so
+    # the events recovery publishes are delivered rather than sitting in the
+    # queue until the first download. Subscribers register before the drain
+    # starts so nothing published during recovery is missed.
+    register_webhook_subscriber(recording_events)
+    register_notification_subscriber(recording_events)
+    register_poster_art_subscriber(recording_events)
+    recording_event_task = asyncio.create_task(recording_events.run())
     await download_manager.recover_incomplete_downloads()
     download_task = asyncio.create_task(download_manager.process_queue())
     post_process_task = asyncio.create_task(download_manager.process_post_queue())
     schedule_task = asyncio.create_task(scheduled_manager.process_queue())
     epg_task = asyncio.create_task(epg_ingest_manager.process_queue())
+    notification_task = asyncio.create_task(notification_sweeper.process_queue())
+    update_check_task = asyncio.create_task(update_checker.process_queue())
 
     yield
 
@@ -86,7 +106,19 @@ async def lifespan(app: FastAPI):
     post_process_task.cancel()
     schedule_task.cancel()
     epg_task.cancel()
-    await asyncio.gather(download_task, post_process_task, schedule_task, epg_task, return_exceptions=True)
+    recording_event_task.cancel()
+    notification_task.cancel()
+    update_check_task.cancel()
+    await asyncio.gather(
+        download_task,
+        post_process_task,
+        schedule_task,
+        epg_task,
+        recording_event_task,
+        notification_task,
+        update_check_task,
+        return_exceptions=True,
+    )
 
 
 app = FastAPI(
@@ -308,6 +340,7 @@ app.include_router(logs.router, prefix="/api", tags=["logs"])
 app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(admin_users.router, prefix="/api/admin", tags=["admin-users"])
 app.include_router(admin_plex.router, prefix="/api/admin", tags=["admin-plex"])
+app.include_router(notifications_api.router, prefix="/api/notifications", tags=["notifications"])
 
 
 @app.get("/api/health")

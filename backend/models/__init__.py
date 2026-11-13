@@ -5,6 +5,7 @@ from .settings import AppSettings
 from .scheduled_recording import ScheduledRecording, ScheduledStatus
 from .recording_rule import RecordingRule
 from .starred_channel import StarredChannel
+from .notification import Notification, NotificationDismissal
 from .user import User, UserIdentity, UserSetupToken, PlexServer
 
 __all__ = [
@@ -21,4 +22,6 @@ __all__ = [
     "UserIdentity",
     "UserSetupToken",
     "PlexServer",
+    "Notification",
+    "NotificationDismissal",
 ]

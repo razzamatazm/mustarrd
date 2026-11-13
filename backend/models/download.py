@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from enum import Enum
 from sqlalchemy import String, Integer, DateTime, Float, ForeignKey, Text, Boolean
@@ -12,6 +13,10 @@ class DownloadStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Capture stopped early but left a file ffprobe can open. The recording is
+    # kept, post-processed and moved to the completed folder like a completed
+    # one; the status records that it is short.
+    INTERRUPTED = "interrupted"
 
 
 class Download(Base):
@@ -46,6 +51,34 @@ class Download(Base):
     # Actual duration of the recorded file (ffprobe), as opposed to the EPG
     # program duration in duration_minutes. Null when probing was unavailable.
     recorded_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Original catchup media, measured before any post-processing. Keep this
+    # distinct from the final file's duration (commercial removal shortens it).
+    raw_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_analysis_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    duration_analysis_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Outcome of this capture's buffer step, before Commercial Skip or conversion.
+    # Null on old rows: final duration is not evidence that a trim took place.
+    buffer_trim_status: Mapped[str | None] = mapped_column(String(32), nullable=True, default="not_run")
+    # Why the capture stopped early. Non-null marks the recording as interrupted
+    # and is kept separate from error_message so an interruption and a
+    # "Completed with warnings" integrity note can coexist without clobbering.
+    interruption_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Structured guide metadata for this program, as JSON, captured when the
+    # recording was queued. Guide ingest overwrites and prunes epg_programs
+    # rows, so by the time post-processing runs the original row may be gone
+    # or describe a different program; the NFO sidecar has to reflect what was
+    # on the guide when the user pressed record.
+    guide_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Poster art (services/poster_art.py): the image this recording's poster
+    # was fetched from, and which source found it. The bytes are a disk cache
+    # keyed by this URL, so this is all that has to be stored. Null means no
+    # poster has been found.
+    poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A small rendition of the same poster, for the History thumbnail.
+    poster_thumb_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    poster_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Automatic retry bookkeeping (auto_retry_failed_downloads setting)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -58,6 +91,28 @@ class Download(Base):
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def expected_duration_seconds(self) -> int | None:
+        # duration_minutes is the requested catchup range, including the
+        # user's pre/post padding. VOD does not have this timing contract.
+        if self.is_vod or not self.duration_minutes or self.duration_minutes <= 0:
+            return None
+        return self.duration_minutes * 60
+
+    @property
+    def poster_api_path(self) -> str | None:
+        """Where the UI loads this recording's poster from, or None without one.
+
+        Our own API path, not the third-party image URL: the browser never
+        talks to the poster's host. The ``v`` tag changes when the poster
+        does, so a refreshed poster is not served from cache.
+        """
+        if not self.poster_url:
+            return None
+        shown = self.poster_thumb_url or self.poster_url
+        version = hashlib.sha256(shown.encode("utf-8")).hexdigest()[:10]
+        return f"/api/downloads/{self.id}/poster?v={version}"
 
     def to_dict(self):
         return {
@@ -81,6 +136,13 @@ class Download(Base):
             "error_message": self.error_message,
             "is_vod": self.is_vod,
             "recorded_duration_seconds": self.recorded_duration_seconds,
+            "raw_duration_seconds": self.raw_duration_seconds,
+            "expected_duration_seconds": self.expected_duration_seconds,
+            "duration_analysis_status": self.duration_analysis_status,
+            "duration_analysis_reason": self.duration_analysis_reason,
+            "buffer_trim_status": self.buffer_trim_status,
+            "interruption_reason": self.interruption_reason,
+            "poster": self.poster_api_path,
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "file_deleted_at": self.file_deleted_at.isoformat() if self.file_deleted_at else None,
