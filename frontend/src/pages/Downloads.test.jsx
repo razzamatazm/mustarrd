@@ -169,7 +169,7 @@ describe('Downloads page', () => {
     })
 
     expect(await screen.findByText(`Downloaded before processing: ${formatted} · ${label}`)).toBeInTheDocument()
-    expect(screen.getByText(status === 'long' ? 'Expected: 1h (including padding) · Trim result not recorded' : 'Expected: 1h (including padding)')).toBeInTheDocument()
+    expect(screen.getByText('Expected: 1h (including padding)')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: 'Completed' }))
@@ -200,11 +200,7 @@ describe('Downloads page', () => {
   it.each([
     ['trimmed', 'Successfully trimmed to expected length'],
     ['failed', 'Not trimmed — trim failed'],
-    ['not_run', 'Not trimmed'],
     ['already_matched', 'Already at expected length (no trim needed)'],
-    [null, 'Trim result not recorded'],
-    [undefined, 'Trim result not recorded'],
-    ['future_status', 'Trim result not recorded'],
     ['in_progress', 'Trim outcome not confirmed'],
   ])('shows saved trim outcome %s after Expected, independently of final file length', async (outcome, label) => {
     await renderDownloads({
@@ -223,6 +219,28 @@ describe('Downloads page', () => {
     expect(screen.getByText(`Expected: 2h 2m (including padding) · ${label}`)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
   })
+
+  // Most installs never turn the end-trim option on. Their long recordings,
+  // and everyone's from before the option existed, get no trim note.
+  it.each([['not_run'], [null], [undefined], ['future_status']])(
+    'adds no trim note to a long recording when the trim step has nothing to report (%s)',
+    async (outcome) => {
+      await renderDownloads({
+        downloads: [{
+          ...completedDownload,
+          duration_minutes: 122,
+          raw_duration_seconds: 7617,
+          expected_duration_seconds: 7320,
+          duration_analysis_status: 'long',
+          buffer_trim_status: outcome,
+        }],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      expect(await screen.findByText('Downloaded before processing: 2h 6m 57s · Longer than expected')).toBeInTheDocument()
+      expect(screen.getByText('Expected: 2h 2m (including padding)')).toBeInTheDocument()
+      expect(screen.queryByText(/trim/i)).not.toBeInTheDocument()
+    }
+  )
 
   it.each([
     ['unavailable', null, 'Download length unavailable', 'The raw recording was no longer available.'],

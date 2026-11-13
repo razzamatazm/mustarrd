@@ -2863,7 +2863,7 @@ class DownloadManager:
                     f"({free_gb:.1f} GB free, {required_gb} GB required)."
                 )
             await self._update_processing(
-                session, download_id, 0, "Trimming Dispatcharr buffer time...",
+                session, download_id, 0, "Trimming extra time from the end...",
                 indeterminate=True, download_progress=100.0,
             )
             await log_callback(f"Checking the excess tail against the requested {expected:.1f}s including padding.")
@@ -2871,7 +2871,7 @@ class DownloadManager:
         except Exception as exc:
             download.buffer_trim_status = "failed"
             await session.commit()
-            warning = f"Dispatcharr buffer trim failed: {exc}"
+            warning = f"Buffer trim failed: {exc}"
             await self._broadcast_log(download_id, warning, level="warning")
             return warning
         # False means a recovery probe already found the target length. It is

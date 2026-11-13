@@ -2150,8 +2150,16 @@ class PostProcessor:
             # No seek or leading cut: -t bounds only the output's end. Initial
             # non-key packets must survive when a TS starts mid-GOP. Mapping
             # every stream avoids silently dropping audio/subtitle tracks.
+            #
+            # -dts_delta_threshold 1: -t counts by the clock in the file, and
+            # provider files sometimes skip that clock ahead by a few seconds.
+            # FFmpeg only closes skips over 10s by default, so a smaller one
+            # made the file measure long and the cut then removed real
+            # footage to "fix" it. Closing every skip over 1s makes -t count
+            # footage, so only a genuinely extra tail is removed.
             result = await self._runner.run_capture([
                 ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-dts_delta_threshold", "1",
                 "-i", str(source), "-map", "0", "-c", "copy", "-copyinkf",
                 "-t", f"{expected_seconds:.6f}", "-y", str(candidate),
             ])

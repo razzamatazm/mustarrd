@@ -1058,12 +1058,12 @@ export default function Settings() {
 
         <SubGroup label="Before other processing">
           <SettingRow
-            label="Trim Dispatcharr buffer time"
-            description="Dispatcharr adds buffer time to all catchup recordings. This trims that additional time from the end of the downloaded file, before Commercial Skip, remuxing, or re-encoding. Keeps your requested start and pre/post padding, and works with Keep .ts. Checks all catchup downloads when enabled; VOD is excluded."
+            label="Trim extra time from the end"
+            description="Some sources hand back more than was asked for. Dispatcharr, for example, adds buffer time to catchup recordings. When a recording measures longer than the time you requested, including your padding, this cuts the extra off the end before Commercial Skip, remuxing, or re-encoding. It applies to every catchup recording on every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. Works with Keep .ts. VOD is excluded."
           >
             <Switch
               size={switchSize}
-              aria-label="Trim Dispatcharr buffer time"
+              aria-label="Trim extra time from the end"
               checked={trimBuffer}
               onChange={(e) => handleChange('trim_dispatcharr_buffer', e.currentTarget.checked)}
             />

@@ -1,35 +1,16 @@
 # Changelog
 
-## 2026-10-23
-
-### Improved: Show the buffer trim result beside the expected length
-
-**What you would notice:** History reports whether a long recording was successfully trimmed beside Expected, while keeping Longer than expected beside the original downloaded time. The trim setting description no longer says Off by default; its default is unchanged.
-
-**What changed:** Persist the buffer step outcome before other processing. Later commercial removal cannot be mistaken for successful trimming. Existing recordings without a saved result say Trim result not recorded. A new capture clears the prior result; interrupted or already-matching operations do not claim confirmed trimming.
-
-## 2026-10-22
-
-### Clarified: Why the Dispatcharr buffer option is useful
-
-**What you would notice:** The trim option now explains that Dispatcharr adds buffer time to catchup recordings and that this option removes that additional tail before other processing, without removing your requested padding.
-
-**What changed:** Updated the Settings explanation and its regression coverage. The measured-duration trimming behavior and disabled default are unchanged.
-
-
-## 2026-10-23
-
-### Improved: Put the original length comparison beside the downloaded time
-
-**What you would notice:** History shows Longer than expected, Shorter than expected, or Matches expected length beside Downloaded before processing, rather than beside the requested length.
-
-**What changed:** Moved the existing comparison label without changing duration analysis, recording status, or playback actions.
-
 All notable changes to Mustarrd are listed here. Most recent changes are at the top.
 
 ---
 
 ## 2026-11-12
+
+### Added: Trim extra time from the end of a recording
+
+**What you would notice:** **Settings > Post-Processing** has a new switch, **Trim extra time from the end**, off by default. Some sources hand back more than was asked for; Dispatcharr, for example, adds buffer time to catchup recordings. With the switch on, a catchup recording that measures longer than the time you requested, including your padding, has the extra cut off its end before Commercial Skip or conversion. It works with Keep .ts. It applies to every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. In History, a recording this step touched says so next to its expected length: trimmed, already the right length, or not trimmed because the trim failed. If a trim fails for any reason the original recording is kept and the recording finishes with a warning. Thanks to @matrix2669.
+
+**What changed:** The cut is a stream copy to a temporary file, which is checked for audio/video and the right length before it replaces the original. Nothing is cut unless the measured length is reliable and more than 5 seconds over what was requested; a recording whose length cannot be trusted is left alone. Provider files sometimes skip their clock ahead by a few seconds, which makes them measure long without being long, so the cut closes those skips first and counts real footage. The outcome is saved on the recording (`buffer_trim_status`), and VOD is excluded. The Keep .ts description now reads "Keep the recording in its original .ts format", since trimming can apply to it.
 
 ### Added: Poster art for finished recordings
 
@@ -66,12 +47,6 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 **What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
 
 **What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
-
-### Added: Trim extra Dispatcharr buffer time before other processing
-
-**What you would notice:** A new **Trim Dispatcharr buffer time** switch in Post-Processing can remove an unwanted extra tail from catchup downloads before Commercial Skip or conversion. It is off by default, works with Keep .ts, and preserves your requested start and pre/post padding. It checks all catchup downloads rather than guessing which accounts use Dispatcharr. On-demand downloads are excluded.
-
-**What changed:** Reliable raw-duration analysis supplies the target; no fixed five-minute correction is used. FFmpeg stream-copies the beginning to a temporary file, then Mustarrd verifies the streams and duration before replacing the original. A current-file probe makes restarting after a completed trim harmless. Failed or unverifiable trims leave the original intact and surface a completion warning while normal processing continues.
 
 ### Added: See the downloaded length before processing changes it
 

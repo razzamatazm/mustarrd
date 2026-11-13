@@ -222,7 +222,7 @@ class BufferTrimPipelineTests(unittest.IsolatedAsyncioTestCase):
         _, warnings = await self._process()
         self.processor.transcode.assert_awaited_once()
         self.assertEqual(self.source.read_bytes(), b"original recording")
-        self.assertEqual(warnings, ["Dispatcharr buffer trim failed: candidate did not validate"])
+        self.assertEqual(warnings, ["Buffer trim failed: candidate did not validate"])
 
     async def test_low_space_warns_and_keeps_original_when_trim_is_only_step(self):
         with patch("services.download_manager.get_free_space_shortfall", AsyncMock(return_value=(1.0, 25))):
@@ -237,7 +237,7 @@ class BufferTrimPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             download = await session.get(Download, self.download.id)
             self.assertEqual(download.status, DownloadStatus.COMPLETED.value)
-            self.assertIn("Completed with warnings: Dispatcharr buffer trim failed", download.error_message)
+            self.assertIn("Completed with warnings: Buffer trim failed", download.error_message)
             self.assertEqual(Path(download.output_path).read_bytes(), b"original recording")
             self.assertEqual(download.raw_duration_seconds, 4260)
 

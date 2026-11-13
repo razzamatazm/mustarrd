@@ -192,6 +192,53 @@ class RealBufferTrimTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(await processor.trim_buffer_tail(str(source), 30))
 
+    async def _video_packets(self, runner, source):
+        probe = await runner.run_capture([
+            shutil.which("ffprobe"), "-v", "error", "-select_streams", "v:0",
+            "-count_packets", "-show_entries", "stream=nb_read_packets",
+            "-of", "json", str(source),
+        ], timeout=20)
+        self.assertEqual(probe.returncode, 0, probe.stderr_text)
+        return int(json.loads(probe.stdout_text)["streams"][0]["nb_read_packets"])
+
+    async def test_a_timestamp_jump_is_not_mistaken_for_extra_footage(self):
+        """A provider file whose clock skips ahead measures long without being long.
+
+        Thirty seconds of footage with an 8 second skip in its timestamps
+        probes as 38 seconds. Cutting that "back" to 30 by the clock would
+        throw away 8 seconds of the show and still pass the length check.
+        """
+        runner = ProcessRunner()
+        processor = PostProcessor(runner)
+        with tempfile.TemporaryDirectory() as folder:
+            parts = []
+            for name, seconds, offset in (("before", 5, 0), ("after", 25, 13)):
+                part = Path(folder) / f"{name}.ts"
+                generated = await runner.run_capture([
+                    shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", f"testsrc2=size=96x64:rate=10:duration={seconds}",
+                    "-f", "lavfi", "-i", f"sine=frequency=1000:sample_rate=16000:duration={seconds}",
+                    "-c:v", "mpeg2video", "-g", "10", "-c:a", "mp2", "-b:a", "64k",
+                    "-output_ts_offset", str(offset), "-f", "mpegts", "-y", str(part),
+                ], timeout=30)
+                self.assertEqual(generated.returncode, 0, generated.stderr_text)
+                parts.append(part)
+            source = Path(folder) / "skipping-clock.ts"
+            source.write_bytes(b"".join(part.read_bytes() for part in parts))
+
+            footage = await self._video_packets(runner, source)
+            self.assertGreater(await processor._get_duration(str(source)), 36)
+
+            try:
+                await processor.trim_buffer_tail(str(source), 30)
+            except RuntimeError:
+                pass  # Refusing to touch the file is also a safe answer.
+
+            self.assertGreaterEqual(
+                await self._video_packets(runner, source), footage - 5,
+                "The trim removed footage that was never extra.",
+            )
+
     async def test_mid_gop_recording_retains_initial_non_key_packets(self):
         runner = ProcessRunner()
         processor = PostProcessor(runner)
