@@ -50,6 +50,8 @@ const baseSettings = {
   min_free_space_gb: 25,
   default_pre_padding_minutes: 1,
   default_post_padding_minutes: 2,
+  scheduled_download_delay_minutes: 5,
+  download_retry_window_seconds: 30,
   transcode_enabled: true,
   remux_only: true,
   transcode_format: 'mkv',
@@ -238,6 +240,42 @@ describe('Settings page', () => {
     })
   })
 
+  it('shows and saves the scheduled download delay', async () => {
+    renderSettings()
+    await screen.findByText('Wait after recording')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Scheduled download delay' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ scheduled_download_delay_minutes: 6 })
+  })
+
+  it('shows the retry window at its default and saves a longer one', async () => {
+    renderSettings()
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('30 seconds (default)')
+
+    fireEvent.click(input)
+    fireEvent.click(await screen.findByRole('option', { name: '10 minutes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ download_retry_window_seconds: 600 })
+  })
+
+  it('shows a retry window saved outside the app instead of a blank box', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, download_retry_window_seconds: 45 })
+    renderSettings()
+
+    const input = await screen.findByRole('textbox', { name: 'Keep retrying for' })
+    expect(input.value).toBe('45 seconds')
+  })
+
   it('discards edits from the save bar', async () => {
     renderSettings()
     await screen.findByText('Max concurrent downloads')
@@ -380,6 +418,40 @@ describe('Settings page', () => {
       expect(settingsApi.update).toHaveBeenCalled()
     })
     expect(settingsApi.update.mock.calls[0][0]).toEqual({ write_nfo_files: false })
+  })
+
+  it('turns the update check off and saves only that field', async () => {
+    settingsApi.get.mockResolvedValue({
+      ...baseSettings,
+      update_check_enabled: true,
+      build_sha: '0123456789abcdef0123456789abcdef01234567',
+    })
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    const toggle = await screen.findByRole('switch', { name: 'Check for updates' })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText('0123456')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => {
+      expect(settingsApi.update).toHaveBeenCalled()
+    })
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ update_check_enabled: false })
+  })
+
+  it('says when this build has no commit to check against', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+
+    fireEvent.click(screen.getByText('Updates'))
+
+    expect(await screen.findByRole('switch', { name: 'Check for updates' })).toBeChecked()
+    expect(screen.getByText('Local build')).toBeInTheDocument()
   })
 
   it('maps the two-step format picker onto the transcode fields', async () => {

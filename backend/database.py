@@ -152,6 +152,29 @@ async def _apply_lightweight_migrations(conn) -> None:
             text("ALTER TABLE app_settings ADD COLUMN auto_retry_failed_downloads BOOLEAN DEFAULT 0")
         )
 
+    if not await _column_exists(conn, "app_settings", "update_check_enabled"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN update_check_enabled BOOLEAN DEFAULT 1")
+        )
+
+    if not await _column_exists(conn, "app_settings", "scheduled_download_delay_minutes"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN scheduled_download_delay_minutes INTEGER DEFAULT 5"
+            )
+        )
+
+    # 30 seconds is what the hard-coded retry constants added up to, so an
+    # existing install keeps retrying exactly as it did.
+    if not await _column_exists(conn, "app_settings", "download_retry_window_seconds"):
+        await conn.execute(
+            text(
+                "ALTER TABLE app_settings "
+                "ADD COLUMN download_retry_window_seconds INTEGER DEFAULT 30"
+            )
+        )
+
     if not await _column_exists(conn, "app_settings", "mark_short_downloads_failed"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN mark_short_downloads_failed BOOLEAN DEFAULT 0")
@@ -200,6 +223,23 @@ async def _apply_lightweight_migrations(conn) -> None:
                 text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_spec}")
             )
 
+    # One webhook URL per recording lifecycle event; empty means off.
+    webhook_url_columns = (
+        "webhook_url_recording_started",
+        "webhook_url_recording_completed",
+        "webhook_url_recording_failed",
+        "webhook_url_recording_cancelled",
+        "webhook_url_postprocessing_completed",
+    )
+    for column_name in webhook_url_columns:
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(
+                    f"ALTER TABLE app_settings ADD COLUMN {column_name} "
+                    "VARCHAR(1000) DEFAULT ''"
+                )
+            )
+
     if not await _column_exists(conn, "app_settings", "vaapi_render_device"):
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN vaapi_render_device VARCHAR(255) DEFAULT ''")
@@ -239,6 +279,27 @@ async def _apply_lightweight_migrations(conn) -> None:
         await conn.execute(
             text("ALTER TABLE app_settings ADD COLUMN write_nfo_files BOOLEAN DEFAULT 1")
         )
+
+    # Poster art (#443): which image a recording's poster came from, the two
+    # switches, and the optional (encrypted) TMDB key.
+    for column_name, column_type in (
+        ("poster_url", "TEXT"),
+        ("poster_thumb_url", "TEXT"),
+        ("poster_source", "VARCHAR(32)"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_type}")
+            )
+    for column_name, column_type in (
+        ("poster_art_enabled", "BOOLEAN DEFAULT 1"),
+        ("poster_art_save_to_library", "BOOLEAN DEFAULT 1"),
+        ("tmdb_api_key_encrypted", "TEXT"),
+    ):
+        if not await _column_exists(conn, "app_settings", column_name):
+            await conn.execute(
+                text(f"ALTER TABLE app_settings ADD COLUMN {column_name} {column_type}")
+            )
 
 
 async def _carry_over_legacy_comskip_ini(conn) -> None:

@@ -11,6 +11,10 @@ Transient network errors (aiohttp.ClientError transport failures, timeouts)
 are retried up to TRANSIENT_RETRY_LIMIT times with backoff, resuming from the
 bytes already on disk via HTTP Range. Non-network errors (HTTP status errors,
 disk errors) still fail fast.
+
+Since #442 the number of retries comes from the retry window setting. These
+tests run with no settings row, which means the default window, and that is
+still TRANSIENT_RETRY_LIMIT retries. See test_download_retry_window.py.
 """
 
 import asyncio
@@ -137,7 +141,8 @@ class DownloadTransientRetryTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
-                patch("services.download_manager.TRANSIENT_RETRY_BACKOFF_SECONDS", 0),
+                patch("services.download_manager.asyncio.sleep", AsyncMock()),
+                patch.object(manager, "_load_app_settings", AsyncMock(return_value=None)),
                 patch.object(manager, "_broadcast_log", AsyncMock()),
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):
@@ -175,7 +180,8 @@ class DownloadTransientRetryTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
-                patch("services.download_manager.TRANSIENT_RETRY_BACKOFF_SECONDS", 0),
+                patch("services.download_manager.asyncio.sleep", AsyncMock()),
+                patch.object(manager, "_load_app_settings", AsyncMock(return_value=None)),
                 patch.object(manager, "_broadcast_log", AsyncMock()),
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):
@@ -203,7 +209,8 @@ class DownloadTransientRetryTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
-                patch("services.download_manager.TRANSIENT_RETRY_BACKOFF_SECONDS", 0),
+                patch("services.download_manager.asyncio.sleep", AsyncMock()),
+                patch.object(manager, "_load_app_settings", AsyncMock(return_value=None)),
                 patch.object(manager, "_broadcast_log", AsyncMock()),
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):
@@ -236,7 +243,8 @@ class DownloadTransientRetryTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch("services.download_manager.aiohttp.ClientSession", return_value=client_cm),
-                patch("services.download_manager.TRANSIENT_RETRY_BACKOFF_SECONDS", 0),
+                patch("services.download_manager.asyncio.sleep", AsyncMock()),
+                patch.object(manager, "_load_app_settings", AsyncMock(return_value=None)),
                 patch.object(manager, "_broadcast_log", AsyncMock()),
                 patch.object(manager, "_broadcast_progress", AsyncMock()),
             ):

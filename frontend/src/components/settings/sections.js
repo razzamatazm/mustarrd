@@ -6,10 +6,13 @@ import {
   IconListDetails,
   IconLock,
   IconMoon,
+  IconPhoto,
+  IconRefresh,
   IconScissors,
   IconServer,
   IconUsers,
   IconWand,
+  IconWebhook,
 } from '@tabler/icons-react'
 
 // The settings IA: 3 groups, order matters.
@@ -20,6 +23,7 @@ export const SECTION_GROUPS = [
       { id: 'accounts', label: 'Accounts', icon: IconServer },
       { id: 'plex', label: 'Plex Integration', icon: IconDeviceTv },
       { id: 'users', label: 'Users', icon: IconUsers },
+      { id: 'webhooks', label: 'Webhooks', icon: IconWebhook },
     ],
   },
   {
@@ -29,6 +33,7 @@ export const SECTION_GROUPS = [
       { id: 'processing', label: 'Post-Processing', icon: IconWand },
       { id: 'comskip', label: 'Commercial Skip', icon: IconScissors },
       { id: 'naming', label: 'File Naming', icon: IconFile },
+      { id: 'poster-art', label: 'Poster Art', icon: IconPhoto },
     ],
   },
   {
@@ -37,6 +42,7 @@ export const SECTION_GROUPS = [
       { id: 'guide', label: 'Program Guide', icon: IconCalendar },
       { id: 'appearance', label: 'Appearance', icon: IconMoon },
       { id: 'security', label: 'Security', icon: IconLock },
+      { id: 'updates', label: 'Updates', icon: IconRefresh },
       { id: 'logs', label: 'Logs', icon: IconListDetails },
     ],
   },
@@ -62,6 +68,8 @@ export const SEARCH_INDEX = [
   { label: 'Completed folder', section: 'recording', kw: 'storage path media library output' },
   { label: 'Max concurrent downloads', section: 'recording', kw: 'simultaneous parallel limit' },
   { label: 'Minimum free space', section: 'recording', kw: 'disk gb pause low' },
+  { label: 'Scheduled download delay', section: 'recording', kw: 'wait after airing catchup provider archive minutes' },
+  { label: 'Keep retrying for (provider outages)', section: 'recording', kw: 'retry window outage reconnect network dropped interrupted resume minutes' },
   { label: 'Recording padding (start early / end late)', section: 'recording', kw: 'minutes before after buffer' },
   { label: 'Mark short downloads as failed', section: 'recording', kw: 'recovery interrupted incomplete duration retry missing recording' },
   { label: 'Output container (.ts / MKV / MP4)', section: 'processing', kw: 'format remux transcode encode ffmpeg' },
@@ -77,6 +85,9 @@ export const SEARCH_INDEX = [
   { label: 'TV show filename template', section: 'naming', kw: 'season episode SxxExx plex naming' },
   { label: 'Movie filename template', section: 'naming', kw: 'year title naming' },
   { label: 'Sports filename template', section: 'naming', kw: 'league teams date naming' },
+  { label: 'Fetch poster art', section: 'poster-art', kw: 'artwork cover image thumbnail picture tmdb tvmaze history' },
+  { label: 'Save a copy next to the recording (poster)', section: 'poster-art', kw: 'artwork poster.jpg library kodi jellyfin plex cover image file' },
+  { label: 'TMDB API key', section: 'poster-art', kw: 'artwork poster themoviedb token movies films cover' },
   { label: 'IPTV provider accounts', section: 'accounts', kw: 'xtream server url username add' },
   { label: 'Force EPG refresh', section: 'accounts', kw: 'rebuild guide clear' },
   { label: 'Plex server & libraries', section: 'plex', kw: 'connect library scan refresh' },
@@ -85,5 +96,11 @@ export const SEARCH_INDEX = [
   { label: 'Guide refresh interval', section: 'guide', kw: 'epg sync hours automatic' },
   { label: 'Theme (dark / light)', section: 'appearance', kw: 'mode color' },
   { label: 'Admin password', section: 'security', kw: 'change credentials login' },
+  { label: 'Check for updates', section: 'updates', kw: 'new version upgrade docker image latest github build' },
   { label: 'Application logs', section: 'logs', kw: 'errors warnings activity debug' },
+  { label: 'Recording started webhook', section: 'webhooks', kw: 'webhook notify http post json event start' },
+  { label: 'Recording finished webhook', section: 'webhooks', kw: 'webhook notify http post json event completed done plex jellyfin scan' },
+  { label: 'Recording failed webhook', section: 'webhooks', kw: 'webhook notify http post json event error alert' },
+  { label: 'Recording cancelled webhook', section: 'webhooks', kw: 'webhook notify http post json event stopped' },
+  { label: 'Processing finished webhook', section: 'webhooks', kw: 'webhook notify http post json event postprocessing comskip transcode plex jellyfin scan' },
 ]

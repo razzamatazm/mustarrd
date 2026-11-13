@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urljoin, urlencode, quote
 
+from services.provider_http import provider_request_headers
+
 
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=90)
 # Full channel list and per-channel EPG backfill responses are as heavy as VOD
@@ -152,6 +154,17 @@ def restyle_timeshift_url(url: Optional[str], style: str) -> Optional[str]:
     return _format_timeshift_url(style=style, **parts)
 
 
+def parse_expiration_date(user_info: dict) -> Optional[datetime]:
+    """The account's expiry from an authenticate() ``user_info``, or None."""
+    raw = (user_info or {}).get("exp_date")
+    if not raw:
+        return None
+    try:
+        return datetime.fromtimestamp(int(raw))
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
 class XtreamClient:
     def __init__(self, server_url: str, username: str, password: str):
         self.server_url = server_url.rstrip("/")
@@ -162,7 +175,8 @@ class XtreamClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers=provider_request_headers(),
             )
         return self._session
 

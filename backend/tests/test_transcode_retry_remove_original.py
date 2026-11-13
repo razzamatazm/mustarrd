@@ -62,6 +62,8 @@ class TranscodeRetryRemoveOriginalTests(unittest.IsolatedAsyncioTestCase):
 
             processor = PostProcessor()
             processor._ffmpeg_path = "/usr/bin/ffmpeg"
+            log_messages = []
+            status_messages = []
 
             call_count = 0
 
@@ -99,6 +101,8 @@ class TranscodeRetryRemoveOriginalTests(unittest.IsolatedAsyncioTestCase):
                     hw_accel=HardwareAccel.CPU,
                     remux_only=True,
                     remove_original=True,
+                    log_callback=log_messages.append,
+                    status_callback=status_messages.append,
                 )
 
             self.assertEqual(call_count, 2, "Expected remux attempt then full-encode retry.")
@@ -108,6 +112,22 @@ class TranscodeRetryRemoveOriginalTests(unittest.IsolatedAsyncioTestCase):
                 "Original .ts must be deleted when remove_original=True and retry succeeds. "
                 "Bug: early return in the retry block bypasses the remove_original deletion.",
             )
+            fallback_message = "Remux failed; re-encoding with CPU (libx264)."
+            self.assertIn(fallback_message, log_messages)
+            self.assertIn(fallback_message, status_messages)
+
+    def test_fallback_encoder_description_names_acceleration_and_encoder(self):
+        processor = PostProcessor()
+        expectations = {
+            HardwareAccel.CPU: "CPU (libx264)",
+            HardwareAccel.VAAPI: "VA-API (h264_vaapi)",
+            HardwareAccel.NVIDIA: "NVENC (h264_nvenc)",
+            HardwareAccel.AMD: "AMF (h264_amf)",
+            HardwareAccel.APPLE_SILICON: "VideoToolbox (hevc_videotoolbox)",
+        }
+        for accel, expected in expectations.items():
+            with self.subTest(accel=accel):
+                self.assertEqual(processor._encoder_description(accel), expected)
 
     async def test_remux_success_removes_original(self):
         """Baseline: when remux succeeds on first try, original is deleted (no regression)."""

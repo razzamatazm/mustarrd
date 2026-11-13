@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, conint
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, delete as sql_delete
@@ -22,6 +22,12 @@ from database import get_session
 from models import AppSettings, Download, DownloadStatus, XtreamAccount, User, ScheduledRecording, ScheduledStatus
 from services.disk_space import check_disk_space
 from services.download_manager import download_manager
+from services.poster_art import (
+    OUTCOME_DISABLED,
+    OUTCOME_SKIPPED,
+    is_poster_eligible,
+    poster_art,
+)
 from api.hls_common import hls_asset_response, hls_http_error, hls_playlist_response
 from services.hls_streamer import (
     HLS_ASSET_PATTERN,
@@ -32,6 +38,7 @@ from services.hls_streamer import (
 from services.file_namer import file_namer
 from services.epg_service import epg_service
 from services.download_builder import build_download_from_program
+from schedule_timing import get_scheduled_download_delay_minutes
 
 
 router = APIRouter()
@@ -236,7 +243,9 @@ async def get_upcoming_recordings(
     if not auth.is_admin:
         query = query.where(ScheduledRecording.requested_by_user_id == auth.user_id)
     result = await session.execute(query)
-    return [r.to_dict() for r in result.scalars().all()]
+    recordings = result.scalars().all()
+    download_delay_minutes = await get_scheduled_download_delay_minutes(session)
+    return [r.to_dict(download_delay_minutes) for r in recordings]
 
 
 @router.get("")
@@ -612,6 +621,93 @@ async def get_download_hls_asset(
         raise HTTPException(status_code=409, detail="No active playback session for this download")
     hls_streamer.touch(hls_session)
     return hls_asset_response(hls_session, asset)
+
+
+async def _owned_download(
+    download_id: int, auth: AuthContext, session: AsyncSession
+) -> Download:
+    query = select(Download).where(Download.id == download_id)
+    if not auth.is_admin:
+        query = query.where(Download.requested_by_user_id == auth.user_id)
+    download = (await session.execute(query)).scalar_one_or_none()
+    if not download:
+        raise HTTPException(status_code=404, detail="Download not found")
+    return download
+
+
+@router.get("/{download_id}/poster")
+async def get_download_poster(
+    download_id: int,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a recording's poster, as a thumbnail, from the disk cache.
+
+    The row stores which image the poster is; the bytes come from the cache
+    and are refetched if the cache has been cleared. The browser is given
+    this path rather than the image's own address, so it never contacts the
+    poster's host.
+    """
+    download = await _owned_download(download_id, auth, session)
+    thumb_url, poster_url = download.poster_thumb_url, download.poster_url
+    settings_row = (await session.execute(select(AppSettings))).scalar_one_or_none()
+    # Switched off means no requests to the poster's host, including from
+    # here: a poster already on disk is still shown, a lost one is not refetched.
+    may_fetch = settings_row is None or settings_row.poster_art_enabled is not False
+    # Let go of the database before any refetch reaches for the network.
+    await session.close()
+
+    result = await poster_art.read(thumb_url, poster_url, fetch=may_fetch)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No poster for this recording")
+    content, content_type = result
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            # The path carries a version tag that changes with the poster.
+            "Cache-Control": "private, max-age=604800, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+    )
+
+
+@router.post("/{download_id}/poster/refresh")
+async def refresh_download_poster(
+    download_id: int,
+    auth: AuthContext = Depends(require_admin_or_download_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Look a finished recording's poster up again and replace what is there."""
+    download = await _owned_download(download_id, auth, session)
+    if not is_poster_eligible(download):
+        raise HTTPException(
+            status_code=400,
+            detail="Artwork can only be refreshed for a finished recording",
+        )
+    await session.close()
+
+    # A show folder's poster.jpg is shared by every episode in it, including
+    # other people's, so only an admin's refresh may overwrite one.
+    outcome = await poster_art.attach(
+        download_id, replace=True, replace_show_poster=auth.is_admin
+    )
+    if outcome.status == OUTCOME_DISABLED:
+        raise HTTPException(
+            status_code=409,
+            detail="Poster art is turned off. An admin can turn it on in Settings.",
+        )
+    if outcome.status == OUTCOME_SKIPPED:
+        raise HTTPException(status_code=404, detail="Download not found")
+
+    refreshed = (
+        await session.execute(select(Download).where(Download.id == download_id))
+    ).scalar_one_or_none()
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Download not found")
+    await session.refresh(refreshed)
+    return {"found": outcome.found, "download": refreshed.to_dict()}
 
 
 @router.delete("/{download_id}")

@@ -12,6 +12,7 @@ from services.epg_service import epg_service, NoCatchupSupportError
 from services.disk_space import get_free_space_gb
 from services.retry_policy import AUTO_RETRY_MAX_ATTEMPTS, AUTO_RETRY_MIN_INTERVAL_MINUTES
 from config import settings as app_settings
+from schedule_timing import resolve_scheduled_download_delay_minutes
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +119,17 @@ class ScheduledManager:
             settings = settings_result.scalar_one_or_none()
             download_folder = settings.download_folder if settings and settings.download_folder else app_settings.default_download_folder
             min_free_gb = settings.min_free_space_gb if settings and settings.min_free_space_gb is not None else 25
+            download_delay_minutes = resolve_scheduled_download_delay_minutes(
+                settings.scheduled_download_delay_minutes if settings else None
+            )
 
             ready = []
             for schedule in schedules:
-                available_at = schedule.available_at_utc()
-                if not available_at:
+                archive_ready_at = schedule.available_at_utc()
+                if not archive_ready_at:
                     continue
-                if available_at <= now_utc:
+                download_at = schedule.available_at_utc(download_delay_minutes)
+                if download_at <= now_utc:
                     try:
                         archive_days = await self._get_catchup_window_days(session, schedule)
                     except NoCatchupSupportError as exc:
@@ -139,7 +144,7 @@ class ScheduledManager:
                         )
                         continue
                     catchup_expiry = now_utc - timedelta(days=archive_days)
-                    program_end_utc = available_at - timedelta(minutes=int(schedule.post_padding_minutes or 0))
+                    program_end_utc = archive_ready_at - timedelta(minutes=int(schedule.post_padding_minutes or 0))
                     # Timeshift URLs are keyed to program start; compare padded start
                     # against the boundary, not program end.
                     if schedule.start_timestamp:

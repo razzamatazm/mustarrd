@@ -1,7 +1,12 @@
-from sqlalchemy import String, Integer, Boolean
+from sqlalchemy import String, Integer, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 from config import settings as app_settings
+from schedule_timing import DEFAULT_SCHEDULED_DOWNLOAD_DELAY_MINUTES
+from download_retry_window import (
+    DEFAULT_RETRY_WINDOW_SECONDS,
+    resolve_retry_window_seconds,
+)
 
 
 class AppSettings(Base):
@@ -39,6 +44,16 @@ class AppSettings(Base):
     min_free_space_gb: Mapped[int] = mapped_column(Integer, default=25)
     default_pre_padding_minutes: Mapped[int] = mapped_column(Integer, default=1)
     default_post_padding_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    scheduled_download_delay_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=DEFAULT_SCHEDULED_DOWNLOAD_DELAY_MINUTES,
+    )
+    # Total seconds a recording spends waiting for the provider to come back
+    # after a network error mid-download. See download_retry_window.py.
+    download_retry_window_seconds: Mapped[int] = mapped_column(
+        Integer,
+        default=DEFAULT_RETRY_WINDOW_SECONDS,
+    )
     default_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_concurrent_post_processing: Mapped[int] = mapped_column(Integer, default=1)
 
@@ -58,6 +73,9 @@ class AppSettings(Base):
     # Classification does not enable the failed-download retry master switch.
     mark_short_downloads_failed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Daily check against GitHub for a newer build (services/update_check.py).
+    update_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
     # Post-download ffprobe sanity check; flags suspect files as
     # "Completed with warnings" without failing the recording.
     integrity_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -65,6 +83,15 @@ class AppSettings(Base):
     # Write a Kodi-format .nfo sidecar next to each finished recording so Plex
     # and Jellyfin match it against the right show.
     write_nfo_files: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Poster art (services/poster_art.py). Looking a poster up tells TMDB or
+    # TVMaze the name of the show, so it can be turned off; saving a copy into
+    # the library is a second switch for people who only want the thumbnail.
+    poster_art_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    poster_art_save_to_library: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional TMDB API key, AES-GCM encrypted like account passwords. Never
+    # returned by the API: to_dict() only says whether one is saved.
+    tmdb_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     comskip_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Cut vs Mark. True = Cut (physically remove commercials, the pre-existing
@@ -104,6 +131,16 @@ class AppSettings(Base):
         default="resource_connections_only",
     )
 
+    # Webhooks: one URL per recording lifecycle event, empty means off.
+    # Validated on save by services.webhook_dispatcher.validate_webhook_url.
+    webhook_url_recording_started: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_completed: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_failed: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_recording_cancelled: Mapped[str] = mapped_column(String(1000), default="")
+    webhook_url_postprocessing_completed: Mapped[str] = mapped_column(
+        String(1000), default=""
+    )
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -117,6 +154,10 @@ class AppSettings(Base):
             "min_free_space_gb": self.min_free_space_gb,
             "default_pre_padding_minutes": self.default_pre_padding_minutes,
             "default_post_padding_minutes": self.default_post_padding_minutes,
+            "scheduled_download_delay_minutes": self.scheduled_download_delay_minutes,
+            "download_retry_window_seconds": resolve_retry_window_seconds(
+                self.download_retry_window_seconds
+            ),
             "default_account_id": self.default_account_id,
             "max_concurrent_post_processing": self.max_concurrent_post_processing,
             "transcode_enabled": self.transcode_enabled,
@@ -127,6 +168,9 @@ class AppSettings(Base):
             "remux_only": self.remux_only,
             "integrity_check_enabled": self.integrity_check_enabled,
             "write_nfo_files": self.write_nfo_files,
+            "poster_art_enabled": self.poster_art_enabled is not False,
+            "poster_art_save_to_library": self.poster_art_save_to_library is not False,
+            "tmdb_api_key_set": bool(self.tmdb_api_key_encrypted),
             "comskip_enabled": self.comskip_enabled,
             "comskip_cut": self.comskip_cut,
             "comskip_path": self.comskip_path,
@@ -151,10 +195,19 @@ class AppSettings(Base):
             "show_future_programs": self.show_future_programs,
             "launch_on_startup": self.launch_on_startup,
             "auto_retry_failed_downloads": self.auto_retry_failed_downloads,
+            "update_check_enabled": self.update_check_enabled is not False,
+            # Read-only: the commit this build was made from, "" if unknown.
+            "build_sha": app_settings.build_sha or "",
             "mark_short_downloads_failed": self.mark_short_downloads_failed,
             "onboarding_dismissed": self.onboarding_dismissed,
             "onboarding_processing_confirmed": self.onboarding_processing_confirmed,
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,
             "onboarding_selected_profile": self.onboarding_selected_profile,
             "plex_outbound_policy": self.plex_outbound_policy,
+            "webhook_url_recording_started": self.webhook_url_recording_started or "",
+            "webhook_url_recording_completed": self.webhook_url_recording_completed or "",
+            "webhook_url_recording_failed": self.webhook_url_recording_failed or "",
+            "webhook_url_recording_cancelled": self.webhook_url_recording_cancelled or "",
+            "webhook_url_postprocessing_completed": self.webhook_url_postprocessing_completed
+            or "",
         }

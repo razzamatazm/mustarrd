@@ -52,8 +52,35 @@ import NumberStepper from '../components/settings/NumberStepper'
 import SaveBar from '../components/settings/SaveBar'
 import SettingsSearch from '../components/settings/SettingsSearch'
 import { SectionHeader, SettingRow, SubGroup } from '../components/settings/SettingsPrimitives'
+import WebhooksSection, { getWebhookErrors } from '../components/settings/WebhooksSection'
+import PosterArtSection from '../components/settings/PosterArtSection'
 import { SECTION_GROUPS, ADMIN_SECTIONS, DOWNLOAD_USER_SECTIONS } from '../components/settings/sections'
 import classes from './Settings.module.css'
+
+// 30 seconds is what Mustarrd always did before this was a setting.
+const DEFAULT_RETRY_WINDOW_SECONDS = 30
+const RETRY_WINDOW_CHOICES = [
+  { value: '30', label: '30 seconds (default)' },
+  { value: '60', label: '1 minute' },
+  { value: '120', label: '2 minutes' },
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+  { value: '3600', label: '1 hour' },
+]
+
+// A value saved outside the app (through the API) still has to show up as the
+// current choice rather than leaving the box blank.
+function retryWindowOptions(currentSeconds) {
+  const current = String(currentSeconds ?? DEFAULT_RETRY_WINDOW_SECONDS)
+  if (RETRY_WINDOW_CHOICES.some((choice) => choice.value === current)) return RETRY_WINDOW_CHOICES
+  const seconds = Number(current)
+  const label = seconds === 0 ? 'Do not retry' : `${seconds} seconds`
+  return [...RETRY_WINDOW_CHOICES, { value: current, label }].sort(
+    (a, b) => Number(a.value) - Number(b.value)
+  )
+}
 
 function isPlexNotConnectedError(message) {
   return (message || '').toLowerCase().includes('plex account is not connected')
@@ -849,7 +876,7 @@ export default function Settings() {
 
   const renderRecording = () => (
     <Stack gap="xl">
-      <SectionHeader title="Recording" description="Folders, concurrency, and default timing for recordings" />
+      <SectionHeader title="Recording" description="Folders, concurrency, and timing for recordings" />
 
       <SubGroup label="Storage">
         <TextInput
@@ -908,6 +935,43 @@ export default function Settings() {
               unit="GB"
               value={formData.min_free_space_gb}
               onChange={(val) => handleChange('min_free_space_gb', val)}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
+      <SubGroup label="Scheduled downloads">
+        <Stack gap={0}>
+          <SettingRow
+            label="Wait after recording"
+            description="Wait after the scheduled end, including End late padding, before downloading from catchup. Set to 0 to start immediately."
+          >
+            <NumberStepper
+              aria-label="Scheduled download delay"
+              min={0}
+              max={120}
+              unit="min"
+              value={formData.scheduled_download_delay_minutes}
+              onChange={(val) => handleChange('scheduled_download_delay_minutes', val)}
+            />
+          </SettingRow>
+        </Stack>
+      </SubGroup>
+
+      <SubGroup label="Provider outages">
+        <Stack gap={0}>
+          <SettingRow
+            label="Keep retrying for"
+            description="If your provider drops out partway through a recording, Mustarrd waits and reconnects, picking up where it left off. This is how long one recording will spend waiting in total before it gives up. Whatever it captured is kept if it plays."
+          >
+            <Select
+              aria-label="Keep retrying for"
+              value={String(formData.download_retry_window_seconds ?? DEFAULT_RETRY_WINDOW_SECONDS)}
+              onChange={(val) => {
+                if (val !== null) handleChange('download_retry_window_seconds', Number(val))
+              }}
+              data={retryWindowOptions(formData.download_retry_window_seconds)}
+              allowDeselect={false}
             />
           </SettingRow>
         </Stack>
@@ -1360,6 +1424,38 @@ export default function Settings() {
     </Stack>
   )
 
+  const renderUpdates = () => (
+    <Stack gap="xl">
+      <SectionHeader title="Updates" description="Find out when a newer version of Mustarrd is out" />
+
+      <Stack gap={0}>
+        <SettingRow
+          label="Check for updates"
+          description="Once a day, ask GitHub whether there is a newer Mustarrd image and say so under the bell. Sends nothing about you or your recordings."
+        >
+          <Switch
+            size={switchSize}
+            aria-label="Check for updates"
+            checked={formData.update_check_enabled !== false}
+            onChange={(e) => handleChange('update_check_enabled', e.currentTarget.checked)}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Running build"
+          description={
+            formData.build_sha
+              ? 'The code version this server was built from'
+              : 'Built outside the published Docker image, so there is nothing to compare against and no check runs'
+          }
+        >
+          <Text size="sm" ff="monospace" c={formData.build_sha ? undefined : 'dimmed'}>
+            {formData.build_sha ? formData.build_sha.slice(0, 7) : 'Local build'}
+          </Text>
+        </SettingRow>
+      </Stack>
+    </Stack>
+  )
+
   const renderSecurity = () => (
     <Stack gap="xl">
       <SectionHeader
@@ -1686,6 +1782,7 @@ export default function Settings() {
   )
 
   const comskipErrors = getComskipErrors(formData)
+  const webhookErrors = getWebhookErrors(formData)
 
   const renderComskip = () => (
     <ComskipSection
@@ -1699,6 +1796,14 @@ export default function Settings() {
     />
   )
 
+  const renderWebhooks = () => (
+    <WebhooksSection formData={formData} onChange={handleChange} />
+  )
+
+  const renderPosterArt = () => (
+    <PosterArtSection formData={formData} onChange={handleChange} switchSize={switchSize} />
+  )
+
   const sectionContent = {
     recording: renderRecording,
     processing: renderProcessing,
@@ -1707,8 +1812,11 @@ export default function Settings() {
     guide: renderGuide,
     appearance: renderAppearance,
     security: renderSecurity,
+    updates: renderUpdates,
     users: renderUsers,
     plex: renderPlex,
+    webhooks: renderWebhooks,
+    'poster-art': renderPosterArt,
     accounts: () => <AccountsSection showTitle={false} />,
     logs: () => <LogsSection showTitle={false} />,
   }
@@ -1906,7 +2014,7 @@ export default function Settings() {
         <SaveBar
           count={changedCount}
           saving={updateMutation.isPending}
-          disabled={Object.keys(comskipErrors).length > 0}
+          disabled={Object.keys(comskipErrors).length > 0 || Object.keys(webhookErrors).length > 0}
           onSave={handleSave}
           onDiscard={handleReset}
         />

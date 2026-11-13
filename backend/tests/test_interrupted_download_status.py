@@ -220,7 +220,7 @@ class InterruptedDownloadTests(unittest.TestCase):
             )
             maker, _session = _session_ctx(download)
 
-            async def fake_post_process(path, download_id, session, settings):
+            async def fake_post_process(path, download_id, session, settings, **_kwargs):
                 return final, []
 
             with patch("services.download_manager.async_session_maker", maker), \

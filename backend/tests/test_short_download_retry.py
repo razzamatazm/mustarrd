@@ -158,7 +158,8 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.manager._download_catchup_stream = AsyncMock(return_value=path.stat().st_size)
         self.manager._integrity_check_warning = AsyncMock(return_value=None)
 
-        async def process(input_path, download_id, session, settings):
+        # **kwargs: main now also passes expected_duration_seconds (#462).
+        async def process(input_path, download_id, session, settings, **kwargs):
             current = await session.get(Download, download_id)
             self.assertEqual(current.raw_duration_seconds, 3840)
             self.assertIn("1:06:00", current.interruption_reason)

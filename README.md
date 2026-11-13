@@ -109,6 +109,7 @@ Then open **http://localhost:4177** in your browser.
 ### Schedule a Recording
 
 - Browse to an upcoming program and use the **Schedule** option to download it automatically when it airs (turn on the "view future programming" switch first)
+- By default, Mustarrd waits 5 minutes after the show ends (and after any **End late** padding) before downloading it, giving your provider time to publish the catchup recording. Change or disable this under **Settings > Recording > Wait after recording**
 - The **Scheduled** page lists everything queued as a day-by-day agenda ("TONIGHT", then future days) with the air time up front. Recordings paused for low disk space show a yellow "PAUSED (LOW SPACE)" badge
 - The **History** tab on the Scheduled page shows past scheduled runs. FAILED entries show a **Retry** button directly on the card to re-queue the download without navigating away
 
@@ -159,6 +160,7 @@ A few variables are read straight from the process environment rather than throu
 | `CATCHUP_CORS_ORIGINS` | Comma-separated allowed frontend origins; only needed when the UI is accessed from a non-localhost address | `http://localhost:4178,...` |
 | `CATCHUP_SESSION_COOKIE_SECURE_MODE` | When to mark session cookies as HTTPS-only: `auto` (default, detects HTTPS including reverse-proxy setups), `always`, or `never` | `auto` |
 | `CATCHUP_ALLOW_REMOTE_SETUP` | Allow password setup from non-local IPs | `false` |
+| `CATCHUP_PROVIDER_USER_AGENT` | How Mustarrd identifies itself to your IPTV provider. Some providers refuse anything that does not look like a media player; change this only if yours asks for a specific player | `VLC/3.0.21 LibVLC/3.0.21` |
 | `CATCHUP_FFMPEG_PATH` | Path to ffmpeg binary | *(auto-detected)* |
 | `CATCHUP_FFPROBE_PATH` | Path to ffprobe binary (required for commercial removal) | *(auto-detected)* |
 | `CATCHUP_COMSKIP_PATH` | Path to comskip binary | *(auto-detected)* |

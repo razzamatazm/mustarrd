@@ -33,6 +33,7 @@ import {
   IconChevronUp,
   IconDatabase,
   IconAlertTriangle,
+  IconPhoto,
 } from '@tabler/icons-react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -42,6 +43,7 @@ import HistoryRow from '../components/HistoryRow'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 import {
   isPlayableDownload,
+  PLAYABLE_DOWNLOAD_STATUSES,
   RETRYABLE_DOWNLOAD_STATUSES,
   TERMINAL_DOWNLOAD_STATUSES,
 } from '../constants/downloadStatus'
@@ -417,6 +419,33 @@ export default function Downloads() {
     },
   })
 
+  const refreshPosterMutation = useMutation({
+    mutationFn: (download) => downloadsApi.refreshPoster(download.id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['downloads'] })
+      notifications.show(
+        data?.found
+          ? {
+              title: 'Artwork Updated',
+              message: 'The poster for this recording was looked up again',
+              color: 'green',
+            }
+          : {
+              title: 'No Artwork Found',
+              message: 'No poster could be found for this recording',
+              color: 'yellow',
+            }
+      )
+    },
+    onError: (error) => {
+      notifications.show({
+        title: 'Error',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (download) => downloadsApi.cancel(download.id),
     onSuccess: () => {
@@ -501,6 +530,9 @@ export default function Downloads() {
   const filteredHistoryDownloads = historyFilter === 'all'
     ? historyDownloads
     : historyDownloads.filter((d) => d.status === historyFilter)
+  // Only give rows a poster slot when some recording has one, so a History
+  // with no artwork at all looks exactly as it did before.
+  const anyHistoryPosters = filteredHistoryDownloads.some((d) => d.poster)
   const accountGuideOffsets = Object.fromEntries(
     (accounts || []).map((account) => [Number(account.id), getGuideOffsetHours(account.guide_offset_hours)])
   )
@@ -567,6 +599,24 @@ export default function Downloads() {
               </ActionIcon>
             </>
           )
+        )}
+        {PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && !download.is_vod && (
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size={30}
+            radius={7}
+            visibleFrom="sm"
+            aria-label="Refresh artwork"
+            title="Refresh artwork"
+            loading={
+              refreshPosterMutation.isPending &&
+              refreshPosterMutation.variables?.id === download.id
+            }
+            onClick={() => refreshPosterMutation.mutate(download)}
+          >
+            <IconPhoto size={15} />
+          </ActionIcon>
         )}
         {canRetry && (
           <ActionIcon
@@ -753,6 +803,7 @@ export default function Downloads() {
                             {renderDurationAnalysis(download)}
                           </>
                         }
+                        poster={anyHistoryPosters ? download.poster || null : undefined}
                         error={renderRowMessages(download)}
                         size={isPlayableDownload(download) && download.file_size > 0 ? formatBytes(download.file_size) : null}
                         actions={renderHistoryActions(download)}
