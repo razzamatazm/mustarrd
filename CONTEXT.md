@@ -92,11 +92,21 @@ the name of the tab), time slot (that's a clock time, not a title)
 One showing of a programme: this account, this channel, this start and stop.
 It is what a recording rule schedules, and its identity is what stops the
 same showing being recorded twice. An airing already scheduled, recording or
-recorded, by hand or by any rule, is taken. The identity is exact, so a
-provider that moves a listing by a minute between guide refreshes makes it
-look like a new airing.
+recorded, by hand or by any rule, is taken. A **moved listing** is the same
+airing, not a new one.
 _Avoid_: episode (two airings can be the same episode), programme (that's the
 guide entry; a repeat is the same programme and a different airing), slot
+
+**Moved listing**:
+A guide entry the provider retimed between refreshes: a match overran, or
+8:00 was corrected to 8:05. The guide keeps the old entry and gains the new
+one, so one airing shows up twice. Two entries on a channel are the same
+airing when they have the same title and overlap for more than half of the
+shorter one, which still keeps back-to-back episodes apart. A rule's
+recording that has not started is moved onto the newer entry; anything
+already started, made by hand, or cancelled is left as it is and simply not
+recorded again.
+_Avoid_: shifted airing, duplicate listing, retime
 
 ### Commercial Skip
 
