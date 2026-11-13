@@ -58,6 +58,7 @@ class AppSettings(Base):
     max_concurrent_post_processing: Mapped[int] = mapped_column(Integer, default=1)
 
     # Post-processing options
+    trim_dispatcharr_buffer: Mapped[bool] = mapped_column(Boolean, default=False)
     transcode_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     transcode_format: Mapped[str] = mapped_column(String(10), default="mkv")  # ts, mp4, mkv
     hw_accel: Mapped[str] = mapped_column(String(20), default="cpu")  # cpu, videotoolbox, nvenc, amf, vaapi
@@ -157,6 +158,7 @@ class AppSettings(Base):
             ),
             "default_account_id": self.default_account_id,
             "max_concurrent_post_processing": self.max_concurrent_post_processing,
+            "trim_dispatcharr_buffer": self.trim_dispatcharr_buffer,
             "transcode_enabled": self.transcode_enabled,
             "transcode_format": self.transcode_format,
             "hw_accel": self.hw_accel,

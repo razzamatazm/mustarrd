@@ -18,6 +18,7 @@ Mustarrd connects to your IPTV provider and lets you download past programs. Thi
 - **Download from On Demand:** if your provider offers on demand listings, you can grab those too — movies and series browse as a poster grid
 - **Scheduled recordings:** set programs to download automatically when they air; export and import your schedule as a backup or to move to another machine
 - **Download length checks:** compare the original catchup download with its requested length, including padding, before commercial removal or conversion changes the file
+- **Optional Dispatcharr buffer trimming:** remove a measured extra tail before other processing, while preserving your requested pre/post padding
 - **Smart file naming:** TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
 - **Plex Link:** let your Plex users request programming by logging in with their Plex credentials (or don't), and push finished recordings straight into your Plex library
 - **Multiple accounts:** connect more than one IPTV provider. Add more users to give them download access
@@ -103,6 +104,14 @@ Then open **http://localhost:4177** in your browser.
 | Desktop | Mobile |
 |---------|--------|
 | ![Downloads page](docs/screenshots/screenshot-downloads.png) | ![Downloads on mobile](docs/screenshots/screenshot-downloads-mobile.png) |
+
+### Trim Extra Dispatcharr Buffer Time
+
+In **Settings > Post-Processing > Before other processing**, enable **Trim Dispatcharr buffer time** if your catchup source adds unwanted time at the end. It is off by default and applies to all catchup downloads, including scheduled recordings and time slots; it does not try to detect which accounts use Dispatcharr. On-demand movies and episodes are excluded.
+
+Mustarrd measures the downloaded file and keeps the requested length, including your chosen pre/post padding. Only a reliably measured excess of more than five seconds qualifies. The trim keeps the beginning and removes the extra tail before Commercial Skip, remuxing, or re-encoding. It also works with **Keep .ts**, without re-encoding; small packet-boundary differences can remain. No fixed five-minute value is subtracted and the outgoing catchup request is unchanged.
+
+The original file is replaced only after the trimmed copy passes stream and duration checks. If trimming cannot run or its result cannot be verified, normal processing continues with the original and the recording finishes with a warning. Downloads History retains the original measured duration, separately from the finished file's duration.
 
 ### Schedule a Recording
 

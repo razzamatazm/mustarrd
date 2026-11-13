@@ -198,6 +198,51 @@ describe('Downloads page', () => {
   })
 
   it.each([
+    ['trimmed', 'Successfully trimmed to expected length'],
+    ['failed', 'Not trimmed — trim failed'],
+    ['already_matched', 'Already at expected length (no trim needed)'],
+    ['in_progress', 'Trim outcome not confirmed'],
+  ])('shows saved trim outcome %s after Expected, independently of final file length', async (outcome, label) => {
+    await renderDownloads({
+      downloads: [{
+        ...completedDownload,
+        duration_minutes: 122,
+        raw_duration_seconds: 7617,
+        expected_duration_seconds: 7320,
+        recorded_duration_seconds: 5400,
+        duration_analysis_status: 'long',
+        buffer_trim_status: outcome,
+      }],
+      initialEntries: ['/downloads?tab=history'],
+    })
+    expect(await screen.findByText('Downloaded before processing: 2h 6m 57s · Longer than expected')).toBeInTheDocument()
+    expect(screen.getByText(`Expected: 2h 2m (including padding) · ${label}`)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Play' })).toBeInTheDocument()
+  })
+
+  // Most installs never turn the end-trim option on. Their long recordings,
+  // and everyone's from before the option existed, get no trim note.
+  it.each([['not_run'], [null], [undefined], ['future_status']])(
+    'adds no trim note to a long recording when the trim step has nothing to report (%s)',
+    async (outcome) => {
+      await renderDownloads({
+        downloads: [{
+          ...completedDownload,
+          duration_minutes: 122,
+          raw_duration_seconds: 7617,
+          expected_duration_seconds: 7320,
+          duration_analysis_status: 'long',
+          buffer_trim_status: outcome,
+        }],
+        initialEntries: ['/downloads?tab=history'],
+      })
+      expect(await screen.findByText('Downloaded before processing: 2h 6m 57s · Longer than expected')).toBeInTheDocument()
+      expect(screen.getByText('Expected: 2h 2m (including padding)')).toBeInTheDocument()
+      expect(screen.queryByText(/trim/i)).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
     ['unavailable', null, 'Download length unavailable', 'The raw recording was no longer available.'],
     ['unreliable', 93600, 'Download length could not be verified', 'The recording timestamps are inconsistent.'],
   ])('explains %s analysis without substituting the final file duration', async (status, raw, label, reason) => {

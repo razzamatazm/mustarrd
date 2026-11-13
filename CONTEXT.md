@@ -66,6 +66,14 @@ processing; a new capture attempt clears the previous observation. Missing or
 implausible measurements remain uncertain, never replaced with the requested
 length. This is a duration estimate, not proof of uninterrupted or correct content.
 
+**Buffer trim outcome**:
+The saved result of the excess-tail step on the current raw capture. A confirmed
+trim is recorded before Commercial Skip or conversion and is independent of the
+final file duration and overall download status. Old rows without this evidence
+remain unknown; matching final length never backfills a successful trim. A new
+capture resets the result. A file already at the target on recovery is reported
+separately rather than assumed to have been trimmed.
+
 ### Commercial Skip
 
 **Commercial Skip**:
