@@ -33,7 +33,6 @@ class RecordingRuleCreate(BaseModel):
     match_mode: MatchMode = "exact"
     enabled: bool = True
     days_of_week: Optional[list[conint(ge=0, le=6)]] = None
-    delete_after_days: Optional[conint(ge=1, le=3650)] = None
     pre_padding_minutes: conint(ge=0, le=120) = 0
     post_padding_minutes: conint(ge=0, le=120) = 0
 
@@ -56,7 +55,6 @@ class RecordingRuleUpdate(BaseModel):
     title_match: Optional[str] = None
     match_mode: Optional[MatchMode] = None
     days_of_week: Optional[list[conint(ge=0, le=6)]] = None
-    delete_after_days: Optional[conint(ge=1, le=3650)] = None
     pre_padding_minutes: Optional[conint(ge=0, le=120)] = None
     post_padding_minutes: Optional[conint(ge=0, le=120)] = None
 
@@ -126,7 +124,6 @@ async def create_recording_rule(
         title_match=data.title_match,
         match_mode=data.match_mode,
         enabled=data.enabled,
-        delete_after_days=data.delete_after_days,
         pre_padding_minutes=data.pre_padding_minutes,
         post_padding_minutes=data.post_padding_minutes,
         request_source=auth.provider or "admin_local",
@@ -169,7 +166,6 @@ async def update_recording_rule(
         "enabled",
         "title_match",
         "match_mode",
-        "delete_after_days",
         "pre_padding_minutes",
         "post_padding_minutes",
     ):
@@ -202,8 +198,10 @@ async def delete_recording_rule(
     if not rule:
         raise HTTPException(status_code=404, detail="Recording rule not found")
 
-    # Existing schedules are independent snapshots. Detach them before deleting
-    # the rule so no schedule or completed recording is removed as a side effect.
+    # Recordings the rule scheduled that have not started go with it: nobody
+    # asked for them except the rule. Everything that has started, finished or
+    # failed is history, so it is detached and kept.
+    removed = await recording_rule_service.remove_unfired_schedules(session, rule.id)
     await session.execute(
         update(ScheduledRecording)
         .where(ScheduledRecording.recording_rule_id == rule.id)
@@ -211,4 +209,4 @@ async def delete_recording_rule(
     )
     await session.delete(rule)
     await session.commit()
-    return {"status": "deleted"}
+    return {"status": "deleted", "removed_schedules": removed}

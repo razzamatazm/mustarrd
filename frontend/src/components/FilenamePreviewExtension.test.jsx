@@ -63,9 +63,6 @@ describe('recording filename previews', () => {
     )
 
     expect(await screen.findByDisplayValue('TV.ts/Breaking Bad/Episode')).toBeTruthy()
-    // Mantine's Select renders a hidden input alongside the visible one, so
-    // match the visible field by its displayed value rather than the label.
-    expect(screen.getByDisplayValue('Keep recordings forever')).toBeInTheDocument()
   })
 
   it('includes the scheduled download delay in the expected start time', async () => {

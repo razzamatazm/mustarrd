@@ -11,7 +11,6 @@ import {
   Alert,
   Accordion,
   NumberInput,
-  Select,
   useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
@@ -46,13 +45,6 @@ const typeLabels = {
   other: 'Other',
 }
 
-const retentionOptions = [
-  { value: 'forever', label: 'Keep recordings forever' },
-  { value: '7', label: 'Delete recordings after 7 days' },
-  { value: '14', label: 'Delete recordings after 14 days' },
-  { value: '30', label: 'Delete recordings after 30 days' },
-]
-
 export default function ScheduleModal({ opened, onClose, program, channel, accountId, guideOffsetHours = 0 }) {
   const queryClient = useQueryClient()
   const [filename, setFilename] = useState('')
@@ -61,7 +53,6 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
   const [prePadding, setPrePadding] = useState(1)
   const [postPadding, setPostPadding] = useState(5)
   const [offsetsDirty, setOffsetsDirty] = useState(false)
-  const [deleteAfterDays, setDeleteAfterDays] = useState('forever')
   const { colorScheme } = useMantineColorScheme()
   const theme = useMantineTheme()
   const normalizedGuideOffsetHours = getGuideOffsetHours(guideOffsetHours)
@@ -88,7 +79,6 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
   useEffect(() => {
     if (opened) {
       setOffsetsDirty(false)
-      setDeleteAfterDays('forever')
     }
   }, [opened])
 
@@ -188,7 +178,6 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
       channel_id: channel.stream_id.toString(),
       channel_name: channel.name,
       title_match: program.title,
-      delete_after_days: deleteAfterDays === 'forever' ? null : Number(deleteAfterDays),
       pre_padding_minutes: prePadding,
       post_padding_minutes: postPadding,
     })
@@ -282,15 +271,6 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
             </Accordion.Panel>
           </Accordion.Item>
         </Accordion>
-
-        <Select
-          label="Recurring recording retention"
-          description="Only applies when you choose Record every airing"
-          data={retentionOptions}
-          value={deleteAfterDays}
-          onChange={(value) => setDeleteAfterDays(value || 'forever')}
-          allowDeselect={false}
-        />
 
         <Stack gap="xs">
           <Text fw={500}>Filename</Text>

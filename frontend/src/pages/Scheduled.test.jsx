@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -152,7 +153,8 @@ describe('Scheduled page', () => {
   it('lists, disables, and deletes recurring recording rules', async () => {
     const { recordingRulesApi } = await import('../api')
     recordingRulesApi.update.mockResolvedValue({})
-    recordingRulesApi.delete.mockResolvedValue({ status: 'deleted' })
+    recordingRulesApi.delete.mockResolvedValue({ status: 'deleted', removed_schedules: 3 })
+    const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
     await renderScheduled({
       rules: [{
         id: 7,
@@ -160,43 +162,31 @@ describe('Scheduled page', () => {
         channel_name: 'Game Network',
         title_match: 'Evening Quiz',
         enabled: true,
-        delete_after_days: 14,
       }],
       initialEntries: ['/scheduled?tab=rules'],
     })
 
     expect(await screen.findByText('Evening Quiz')).toBeInTheDocument()
-    expect(screen.getByText(/Deletes recordings after 14 days/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('switch', { name: 'Enable Evening Quiz' }))
     await waitFor(() => {
       expect(recordingRulesApi.update).toHaveBeenCalledWith(7, { enabled: false })
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete rule Evening Quiz' }))
+    // Deleting a rule takes its not-yet-started recordings with it, so say so first.
+    expect(screen.getByText(/recordings it scheduled that have not started/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Yes, delete' }))
     await waitFor(() => {
       expect(recordingRulesApi.delete).toHaveBeenCalledWith(7)
     })
-  })
-
-  it('toggles the global rule retention setting', async () => {
-    const { settingsApi } = await import('../api')
-    settingsApi.update.mockResolvedValue({})
-    await renderScheduled({ rules: [], initialEntries: ['/scheduled?tab=rules'] })
-
-    fireEvent.click(await screen.findByLabelText('Enable rule-based retention cleanup'))
     await waitFor(() => {
-      expect(settingsApi.update).toHaveBeenCalledWith({ recording_rule_retention_enabled: true })
+      expect(show).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining('Removed 3 scheduled recordings that had not started'),
+      }))
     })
   })
 
-  it('hides the retention toggle from non-admins', async () => {
-    await renderScheduled({ rules: [], isAdmin: false, initialEntries: ['/scheduled?tab=rules'] })
-    await screen.findByText(/No recurring recording rules yet/)
-    expect(screen.queryByLabelText('Enable rule-based retention cleanup')).not.toBeInTheDocument()
-  })
-
-  it('edits recurring matching, padding, days, and deletion retention', async () => {
+  it('edits recurring matching, padding, and days', async () => {
     const { recordingRulesApi } = await import('../api')
     recordingRulesApi.update.mockResolvedValue({ scheduled_count: 0 })
     await renderScheduled({
@@ -208,7 +198,6 @@ describe('Scheduled page', () => {
         match_mode: 'exact',
         enabled: true,
         days_of_week: null,
-        delete_after_days: null,
         pre_padding_minutes: 1,
         post_padding_minutes: 5,
       }],
@@ -217,14 +206,12 @@ describe('Scheduled page', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit rule Evening Quiz' }))
     fireEvent.change(await screen.findByLabelText('Title match'), { target: { value: 'Quiz' } })
-    fireEvent.change(screen.getByLabelText('Delete completed recordings after'), { target: { value: '14' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
 
     await waitFor(() => {
       expect(recordingRulesApi.update).toHaveBeenCalledWith(8, expect.objectContaining({
         title_match: 'Quiz',
         match_mode: 'exact',
-        delete_after_days: 14,
         pre_padding_minutes: 1,
         post_padding_minutes: 5,
       }))

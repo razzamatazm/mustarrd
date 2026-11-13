@@ -1,24 +1,20 @@
-import asyncio
 import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import AuthContext
-from config import settings as app_config
 from models import (
     AppSettings,
-    Download,
-    DownloadStatus,
     EPGProgram,
     RecordingRule,
     ScheduledRecording,
+    ScheduledStatus,
     XtreamAccount,
 )
 
@@ -83,123 +79,33 @@ def build_rule_airing_key(program: EPGProgram) -> str:
     )
 
 
+# A rule's recording has "fired" once the scheduler has handed it to the
+# download queue. Before that it is only an intention, and it is the rule's.
+UNFIRED_SCHEDULE_STATUSES = (
+    ScheduledStatus.SCHEDULED.value,
+    ScheduledStatus.PAUSED_LOW_SPACE.value,
+)
+
+
 class RecordingRuleService:
-    @staticmethod
-    def _allowed_recording_roots(db_settings: AppSettings | None) -> list[Path]:
-        roots = [
-            app_config.default_download_folder,
-            app_config.default_completed_folder,
-        ]
-        if db_settings:
-            roots.extend(
-                path
-                for path in (db_settings.download_folder, db_settings.completed_folder)
-                if path
-            )
-        return list(
-            dict.fromkeys(Path(path).expanduser().resolve() for path in roots)
-        )
+    async def remove_unfired_schedules(self, session: AsyncSession, rule_id: int) -> int:
+        """Delete the recordings a rule scheduled that have not started yet.
 
-    async def delete_expired_downloads(
-        self,
-        session: AsyncSession,
-        *,
-        account_id: int | None = None,
-        rule_id: int | None = None,
-        now: datetime | None = None,
-    ) -> int:
-        """Remove the media file for opted-in, expired recurring-rule recordings.
-
-        No-op unless an admin has turned on recording_rule_retention_enabled.
-        A file is only eligible when the completed Download is linked through a
-        schedule created by the rule and its resolved path is below a configured
-        recording root. Missing or unsafe paths are left untouched for review.
-        The Download row is kept as history with file_deleted_at set; only the
-        file on disk is removed.
+        Called when the rule is deleted (#427: a deleted rule must not leave
+        orphaned scheduled recordings behind). Anything already downloading,
+        finished, failed or cancelled is history and is left alone. The rows
+        are deleted rather than cancelled: a cancelled row would keep its
+        airing key and stop a later rule from ever scheduling that airing.
+        Does not commit; the caller commits with the rule's own deletion.
         """
-        db_settings = (
-            await session.execute(select(AppSettings))
-        ).scalar_one_or_none()
-        if not getattr(db_settings, "recording_rule_retention_enabled", False):
-            return 0
-
-        query = (
-            select(RecordingRule, ScheduledRecording, Download)
-            .join(
-                ScheduledRecording,
-                ScheduledRecording.recording_rule_id == RecordingRule.id,
-            )
-            .join(Download, Download.id == ScheduledRecording.download_id)
-            .where(
-                RecordingRule.delete_after_days.is_not(None),
-                Download.status == DownloadStatus.COMPLETED.value,
-                Download.completed_at.is_not(None),
-                Download.file_deleted_at.is_(None),
+        result = await session.execute(
+            delete(ScheduledRecording).where(
+                ScheduledRecording.recording_rule_id == rule_id,
+                ScheduledRecording.status.in_(UNFIRED_SCHEDULE_STATUSES),
+                ScheduledRecording.download_id.is_(None),
             )
         )
-        if account_id is not None:
-            query = query.where(RecordingRule.account_id == account_id)
-        if rule_id is not None:
-            query = query.where(RecordingRule.id == rule_id)
-
-        rows = (await session.execute(query)).all()
-        if not rows:
-            return 0
-
-        allowed_roots = self._allowed_recording_roots(db_settings)
-        now_utc = now or datetime.now(timezone.utc)
-        if now_utc.tzinfo is None:
-            now_utc = now_utc.replace(tzinfo=timezone.utc)
-
-        deleted = 0
-        for rule, schedule, download in rows:
-            completed_at = download.completed_at
-            if completed_at.tzinfo is None:
-                completed_at = completed_at.replace(tzinfo=timezone.utc)
-            if completed_at > now_utc - timedelta(days=rule.delete_after_days):
-                continue
-            if not download.output_path:
-                logger.warning(
-                    "Retention skipped download %s because it has no output path",
-                    download.id,
-                )
-                continue
-
-            file_path = Path(download.output_path).expanduser().resolve()
-            if not any(file_path.is_relative_to(root) for root in allowed_roots):
-                logger.warning(
-                    "Retention refused to delete download %s outside configured roots: %s",
-                    download.id,
-                    file_path,
-                )
-                continue
-            if not file_path.is_file():
-                logger.warning(
-                    "Retention skipped download %s because its file is missing: %s",
-                    download.id,
-                    file_path,
-                )
-                continue
-
-            try:
-                await asyncio.to_thread(file_path.unlink)
-            except OSError:
-                logger.exception(
-                    "Retention could not delete download %s at %s",
-                    download.id,
-                    file_path,
-                )
-                continue
-
-            download.file_deleted_at = now_utc
-            schedule.status_message = (
-                f"Recording file deleted after {rule.delete_after_days} days by recurring rule"
-            )
-            deleted += 1
-
-        if deleted:
-            await session.commit()
-        return deleted
+        return int(result.rowcount or 0)
 
     async def evaluate(
         self,

@@ -246,7 +246,6 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
   const [matchMode, setMatchMode] = useState('exact')
   const [enabled, setEnabled] = useState(true)
   const [daysOfWeek, setDaysOfWeek] = useState([])
-  const [deleteAfterDays, setDeleteAfterDays] = useState('')
   const [prePadding, setPrePadding] = useState(0)
   const [postPadding, setPostPadding] = useState(0)
   const [patternError, setPatternError] = useState('')
@@ -257,7 +256,6 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
     setMatchMode(rule.match_mode || 'exact')
     setEnabled(Boolean(rule.enabled))
     setDaysOfWeek((rule.days_of_week || []).map(String))
-    setDeleteAfterDays(rule.delete_after_days ?? '')
     setPrePadding(rule.pre_padding_minutes || 0)
     setPostPadding(rule.post_padding_minutes || 0)
     setPatternError('')
@@ -283,7 +281,6 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
       match_mode: matchMode,
       enabled,
       days_of_week: daysOfWeek.map(Number),
-      delete_after_days: typeof deleteAfterDays === 'number' ? deleteAfterDays : null,
       pre_padding_minutes: typeof prePadding === 'number' ? prePadding : 0,
       post_padding_minutes: typeof postPadding === 'number' ? postPadding : 0,
     })
@@ -353,16 +350,6 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
             onChange={setPostPadding}
           />
         </SimpleGrid>
-        <NumberInput
-          label="Delete completed recordings after"
-          description="Optional number of days; leave blank to keep forever. Older recordings are purged after the next successful EPG refresh."
-          suffix=" days"
-          min={1}
-          max={3650}
-          allowDecimal={false}
-          value={deleteAfterDays}
-          onChange={setDeleteAfterDays}
-        />
         <Alert color="blue" variant="light">
           Saving immediately checks the current future guide. Recordings already scheduled by this rule are not cancelled or changed.
         </Alert>
@@ -378,9 +365,6 @@ function RuleEditorModal({ opened, onClose, rule, accountName, onSave, saving })
 function RuleRow({ rule, accountName, onToggle, onUpdate, onDelete, updating }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editing, setEditing] = useState(false)
-  const retention = rule.delete_after_days
-    ? `Deletes recordings after ${rule.delete_after_days} days`
-    : 'Keeps recordings forever'
   const matchLabel = matchModeLabels[rule.match_mode || 'exact'] || matchModeLabels.exact
   const daysLabel = rule.days_of_week?.length
     ? rule.days_of_week.map((day) => weekdayOptions.find((option) => option.value === String(day))?.label).filter(Boolean).join(', ')
@@ -392,13 +376,15 @@ function RuleRow({ rule, accountName, onToggle, onUpdate, onDelete, updating }) 
       <div className={classes.main}>
         <div className={classes.title}>{rule.title_match}</div>
         <div className={classes.sub}>
-          {[rule.channel_name, accountName, matchLabel, daysLabel, retention].filter(Boolean).join(' · ')}
+          {[rule.channel_name, accountName, matchLabel, daysLabel].filter(Boolean).join(' · ')}
         </div>
       </div>
       <div className={classes.side}>
         {confirmingDelete ? (
           <>
-            <Text size="sm" c="dimmed">Delete this rule?</Text>
+            <Text size="sm" c="dimmed">
+              Delete this rule and the recordings it scheduled that have not started?
+            </Text>
             <Button
               size="xs"
               color="red"
@@ -559,11 +545,15 @@ export default function Scheduled() {
 
   const deleteRuleMutation = useMutation({
     mutationFn: (rule) => recordingRulesApi.delete(rule.id),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['recording-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['schedules'] })
+      const removed = Number(data?.removed_schedules) || 0
       notifications.show({
         title: 'Recording Rule Deleted',
-        message: 'Already-created scheduled recordings were kept',
+        message: removed > 0
+          ? `Removed ${removed} scheduled recording${removed === 1 ? '' : 's'} that had not started. Anything already recorded or in progress was kept.`
+          : 'It had nothing waiting to record. Anything already recorded was kept.',
         color: 'green',
       })
     },
@@ -594,21 +584,6 @@ export default function Scheduled() {
 
   const autoRetryMutation = useMutation({
     mutationFn: (enabled) => settingsApi.update({ auto_retry_failed_downloads: enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
-    onError: (error) => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-      notifications.show({
-        title: 'Error',
-        message: error.message,
-        color: 'red',
-      })
-    },
-  })
-
-  const retentionMutation = useMutation({
-    mutationFn: (enabled) => settingsApi.update({ recording_rule_retention_enabled: enabled }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
     },
@@ -1008,22 +983,6 @@ export default function Scheduled() {
         </Tabs.Panel>
 
         <Tabs.Panel value="rules" pt="md">
-          {isAdmin && (
-            <Tooltip
-              label="When on, recordings made by a rule with a retention period set are deleted that many days after they finish. The download stays in history; only the file is removed."
-              multiline
-              w={300}
-            >
-              <Switch
-                size="sm"
-                mb="md"
-                label="Enable rule-based retention cleanup"
-                checked={Boolean(appSettings?.recording_rule_retention_enabled)}
-                onChange={(event) => retentionMutation.mutate(event.currentTarget.checked)}
-                disabled={retentionMutation.isPending || !appSettings}
-              />
-            </Tooltip>
-          )}
           {rulesLoading ? (
             <Stack align="center" py="xl"><Loader /></Stack>
           ) : rulesError ? (

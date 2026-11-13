@@ -22,13 +22,13 @@ from api.recording_rules import (
 )
 from auth import AuthContext
 from database import Base
+from fastapi import HTTPException
 from models import (
     AppSettings,
-    Download,
-    DownloadStatus,
     EPGProgram,
     RecordingRule,
     ScheduledRecording,
+    ScheduledStatus,
     User,
     XtreamAccount,
 )
@@ -111,7 +111,6 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         channel_name="Example TV",
         title_match="The Example Show",
         enabled=True,
-        delete_after_days=None,
         match_mode="exact",
         days_of_week=None,
     ):
@@ -123,19 +122,12 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
                     channel_name=channel_name,
                     title_match=title_match,
                     enabled=enabled,
-                    delete_after_days=delete_after_days,
                     match_mode=match_mode,
                     days_of_week=days_of_week,
                 ),
                 auth=self.auth,
                 session=session,
             )
-
-    async def _enable_retention(self):
-        async with self.session_factory() as session:
-            settings = (await session.execute(select(AppSettings))).scalar_one()
-            settings.recording_rule_retention_enabled = True
-            await session.commit()
 
     async def _set_offsets(self, *, guide_offset_hours=0, epg_offset_minutes=0):
         async with self.session_factory() as session:
@@ -154,40 +146,6 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
             return (
                 await session.execute(select(func.count()).select_from(model))
             ).scalar_one()
-
-    async def _link_completed_download(self, rule_id, output_path, *, age_days=8):
-        completed_at = datetime.now(timezone.utc) - timedelta(days=age_days)
-        async with self.session_factory() as session:
-            schedule = (
-                await session.execute(
-                    select(ScheduledRecording).where(
-                        ScheduledRecording.recording_rule_id == rule_id
-                    )
-                )
-            ).scalar_one()
-            download = Download(
-                account_id=1,
-                channel_id=schedule.channel_id,
-                channel_name=schedule.channel_name,
-                program_title=schedule.program_title,
-                program_start=schedule.program_start,
-                program_end=schedule.program_end,
-                start_timestamp=schedule.start_timestamp,
-                stop_timestamp=schedule.stop_timestamp,
-                duration_minutes=schedule.duration_minutes,
-                source_url="http://provider.test/recording.ts",
-                output_path=str(output_path),
-                requested_by_user_id=1,
-                request_source="admin_local",
-                status=DownloadStatus.COMPLETED.value,
-                completed_at=completed_at,
-            )
-            session.add(download)
-            await session.flush()
-            schedule.download_id = download.id
-            schedule.status = "completed"
-            await session.commit()
-            return download.id
 
     async def test_creating_rule_matches_future_epg_item(self):
         await self._add_program()
@@ -328,7 +286,6 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
                 data=RecordingRuleUpdate(
                     title_match="evening news",
                     match_mode="contains",
-                    delete_after_days=14,
                     pre_padding_minutes=2,
                     post_padding_minutes=8,
                 ),
@@ -338,7 +295,6 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["scheduled_count"], 1)
         self.assertEqual(result["match_mode"], "contains")
-        self.assertEqual(result["delete_after_days"], 14)
         async with self.session_factory() as session:
             schedule = (
                 await session.execute(select(ScheduledRecording))
@@ -386,123 +342,163 @@ class RecordingRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created, 0)
         self.assertEqual(await self._count(ScheduledRecording), 0)
 
-    async def test_deleting_rule_keeps_already_created_schedule(self):
-        await self._add_program(suffix="delete")
-        rule = await self._create_rule()
-
+    async def _delete_rule(self, rule_id, auth=None):
         async with self.session_factory() as session:
-            result = await delete_recording_rule(
-                rule_id=rule["id"], auth=self.auth, session=session
+            return await delete_recording_rule(
+                rule_id=rule_id, auth=auth or self.auth, session=session
             )
 
-        self.assertEqual(result, {"status": "deleted"})
-        self.assertEqual(await self._count(RecordingRule), 0)
-        self.assertEqual(await self._count(ScheduledRecording), 1)
+    async def _set_schedule_status(self, epg_suffix, status, *, download_id=None):
         async with self.session_factory() as session:
-            schedule = (
-                await session.execute(select(ScheduledRecording))
+            program = (
+                await session.execute(
+                    select(EPGProgram).where(EPGProgram.epg_id == f"epg-{epg_suffix}")
+                )
             ).scalar_one()
-            self.assertIsNone(schedule.recording_rule_id)
-            self.assertIsNotNone(schedule.rule_airing_key)
+            schedule = (
+                await session.execute(
+                    select(ScheduledRecording).where(
+                        ScheduledRecording.program_id == str(program.id)
+                    )
+                )
+            ).scalar_one()
+            schedule.status = status
+            schedule.download_id = download_id
+            await session.commit()
 
-    async def test_optional_retention_removes_file_but_keeps_history(self):
-        await self._enable_retention()
-        await self._add_program(suffix="retention")
-        rule = await self._create_rule(delete_after_days=7)
-        recording = Path(self.recording_dir.name) / "expired.ts"
-        recording.write_bytes(b"recording")
-        download_id = await self._link_completed_download(
-            rule["id"], recording, age_days=8
+    async def _schedules(self):
+        async with self.session_factory() as session:
+            return (
+                await session.execute(
+                    select(ScheduledRecording).order_by(ScheduledRecording.start_timestamp)
+                )
+            ).scalars().all()
+
+    async def _scheduled_airings(self):
+        """The guide entries that still have a schedule, by the name the test gave them."""
+        async with self.session_factory() as session:
+            names = {
+                str(program.id): program.epg_id
+                for program in (await session.execute(select(EPGProgram))).scalars().all()
+            }
+        return [names.get(schedule.program_id, schedule.program_id) for schedule in await self._schedules()]
+
+    async def test_deleting_rule_removes_recordings_that_have_not_started(self):
+        """#427: a deleted rule must not leave orphaned scheduled recordings."""
+        await self._add_program(suffix="next-week", hours_from_now=2)
+        await self._add_program(suffix="week-after", hours_from_now=26)
+        rule = await self._create_rule()
+        self.assertEqual(await self._count(ScheduledRecording), 2)
+
+        result = await self._delete_rule(rule["id"])
+
+        self.assertEqual(result, {"status": "deleted", "removed_schedules": 2})
+        self.assertEqual(await self._count(RecordingRule), 0)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    async def test_deleting_rule_keeps_recordings_that_started_finished_or_failed(self):
+        suffixes = ["downloading", "completed", "failed", "cancelled", "pending"]
+        for index, suffix in enumerate(suffixes):
+            await self._add_program(suffix=suffix, hours_from_now=2 + index * 3)
+        rule = await self._create_rule()
+        await self._set_schedule_status("downloading", ScheduledStatus.DOWNLOADING.value, download_id=11)
+        await self._set_schedule_status("completed", ScheduledStatus.COMPLETED.value, download_id=12)
+        await self._set_schedule_status("failed", ScheduledStatus.FAILED.value, download_id=13)
+        await self._set_schedule_status("cancelled", ScheduledStatus.CANCELLED.value)
+
+        result = await self._delete_rule(rule["id"])
+
+        self.assertEqual(result["removed_schedules"], 1)
+        self.assertEqual(
+            await self._scheduled_airings(),
+            ["epg-downloading", "epg-completed", "epg-failed", "epg-cancelled"],
+        )
+        for schedule in await self._schedules():
+            self.assertIsNone(schedule.recording_rule_id, "History is detached, not deleted.")
+
+    async def test_a_recording_paused_for_low_disk_space_has_not_started_either(self):
+        await self._add_program(suffix="paused")
+        rule = await self._create_rule()
+        await self._set_schedule_status("paused", ScheduledStatus.PAUSED_LOW_SPACE.value)
+
+        result = await self._delete_rule(rule["id"])
+
+        self.assertEqual(result["removed_schedules"], 1)
+        self.assertEqual(await self._count(ScheduledRecording), 0)
+
+    async def test_deleting_rule_leaves_other_recordings_alone(self):
+        await self._add_program(suffix="mine")
+        await self._add_program(
+            suffix="other-rule", channel_id="202", channel_name="Other TV", title="Other Show"
+        )
+        await self._add_program(suffix="by-hand", title="Picked By Hand", hours_from_now=30)
+        rule = await self._create_rule()
+        await self._create_rule(channel_id="202", channel_name="Other TV", title_match="Other Show")
+        async with self.session_factory() as session:
+            program = (
+                await session.execute(
+                    select(EPGProgram).where(EPGProgram.epg_id == "epg-by-hand")
+                )
+            ).scalar_one()
+            session.add(
+                ScheduledRecording(
+                    account_id=1,
+                    channel_id=program.channel_id,
+                    channel_name=program.channel_name,
+                    program_id=str(program.id),
+                    program_title=program.title,
+                    program_start=program.start_time,
+                    program_end=program.end_time,
+                    start_timestamp=program.start_timestamp,
+                    stop_timestamp=program.stop_timestamp,
+                    duration_minutes=60,
+                    status=ScheduledStatus.SCHEDULED.value,
+                    requested_by_user_id=1,
+                )
+            )
+            await session.commit()
+
+        result = await self._delete_rule(rule["id"])
+
+        self.assertEqual(result["removed_schedules"], 1)
+        self.assertEqual(
+            sorted(await self._scheduled_airings()), ["epg-by-hand", "epg-other-rule"]
         )
 
-        async with self.session_factory() as session:
-            deleted = await recording_rule_service.delete_expired_downloads(
-                session,
-                rule_id=rule["id"],
-                now=datetime.now(timezone.utc),
-            )
+    async def test_a_new_rule_can_schedule_what_a_deleted_rule_had_pending(self):
+        """Deleting, not cancelling: a kept row would hold the airing's key forever."""
+        await self._add_program(suffix="again")
+        first = await self._create_rule()
+        await self._delete_rule(first["id"])
 
-        self.assertEqual(deleted, 1)
-        self.assertFalse(recording.exists())
-        async with self.session_factory() as session:
-            download = await session.get(Download, download_id)
-            self.assertIsNotNone(download)
-            self.assertIsNotNone(download.file_deleted_at)
-            schedule = (
-                await session.execute(select(ScheduledRecording))
-            ).scalar_one()
-            self.assertEqual(schedule.download_id, download_id)
-            self.assertIn("deleted after 7 days", schedule.status_message)
+        second = await self._create_rule()
 
-    async def test_retention_is_a_no_op_until_enabled(self):
-        await self._add_program(suffix="retention-off")
-        rule = await self._create_rule(delete_after_days=7)
-        recording = Path(self.recording_dir.name) / "kept-until-enabled.ts"
-        recording.write_bytes(b"recording")
-        await self._link_completed_download(rule["id"], recording, age_days=30)
+        self.assertEqual(second["scheduled_count"], 1)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
 
-        async with self.session_factory() as session:
-            deleted = await recording_rule_service.delete_expired_downloads(
-                session, rule_id=rule["id"]
-            )
+    async def test_a_new_rule_does_not_record_again_what_the_deleted_rule_recorded(self):
+        await self._add_program(suffix="done")
+        first = await self._create_rule()
+        await self._set_schedule_status("done", ScheduledStatus.COMPLETED.value, download_id=21)
+        await self._delete_rule(first["id"])
 
-        self.assertEqual(deleted, 0)
-        self.assertTrue(recording.exists())
+        second = await self._create_rule()
 
-    async def test_retention_sweep_is_idempotent(self):
-        await self._enable_retention()
-        await self._add_program(suffix="retention-twice")
-        rule = await self._create_rule(delete_after_days=7)
-        recording = Path(self.recording_dir.name) / "expired-twice.ts"
-        recording.write_bytes(b"recording")
-        await self._link_completed_download(rule["id"], recording, age_days=8)
+        self.assertEqual(second["scheduled_count"], 0)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
 
-        async with self.session_factory() as session:
-            first = await recording_rule_service.delete_expired_downloads(
-                session, rule_id=rule["id"]
-            )
-            second = await recording_rule_service.delete_expired_downloads(
-                session, rule_id=rule["id"]
-            )
-
-        self.assertEqual(first, 1)
-        self.assertEqual(second, 0)
-
-    async def test_keep_forever_does_not_delete_completed_download(self):
-        await self._enable_retention()
-        await self._add_program(suffix="keep-forever")
+    async def test_someone_elses_rule_cannot_be_deleted(self):
+        await self._add_program(suffix="not-yours")
         rule = await self._create_rule()
-        recording = Path(self.recording_dir.name) / "kept.ts"
-        recording.write_bytes(b"recording")
-        await self._link_completed_download(rule["id"], recording, age_days=30)
+        stranger = AuthContext(
+            authenticated=True, role="download_only", provider="local", user_id=99, is_admin=False
+        )
 
-        async with self.session_factory() as session:
-            deleted = await recording_rule_service.delete_expired_downloads(
-                session, rule_id=rule["id"]
-            )
+        with self.assertRaises(HTTPException) as raised:
+            await self._delete_rule(rule["id"], auth=stranger)
 
-        self.assertEqual(deleted, 0)
-        self.assertTrue(recording.exists())
-        self.assertEqual(await self._count(Download), 1)
-
-    async def test_retention_refuses_file_outside_configured_roots(self):
-        await self._enable_retention()
-        outside_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(outside_dir.cleanup)
-        await self._add_program(suffix="unsafe-retention")
-        rule = await self._create_rule(delete_after_days=7)
-        recording = Path(outside_dir.name) / "outside.ts"
-        recording.write_bytes(b"recording")
-        await self._link_completed_download(rule["id"], recording, age_days=8)
-
-        async with self.session_factory() as session:
-            deleted = await recording_rule_service.delete_expired_downloads(
-                session, rule_id=rule["id"]
-            )
-
-        self.assertEqual(deleted, 0)
-        self.assertTrue(recording.exists())
-        self.assertEqual(await self._count(Download), 1)
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertEqual(await self._count(ScheduledRecording), 1)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,12 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ## 2026-11-12
 
+### Added: Record every airing of a show
+
+**What you would notice:** Opening a programme in Browse now offers **Record every airing** alongside the one-off options. That saves a rule for the show on that channel. A rule can match the title exactly, by "contains", or by a regular expression, can be limited to certain days of the week, and has its own padding. The new **Recurring** tab on the Scheduled page lists your rules and lets you turn each one off, edit it, or delete it. Rules are checked when you create or edit them and after every guide refresh, so future episodes are scheduled for you. If you create a rule while an episode is on air, or shortly after, that airing is still recorded as long as it is inside the channel's catchup window. The same airing is never scheduled twice, even across a guide refresh. Deleting a rule also removes the recordings it scheduled that have not started yet; anything already recorded, in progress, failed or cancelled stays in your history. Thanks to @geoffwatts.
+
+**What changed:** New `recording_rules` table, created on startup, and two new columns on scheduled recordings linking each one to its rule and to the airing it was made for. A rule is tied to one account and one channel. Rule-made recordings are ordinary scheduled recordings, so they queue, retry and show up exactly like ones you pick by hand. Download-only users see and manage only their own rules. Not in this release: rules that search every channel, matching on the description, and automatically deleting a rule's old recordings.
+
 ### Added: Trim extra time from the end of a recording
 
 **What you would notice:** **Settings > Post-Processing** has a new switch, **Trim extra time from the end**, off by default. Some sources hand back more than was asked for; Dispatcharr, for example, adds buffer time to catchup recordings. With the switch on, a catchup recording that measures longer than the time you requested, including your padding, has the extra cut off its end before Commercial Skip or conversion. It works with Keep .ts. It applies to every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. In History, a recording this step touched says so next to its expected length: trimmed, already the right length, or not trimmed because the trim failed. If a trim fails for any reason the original recording is kept and the recording finishes with a warning. Thanks to @matrix2669.
