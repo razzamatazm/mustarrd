@@ -192,6 +192,27 @@ async def _apply_lightweight_migrations(conn) -> None:
             )
         )
 
+    if not await _column_exists(conn, "app_settings", "mark_short_downloads_failed"):
+        await conn.execute(
+            text("ALTER TABLE app_settings ADD COLUMN mark_short_downloads_failed BOOLEAN DEFAULT 0")
+        )
+        # Preserve the earlier experimental opt-in, but never enable the
+        # separate auto_retry_failed_downloads master switch on upgrade.
+        if await _column_exists(conn, "app_settings", "auto_retry_short_downloads"):
+            await conn.execute(text(
+                "UPDATE app_settings SET mark_short_downloads_failed = "
+                "COALESCE(auto_retry_short_downloads, 0)"
+            ))
+
+    for column_name, column_spec in (
+        ("processing_deferred", "BOOLEAN DEFAULT 0"),
+        ("short_file_failed", "BOOLEAN DEFAULT 0"),
+        ("retry_finalized", "BOOLEAN DEFAULT 0"),
+        ("retained_captures_json", "TEXT"),
+    ):
+        if not await _column_exists(conn, "downloads", column_name):
+            await conn.execute(text(f"ALTER TABLE downloads ADD COLUMN {column_name} {column_spec}"))
+
     if not await _column_exists(conn, "downloads", "retry_count"):
         await conn.execute(text("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0"))
 

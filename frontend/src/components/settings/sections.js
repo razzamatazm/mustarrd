@@ -71,6 +71,7 @@ export const SEARCH_INDEX = [
   { label: 'Scheduled download delay', section: 'recording', kw: 'wait after airing catchup provider archive minutes' },
   { label: 'Keep retrying for (provider outages)', section: 'recording', kw: 'retry window outage reconnect network dropped interrupted resume minutes' },
   { label: 'Recording padding (start early / end late)', section: 'recording', kw: 'minutes before after buffer' },
+  { label: 'Mark short downloads as failed', section: 'recording', kw: 'recovery interrupted incomplete duration retry missing recording' },
   { label: 'Output container (.ts / MKV / MP4)', section: 'processing', kw: 'format remux transcode encode ffmpeg' },
   { label: 'Trim extra time from the end', section: 'processing', kw: 'dispatcharr buffer catchup extra tail duration padding length longer before processing' },
   { label: 'Commercials', section: 'processing', kw: 'comskip ads skip mark cut commercials' },

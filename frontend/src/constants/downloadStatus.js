@@ -10,3 +10,8 @@ export const PLAYABLE_DOWNLOAD_STATUSES = ['completed', 'interrupted']
 
 // Statuses a user can start over from.
 export const RETRYABLE_DOWNLOAD_STATUSES = ['failed', 'cancelled', 'interrupted']
+
+// Failed short recordings still have a final, retained playable output.
+export const isPlayableDownload = (download) =>
+  PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) ||
+  (download.status === 'failed' && download.short_file_failed && download.retry_finalized)

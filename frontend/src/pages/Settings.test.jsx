@@ -125,6 +125,46 @@ beforeEach(() => {
 })
 
 describe('Settings page', () => {
+  it.each([false, true])('changes short-file classification without changing the master retry switch (%s)', async (failedEnabled) => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, auto_retry_failed_downloads: failedEnabled })
+    renderSettings()
+    const toggle = await screen.findByRole('switch', { name: 'Mark short downloads as failed' })
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText('Download recovery')).toBeInTheDocument()
+    expect(screen.getByText(/If Auto-retry failed downloads is also on, a short recording is downloaded again/)).toBeInTheDocument()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(settingsApi.update).toHaveBeenCalled())
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ mark_short_downloads_failed: true })
+  })
+
+  it('keeps the short-attempt explanation in parentheses in the setting description', async () => {
+    await renderSettings()
+    expect(await screen.findByText('Mark catchup recordings that are more than five seconds shorter than the requested length, including padding, as Failed. If Auto-retry failed downloads is also on, a short recording is downloaded again, up to three times. (The attempts wait unprocessed until retrying ends. Then the longest one is processed and kept, and the others are removed.)')).toBeInTheDocument()
+    expect(screen.queryByText('The attempts wait unprocessed until retrying ends. Then the longest one is processed and kept, and the others are removed.', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('can disable the saved short-file classification setting without changing other preferences', async () => {
+    settingsApi.get.mockResolvedValue({ ...baseSettings, mark_short_downloads_failed: true, auto_retry_failed_downloads: true })
+    renderSettings()
+    const toggle = await screen.findByRole('switch', { name: 'Mark short downloads as failed' })
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(settingsApi.update).toHaveBeenCalled())
+    expect(settingsApi.update.mock.calls[0][0]).toEqual({ mark_short_downloads_failed: false })
+  })
+
+  it('finds download recovery through settings search', async () => {
+    renderSettings()
+    await screen.findByText('Connections')
+    fireEvent.click(screen.getByText('Post-Processing'))
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'recovery' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Mark short downloads as failed/ }))
+    expect(await screen.findByText('Download recovery')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Mark short downloads as failed' })).not.toBeChecked()
+  })
+
   it('renders the grouped rail with renamed sections and lands on Recording', async () => {
     renderSettings()
 

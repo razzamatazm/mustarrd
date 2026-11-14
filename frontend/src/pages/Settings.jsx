@@ -1001,6 +1001,20 @@ export default function Settings() {
           </SettingRow>
         </Stack>
       </SubGroup>
+
+      <SubGroup label="Download recovery">
+        <SettingRow
+          label="Mark short downloads as failed"
+          description="Mark catchup recordings that are more than five seconds shorter than the requested length, including padding, as Failed. If Auto-retry failed downloads is also on, a short recording is downloaded again, up to three times. (The attempts wait unprocessed until retrying ends. Then the longest one is processed and kept, and the others are removed.)"
+        >
+          <Switch
+            size={switchSize}
+            aria-label="Mark short downloads as failed"
+            checked={Boolean(formData.mark_short_downloads_failed)}
+            onChange={(event) => handleChange('mark_short_downloads_failed', event.currentTarget.checked)}
+          />
+        </SettingRow>
+      </SubGroup>
     </Stack>
   )
 

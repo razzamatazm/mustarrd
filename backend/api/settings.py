@@ -186,6 +186,7 @@ class SettingsUpdate(BaseModel):
     webhook_url_recording_failed: Optional[str] = None
     webhook_url_recording_cancelled: Optional[str] = None
     webhook_url_postprocessing_completed: Optional[str] = None
+    mark_short_downloads_failed: Optional[bool] = None
 
 
 NON_NULLABLE_FIELDS = {
@@ -235,6 +236,7 @@ NON_NULLABLE_FIELDS = {
     "launch_on_startup",
     "auto_retry_failed_downloads",
     "update_check_enabled",
+    "mark_short_downloads_failed",
 }
 
 

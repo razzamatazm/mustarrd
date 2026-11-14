@@ -763,7 +763,10 @@ export default function Scheduled() {
   }, [activeSchedules, accountGuideOffsets])
 
   const renderHistoryActions = (schedule) => {
-    const hasFile = schedule.download_status === 'completed' && schedule.download_id
+    const hasFile = schedule.download_id && (
+      ['completed', 'interrupted'].includes(schedule.download_status)
+      || (schedule.download_status === 'failed' && schedule.download_short_file_failed && schedule.download_retry_finalized)
+    )
     const downloadHref = schedule.download_id
       ? `/api/downloads/${schedule.download_id}/file?action=download`
       : null

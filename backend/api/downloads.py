@@ -430,7 +430,10 @@ async def clear_finished_downloads(
             DownloadStatus.COMPLETED.value,
             DownloadStatus.FAILED.value,
             DownloadStatus.INTERRUPTED.value,
-        ])
+        ]),
+        # A capture held for another attempt is not finished yet. It finishes
+        # by itself; removing it one at a time is still possible.
+        Download.processing_deferred.isnot(True),
     )
     if not auth.is_admin:
         query = query.where(Download.requested_by_user_id == auth.user_id)
@@ -479,6 +482,9 @@ async def _resolve_completed_download_file(
     if download.status not in (
         DownloadStatus.COMPLETED.value,
         DownloadStatus.INTERRUPTED.value,
+    ) and not (
+        download.status == DownloadStatus.FAILED.value
+        and download.short_file_failed and download.retry_finalized
     ):
         raise HTTPException(status_code=409, detail="Download is not completed yet")
 
@@ -730,9 +736,10 @@ async def cancel_download(
         await download_manager.cancel_download(download_id)
         return {"status": "cancelled"}
     else:
-        # Delete from history
-        await session.delete(download)
-        await session.commit()
+        # Delete from history. This never deletes files: a held capture or a
+        # leftover retry file stays in the download folder.
+        if not await download_manager.remove_from_history(session, download):
+            raise HTTPException(status_code=409, detail="This recording just became active again. Cancel it first.")
         return {"status": "deleted"}
 
 

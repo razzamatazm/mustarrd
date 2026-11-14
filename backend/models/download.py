@@ -84,6 +84,13 @@ class Download(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Retained raw attempts belong to this recording, not to a filename glob.
+    # Persist both ownership and the deferred/final state across restarts.
+    processing_deferred: Mapped[bool] = mapped_column(Boolean, default=False)
+    short_file_failed: Mapped[bool] = mapped_column(Boolean, default=False)
+    retry_finalized: Mapped[bool] = mapped_column(Boolean, default=False)
+    retained_captures_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -139,6 +146,9 @@ class Download(Base):
             "buffer_trim_status": self.buffer_trim_status,
             "interruption_reason": self.interruption_reason,
             "poster": self.poster_api_path,
+            "processing_deferred": bool(self.processing_deferred),
+            "short_file_failed": bool(self.short_file_failed),
+            "retry_finalized": bool(self.retry_finalized),
             "retry_count": self.retry_count,
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

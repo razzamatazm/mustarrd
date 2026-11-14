@@ -124,8 +124,16 @@ def image_extension(content: bytes) -> Optional[str]:
 
 def is_poster_eligible(download) -> bool:
     """Poster art is for finished recordings, and not for on-demand downloads."""
-    return not getattr(download, "is_vod", False) and (
-        getattr(download, "status", None) in _FINISHED_STATUSES
+    if getattr(download, "is_vod", False):
+        return False
+    status = getattr(download, "status", None)
+    if status in _FINISHED_STATUSES:
+        return True
+    # A short recording marked Failed still left a playable file in the library.
+    return (
+        status == DownloadStatus.FAILED.value
+        and getattr(download, "short_file_failed", False) is True
+        and getattr(download, "retry_finalized", False) is True
     )
 
 
