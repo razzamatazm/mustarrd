@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
     register_poster_art_subscriber(recording_events)
     recording_event_task = asyncio.create_task(recording_events.run())
     await download_manager.recover_incomplete_downloads()
+    await download_manager.recover_retained_cleanup()
     download_task = asyncio.create_task(download_manager.process_queue())
     post_process_task = asyncio.create_task(download_manager.process_post_queue())
     schedule_task = asyncio.create_task(scheduled_manager.process_queue())

@@ -4,6 +4,14 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 
 ---
 
+## 2026-11-14
+
+### Added: Mark short recordings as failed, and try them again
+
+**What you would notice:** Sometimes a provider hands back a recording that plays fine but stops early, with no error. There is a new switch for that at **Settings > Recording > Download recovery > Mark short downloads as failed**. It is off by default, and with it off nothing changes. With it on, a catchup recording more than five seconds shorter than you asked for, padding included, shows as Failed with both lengths spelled out. You can still play it and download it. If **Auto-retry failed downloads** is also on, Mustarrd downloads it again, up to three times and at least ten minutes apart. The attempts wait untouched while it retries, so Commercial Skip and conversion run once at the end instead of once per attempt. When retrying ends, Mustarrd keeps the longest attempt under the recording's normal name and deletes the others.
+
+**What changed:** A retry can only improve a recording. If a later attempt comes back shorter than an earlier one, or its length cannot be measured, Mustarrd keeps the earlier one. The same goes for the Retry button on a short recording that was already kept. The new download replaces it only if it is longer. An attempt that is waiting for a retry cannot wait for ever. Mustarrd finishes it as it is when retries run out, when you turn either switch off, when the programme leaves the provider's archive, or when you cancel the retry. It also finishes it after six hours if the provider cannot be reached or the disk is too full to try again. While an attempt is waiting, starting a second download of the same programme is refused so the two cannot overwrite each other. Mustarrd tracks each retry file it wrote and deletes one only after the kept recording has landed and plays. A file that changed since Mustarrd wrote it is left alone, and the row says so. Removing a recording from History never deletes files. A kept short recording sends both `recording.failed` and `recording.completed`, so the failure notification, the webhooks and the poster all still happen. Two details of **Auto-retry failed downloads** changed for everyone, with or without the new switch. The ten-minute gap now counts from the later of the last retry and the last failure, and a retry only uses up one of the three attempts when it is actually queued. On-demand downloads are not covered, and neither are recordings whose length could not be measured.
+
 ## 2026-11-12
 
 ### Fixed: A show the provider retimes is no longer recorded twice

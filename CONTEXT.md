@@ -36,6 +36,32 @@ which finished but probes oddly - a recording can be both.
 _Avoid_: partial recording (that's the file on disk mid-capture), aborted,
 truncated, incomplete
 
+**Short-file failure**:
+An opt-in classification (**Mark short downloads as failed**, off by default) of
+a catchup recording whose raw capture measures more than five seconds shorter
+than the requested padded window: it is Failed rather than Completed. The
+transfer itself succeeded, which is what separates it from an **interrupted
+recording**. It does not enable recovery by itself: automatic re-downloads
+require **Auto-retry failed downloads**. Unknown measurements and VOD do not
+qualify. A finalized short Failed recording keeps a playable file and announces
+both `recording.failed` and `recording.completed`.
+_Avoid_: short recording (says nothing about the status), truncated
+
+**Deferred retry capture**:
+A raw short capture held without Commercial Skip, remuxing or transcoding while
+bounded automatic recovery is still possible: at most three retries after the
+original capture, at least ten minutes apart, within the archive window and
+disk limits. When recovery ends the longest held attempt is finalized, under the
+recording's original name, and the others are removed. A short or unmeasured
+attempt never replaces a longer one, and that includes the finished file of a
+short recording someone retries by hand. A held capture always ends: when
+retries run out or are switched off, when a retry is cancelled, or after six
+hours if the provider cannot be reached. Exact file ownership is persisted
+across restart; superseded attempts are removed only after the kept file has
+landed and probes as playable. Old retry ownership is never inferred from
+filename patterns.
+_Avoid_: held download, pending retry (a retry in the queue is Pending)
+
 **Catchup URL style**:
 Which of the two shapes a provider serves catchup links in: the **path style**
 (`/timeshift/{user}/{pass}/{duration}/{start}/{id}.ts`) or the **query style**

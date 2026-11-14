@@ -97,9 +97,11 @@ Then open **http://localhost:4177** in your browser.
 - A red badge on the **Downloads** menu item shows how many recordings have permanently failed since you last visited. Opening Downloads clears it
 - A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
 - When any scheduled recording is paused for low disk space, or when free space drops below the configured minimum, an orange banner appears at the top of every page, not just Downloads, so you are alerted no matter where you are in the app
-- The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Failed, or Cancelled entries
+- The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Interrupted, Failed, or Cancelled entries
 - Failed downloads show a **Retry** button directly on the card; cancelled downloads show a **Download Again** button
-- Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries are not cleared so you can still retry them)
+- A catchup download that plays but came back more than five seconds shorter than requested is labelled **Shorter than expected** in History. To treat those as failures, enable **Settings > Recording > Download recovery > Mark short downloads as failed** (off by default). The recording then shows as **Failed** and stays playable
+- If **Auto-retry failed downloads** on Scheduled is also enabled, a short download marked Failed is downloaded again, up to three times and at least ten minutes apart. The attempts wait unprocessed until retrying ends; then the longest one is processed and kept under the recording's normal name, and the others are deleted. The short-file option never starts retries by itself, and VOD is not covered
+- Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries are not cleared so you can still retry them). A recording that is still waiting for a retry is skipped. Clearing history never deletes files
 
 | Desktop | Mobile |
 |---------|--------|

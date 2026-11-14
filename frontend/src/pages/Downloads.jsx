@@ -42,7 +42,7 @@ import { accountsApi, authApi, downloadsApi, createDownloadWebSocket } from '../
 import HistoryRow from '../components/HistoryRow'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 import {
-  PLAYABLE_DOWNLOAD_STATUSES,
+  isPlayableDownload,
   RETRYABLE_DOWNLOAD_STATUSES,
   TERMINAL_DOWNLOAD_STATUSES,
 } from '../constants/downloadStatus'
@@ -163,7 +163,9 @@ function renderDurationAnalysis(download) {
 function renderRowMessages(download) {
   const messages = [download.interruption_reason, download.error_message].filter(Boolean)
   if (messages.length === 0) return null
-  return messages.map((msg, i) => <div key={i}>{renderErrorMessage(msg)}</div>)
+  return messages.map((msg, i) => (
+    <div key={i} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{renderErrorMessage(msg)}</div>
+  ))
 }
 
 function getStatusBadge(status) {
@@ -558,7 +560,7 @@ export default function Downloads() {
 
     return (
       <>
-        {PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && (
+        {isPlayableDownload(download) && (
           isDesktop ? (
             <>
               <ActionIcon
@@ -613,7 +615,7 @@ export default function Downloads() {
             </>
           )
         )}
-        {PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && !download.is_vod && (
+        {isPlayableDownload(download) && !download.is_vod && (
           <ActionIcon
             variant="subtle"
             color="gray"
@@ -791,7 +793,7 @@ export default function Downloads() {
                     const aired = formatAirDateTime(download, 'start', guideOffset)
                     const subtitleParts = [download.channel_name, aired]
                     if (
-                      PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) &&
+                      isPlayableDownload(download) &&
                       download.output_path
                     ) {
                       subtitleParts.push(getFileName(download.output_path))
@@ -818,7 +820,7 @@ export default function Downloads() {
                         }
                         poster={anyHistoryPosters ? download.poster || null : undefined}
                         error={renderRowMessages(download)}
-                        size={PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && download.file_size > 0 ? formatBytes(download.file_size) : null}
+                        size={isPlayableDownload(download) && download.file_size > 0 ? formatBytes(download.file_size) : null}
                         actions={renderHistoryActions(download)}
                       />
                     )

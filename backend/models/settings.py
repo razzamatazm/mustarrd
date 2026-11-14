@@ -70,6 +70,9 @@ class AppSettings(Base):
     show_future_programs: Mapped[bool] = mapped_column(Boolean, default=False)
     launch_on_startup: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_retry_failed_downloads: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A clean HTTP response can still contain less media than requested.
+    # Classification does not enable the failed-download retry master switch.
+    mark_short_downloads_failed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Daily check against GitHub for a newer build (services/update_check.py).
     update_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -197,6 +200,7 @@ class AppSettings(Base):
             "update_check_enabled": self.update_check_enabled is not False,
             # Read-only: the commit this build was made from, "" if unknown.
             "build_sha": app_settings.build_sha or "",
+            "mark_short_downloads_failed": self.mark_short_downloads_failed,
             "onboarding_dismissed": self.onboarding_dismissed,
             "onboarding_processing_confirmed": self.onboarding_processing_confirmed,
             "onboarding_comskip_confirmed": self.onboarding_comskip_confirmed,
