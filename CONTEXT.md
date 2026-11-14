@@ -52,12 +52,14 @@ A raw short capture held without Commercial Skip, remuxing or transcoding while
 bounded automatic recovery is still possible: at most three retries after the
 original capture, at least ten minutes apart, within the archive window and
 disk limits. When recovery ends the longest held attempt is finalized, under the
-recording's original name, and the others are removed. A held capture always
-ends: when retries run out or are switched off, when the linked schedule was
-cancelled, or after six hours if the provider cannot be reached. Exact file
-ownership is persisted across restart; superseded attempts are removed only
-after the kept file has landed and probes as playable. Old retry ownership is
-never inferred from filename patterns.
+recording's original name, and the others are removed. A short or unmeasured
+attempt never replaces a longer one, and that includes the finished file of a
+short recording someone retries by hand. A held capture always ends: when
+retries run out or are switched off, when a retry is cancelled, or after six
+hours if the provider cannot be reached. Exact file ownership is persisted
+across restart; superseded attempts are removed only after the kept file has
+landed and probes as playable. Old retry ownership is never inferred from
+filename patterns.
 _Avoid_: held download, pending retry (a retry in the queue is Pending)
 
 **Catchup URL style**:
