@@ -1,6 +1,7 @@
 """Deferred raw attempts are finalized once, then safely cleaned by ownership."""
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -669,6 +670,167 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
         final=await self.row()
         self.assertEqual(final.output_path,kept.output_path)
         self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-20')
+
+    # --- awkward moments: failed checks, cancels and processing errors ----
+
+    async def test_kept_recording_that_cannot_be_checked_is_not_overwritten(self):
+        first=await self.kept_short_recording()
+        kept=Path(first.output_path)
+        stat=kept.stat()
+        os.utime(kept,ns=(stat.st_atime_ns,stat.st_mtime_ns+5_000_000_000))
+        await self.capture(20)
+        if not self.manager._post_queue.empty():
+            await self.finish()
+        final=await self.row()
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertEqual(kept.read_bytes(),b'raw-attempt-0-50')
+        self.assertEqual(final.raw_duration_seconds,50)
+
+    async def test_slow_probe_of_the_kept_recording_does_not_let_a_shorter_retry_win(self):
+        first=await self.kept_short_recording()
+        kept=first.output_path
+        async def probe(path):
+            return bool(path and os.path.realpath(path)!=os.path.realpath(kept) and Path(path).is_file())
+        with patch.object(self.manager,'_partial_is_playable',AsyncMock(side_effect=probe)):
+            await self.capture(20)
+        if not self.manager._post_queue.empty():
+            await self.finish()
+        final=await self.row()
+        self.assertEqual(final.output_path,kept)
+        self.assertEqual(Path(kept).read_bytes(),b'raw-attempt-0-50')
+
+    async def test_implausible_measurement_never_beats_a_measured_capture(self):
+        longest=await self.capture(50)
+        await self.retry()
+        await self.capture(5000)
+        self.assertEqual((await self.row()).raw_duration_seconds,50)
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(longest)])
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+
+    async def run_post_worker(self):
+        task=asyncio.create_task(self.manager.process_post_queue())
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if self.manager._post_queue.empty():
+                break
+        await asyncio.sleep(0.2)
+        self.manager._running=False
+        task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+
+    async def test_cancelling_queued_processing_never_deletes_the_kept_attempt(self):
+        longest=await self.capture(50)
+        await self.retry()
+        await self.capture(20)
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertEqual((await self.row()).output_path,str(longest))
+        await self.manager.cancel_download(self.download.id)
+        await self.run_post_worker()
+        self.assertTrue(longest.exists())
+        await self.scheduler._auto_retry_failed_downloads()
+        row=await self.row()
+        self.assertEqual(row.status,'cancelled')
+        self.assertTrue(self.manager._post_queue.empty())
+        self.assertEqual(self.processed,[])
+        self.assertTrue(longest.exists())
+
+    async def test_cancelling_processing_in_progress_sticks(self):
+        held=await self.capture(50)
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.scheduler._auto_retry_failed_downloads()
+        self.manager._post_queue.get_nowait()
+        started=asyncio.Event()
+        async def hang(path,*args,**kwargs):
+            started.set()
+            await asyncio.sleep(60)
+        self.processor.side_effect=hang
+        task=asyncio.create_task(self.manager._execute_post_process(self.download.id))
+        self.manager._active_post[self.download.id]=task
+        await started.wait()
+        await self.manager.cancel_download(self.download.id)
+        await asyncio.gather(task,return_exceptions=True)
+        self.manager._active_post.pop(self.download.id,None)
+        await self.scheduler._auto_retry_failed_downloads()
+        row=await self.row()
+        self.assertEqual(row.status,'cancelled')
+        self.assertFalse(row.processing_deferred)
+        self.assertTrue(self.manager._post_queue.empty())
+        self.assertTrue(held.exists())
+
+    async def test_cancel_after_the_last_byte_cannot_overwrite_the_kept_recording(self):
+        await self.settings(transcode_enabled=False,auto_retry_failed_downloads=False)
+        await self.capture(50)
+        first=await self.row()
+        self.assertTrue(await self.manager.retry_download(self.download.id))
+        self.manager._queue.get_nowait()
+        with patch.object(self.manager,'_prepare_downloaded_file',AsyncMock(side_effect=asyncio.CancelledError())):
+            await self.capture(20)
+        self.assertEqual(Path(first.output_path).read_bytes(),b'raw-attempt-0-50')
+        await self.scheduler._auto_retry_failed_downloads()
+        final=await self.row()
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_cancel_after_the_last_byte_still_keeps_the_longest_held_attempt(self):
+        longest=await self.capture(50)
+        await self.retry()
+        with patch.object(self.manager,'_prepare_downloaded_file',AsyncMock(side_effect=asyncio.CancelledError())):
+            await self.capture(20)
+        self.assertTrue(longest.exists())
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(longest)])
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_better_retry_that_fails_processing_goes_back_to_the_kept_recording(self):
+        first=await self.kept_short_recording()
+        raw=await self.capture(55)
+        self.processor.side_effect=RuntimeError('Comskip error')
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(final.status,'failed')
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertIn('Comskip error',final.error_message)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+        self.assertTrue(raw.exists())
+        await self.age()
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertTrue(self.manager._queue.empty())
+        self.assertTrue(self.manager._post_queue.empty())
+
+    async def test_one_failed_check_does_not_abandon_the_kept_recording(self):
+        first=await self.kept_short_recording()
+        await self.capture(fail=True)
+        self.assertTrue((await self.row()).processing_deferred)
+        await self.age()
+        with patch.object(self.manager,'_partial_is_playable',AsyncMock(return_value=False)):
+            await self.scheduler._auto_retry_failed_downloads()
+        final=await self.row()
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+
+    async def test_unreadable_held_attempts_are_retried_then_given_up_after_the_bound(self):
+        held=await self.capture(50)
+        await self.settings(auto_retry_failed_downloads=False)
+        with patch.object(self.manager,'_partial_is_playable',AsyncMock(return_value=False)):
+            await self.scheduler._auto_retry_failed_downloads()
+            self.assertTrue((await self.row()).processing_deferred)
+            await self.age(minutes=HELD_CAPTURE_MAX_WAIT_HOURS*60+1)
+            await self.scheduler._auto_retry_failed_downloads()
+        row=await self.row()
+        self.assertFalse(row.processing_deferred)
+        self.assertIn('could be verified',row.error_message)
+        self.assertTrue(held.exists())
 
     # --- a held capture always has a way out ------------------------------
 
