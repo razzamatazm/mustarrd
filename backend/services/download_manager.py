@@ -67,6 +67,9 @@ COMPLETED_WITH_WARNINGS_PREFIX = "Completed with warnings: "
 # Prefix of the note left on a row when superseded retry files could not be
 # removed. Startup retries the cleanup and replaces the note, never stacks it.
 RETAINED_CLEANUP_NOTE = "Retry-file cleanup:"
+# "The best attempt is on disk but could not be checked just now": the answer
+# from _longest_retained_attempt when settling for a lesser one would be premature.
+_UNDECIDED: dict = {"undecided": True}
 
 # The extra fields on the WebSocket frame for "queued for post-processing",
 # which four paths reach: a fresh download, an interrupted one, and two
@@ -1426,14 +1429,20 @@ class DownloadManager:
                     if settings is None:
                         settings = await self._load_app_settings()
                     try:
-                        completed_path = await self._move_to_completed_async(
-                            download.output_path,
-                            self._resolve_completed_folder(settings),
-                            self._resolve_download_folder(settings),
-                        )
-                        completed_path = await self._restore_original_name(
-                            download, completed_path
-                        )
+                        if self._already_in_completed_folder(download.output_path, settings):
+                            # The row was pointed back at a finished file that
+                            # is already in place. Moving it again would lose
+                            # its Show/Season subfolder.
+                            completed_path = download.output_path
+                        else:
+                            completed_path = await self._move_to_completed_async(
+                                download.output_path,
+                                self._resolve_completed_folder(settings),
+                                self._resolve_download_folder(settings),
+                            )
+                            completed_path = await self._restore_original_name(
+                                download, completed_path
+                            )
                     except OSError:
                         # Move failed; keep the recording where it is.
                         completed_path = download.output_path
@@ -1458,7 +1467,8 @@ class DownloadManager:
                     # The frame below fires whether or not there is a row left
                     # to transition, so it stays out here.
                     await self._transition_cancelled(session, download)
-                    if download.output_path and os.path.exists(download.output_path):
+                    if (download.output_path and os.path.exists(download.output_path)
+                            and not self._is_retained_recording(download)):
                         try:
                             os.unlink(download.output_path)
                         except OSError:
@@ -1513,7 +1523,8 @@ class DownloadManager:
                     # to transition, so it stays out here.
                     await self._transition_failed(session, download, _friendly_error(e))
                     try:
-                        if download.output_path and os.path.exists(download.output_path):
+                        if (download.output_path and os.path.exists(download.output_path)
+                                and not self._is_retained_recording(download)):
                             os.unlink(download.output_path)
                     except OSError:
                         pass
@@ -1709,7 +1720,19 @@ class DownloadManager:
                     select(Download).where(Download.id == download_id)
                 )
                 download = result.scalar_one_or_none()
-                if download and download.status in [
+                if download and await self._fall_back_to_kept_final(
+                    session, download, "processing of a retry was cancelled"
+                ):
+                    # The recording had a finished file before this retry.
+                    # Cancelling the retry's processing returns to it, so it
+                    # is not left in the library with no row pointing at it.
+                    self._cancelled.discard(download_id)
+                    await self._broadcast_log(
+                        download_id,
+                        "Post-processing cancelled; the earlier recording was kept.",
+                        level="warning",
+                    )
+                elif download and download.status in [
                     DownloadStatus.PENDING.value,
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.PROCESSING.value,
@@ -1759,7 +1782,7 @@ class DownloadManager:
                 )
                 download = result.scalar_one_or_none()
                 went_back = bool(download) and await self._fall_back_to_kept_final(
-                    session, download, e
+                    session, download, f"a retry could not be processed ({_friendly_error(e)})"
                 )
                 if download and not went_back:
                     # The frame below fires whether or not there is a row left
@@ -1806,8 +1829,11 @@ class DownloadManager:
                     DownloadStatus.COMPLETED.value,
                     DownloadStatus.INTERRUPTED.value,
                 ) and not (
-                    # A tracked attempt is a recording, not a working file.
-                    isinstance(dl.retained_captures_json, str) and dl.retained_captures_json
+                    # A short recording marked Failed is finalized and has a
+                    # playable file; a tracked attempt is a recording too.
+                    # Neither is a working file to throw away.
+                    dl.retry_finalized is True
+                    or (isinstance(dl.retained_captures_json, str) and dl.retained_captures_json)
                 ):
                     path = Path(dl.output_path)
                     if path.is_file():
@@ -3531,6 +3557,20 @@ class DownloadManager:
             )
             download = result.scalar_one_or_none()
 
+            if (download and download.status == DownloadStatus.PROCESSING.value
+                    and self._kept_final_entry(download)):
+                # The retry of a recording that already had a finished file
+                # is being processed. Cancelling that goes back to the file
+                # it had. A running job does it in its own cancel handler,
+                # and writing Cancelled here would race with that. A job
+                # still in the queue has no handler, so do it now.
+                if download_id in self._active_post:
+                    return True
+                if await self._fall_back_to_kept_final(
+                    session, download, "processing of a retry was cancelled"
+                ):
+                    return True
+
             if download and (download.processing_deferred or download.status in [
                 DownloadStatus.PENDING.value,
                 DownloadStatus.DOWNLOADING.value,
@@ -3637,7 +3677,9 @@ class DownloadManager:
             return True
         return await self._settle_on_longest(session, download, settings, batch=batch)
 
-    async def _longest_retained_attempt(self, entries: list) -> Optional[dict]:
+    async def _longest_retained_attempt(
+        self, entries: list, *, settle_for_less: bool, current: Optional[dict] = None
+    ) -> Optional[dict]:
         """The longest attempt that is still there to be kept.
 
         Length is the raw duration measured when the attempt arrived, never a
@@ -3647,18 +3689,28 @@ class DownloadManager:
         interrupted recording's replaced file is not a candidate.
 
         A raw attempt has to be intact and playable to be chosen, because it
-        is about to be processed. The finished file the recording already had
-        only has to exist: staying with it changes nothing on disk, and a
-        slow probe or a touched timestamp must never be the reason a shorter
-        retry lands on top of it.
+        is about to be processed. If a better-ranked one is on disk but its
+        probe fails, the answer is ``_UNDECIDED``: a probe can fail once on a
+        busy machine, and that must not hand the win to a shorter attempt.
+        ``settle_for_less=True`` is for when waiting has run out, and skips it.
+        ``current`` is the receipt of the capture that just landed: it is
+        about to be finished anyway and gets no extra probe, as on main.
+
+        The finished file the recording already had only has to exist:
+        staying with it changes nothing on disk, so a slow probe or a touched
+        timestamp is never the reason a shorter retry lands on top of it. One
+        whose length was never recorded is not replaced on a comparison at
+        all, only by a capture that measured as not short.
         """
         def rank(pair):
             index, entry = pair
             length = self._measured_length(
                 entry.get("raw_duration_seconds"), entry.get("duration_analysis_status")
             )
-            kept = length is not None and entry.get("role") == retained_captures.KEPT_FINAL
-            return (-1.0 if length is None else length, kept, index)
+            kept = entry.get("role") == retained_captures.KEPT_FINAL
+            if length is None:
+                length = math.inf if kept else -1.0
+            return (length, kept, index)
 
         candidates = [
             pair for pair in enumerate(entries)
@@ -3672,10 +3724,48 @@ class DownloadManager:
                 if await asyncio.to_thread(os.path.isfile, retained_captures.recorded_path(entry)):
                     return entry
                 continue
-            if (retained_captures.unchanged(media)
-                    and await self._partial_is_playable(media["path"])):
+            if current is not None and media == current:
                 return entry
+            if not retained_captures.unchanged(media):
+                continue
+            if await self._partial_is_playable(media["path"]):
+                return entry
+            if not settle_for_less:
+                return _UNDECIDED
         return None
+
+    @staticmethod
+    def _is_retained_recording(download) -> bool:
+        """Is the row pointing at a file it is keeping, not at a throwaway partial?
+
+        The cancel and failure handlers delete ``output_path`` as the partial
+        of the capture that just died. That is wrong once the row has been
+        pointed at an earlier attempt or at the finished file it already had,
+        so a path that appears in the ownership record is never deleted
+        there. When unsure, keep the file.
+        """
+        try:
+            if getattr(download, "retry_finalized", False) is True:
+                return True
+            raw = getattr(download, "retained_captures_json", None)
+            if not isinstance(raw, str) or not raw:
+                return False
+            target = os.path.realpath(download.output_path)
+            for attempt in json.loads(raw).get("attempts", []):
+                media = attempt.get("media") if isinstance(attempt, dict) else None
+                if isinstance(media, dict) and media.get("path") == target:
+                    return True
+            return False
+        except Exception:
+            return True
+
+    def _already_in_completed_folder(self, path: str, settings) -> bool:
+        """True for a file under the completed folder when that is a folder of its own."""
+        completed_folder = self._resolve_completed_folder(settings)
+        download_folder = self._resolve_download_folder(settings)
+        return self._path_is_under(path, completed_folder) and not self._folders_equal(
+            completed_folder, download_folder
+        )
 
     async def _park_cancelled_capture(self, session, download) -> bool:
         """A cancel arrived after the last byte of a retry. Hold the capture.
@@ -3705,8 +3795,8 @@ class DownloadManager:
             logger.exception("Could not park cancelled capture for download %s", download.id)
         return True
 
-    async def _fall_back_to_kept_final(self, session, download, error) -> bool:
-        """Processing a retry failed. Go back to the finished file, if one was kept.
+    async def _fall_back_to_kept_final(self, session, download, reason: str) -> bool:
+        """Processing a retry failed or was cancelled. Go back to the finished file, if one was kept.
 
         Without this the row would read Failed and point at an unprocessed
         file while the recording it already had sat in the library unlinked.
@@ -3724,16 +3814,16 @@ class DownloadManager:
                 pass
             await self._restore_kept_final(
                 session, download, entry, settings,
-                warning=(
-                    f"a retry could not be processed ({_friendly_error(error)}); "
-                    f"the earlier recording was kept"
-                ),
+                warning=f"{reason}; the earlier recording was kept",
             )
             return True
         except Exception:
-            logger.exception("Could not go back to the kept recording for download %s", download.id)
+            logger.exception("Could not go back to the kept recording for download %s", getattr(download, '__dict__', {}).get('id'))
             try:
                 await session.rollback()
+                # A rollback expires the row. Reload it so the caller's own
+                # handling does not trip over an unloaded attribute.
+                await session.refresh(download)
             except Exception:
                 pass
             return False
@@ -3771,13 +3861,25 @@ class DownloadManager:
             entries = retained_captures.manifest(download)["attempts"]
         except (ValueError, TypeError):
             return False
-        best = await self._longest_retained_attempt(entries)
+        current = await asyncio.to_thread(retained_captures.identity, download.output_path)
+        best = await self._longest_retained_attempt(
+            entries, settle_for_less=False, current=current
+        )
         if best is None:
             return False
+        if best is _UNDECIDED:
+            # The sweep checks again, and settles for less only once the
+            # usual bound on a held capture has passed.
+            download.processing_deferred = True
+            await self._transition_failed(
+                session, download,
+                "A longer attempt could not be checked just now. It will be checked again shortly.",
+                batch=batch,
+            )
+            return True
         if best.get("role") == retained_captures.KEPT_FINAL:
             await self._restore_kept_final(session, download, best, settings, batch=batch)
             return True
-        current = await asyncio.to_thread(retained_captures.identity, download.output_path)
         if best.get("media") == current:
             return False
         self._adopt_retained_attempt(download, best, settings)
@@ -3856,27 +3958,31 @@ class DownloadManager:
                     entries = retained_captures.manifest(download)["attempts"]
                 except (ValueError, TypeError):
                     return False
-                selected = await self._longest_retained_attempt(entries)
+                times = [t for t in (download.last_retry_at, download.completed_at) if t is not None]
+                waited = datetime.utcnow() - max(times) if times else None
+                overdue = waited is None or waited >= timedelta(hours=HELD_CAPTURE_MAX_WAIT_HOURS)
+                selected = await self._longest_retained_attempt(entries, settle_for_less=overdue)
+                if selected is _UNDECIDED:
+                    return False
                 await session.refresh(download)
                 if (not self._can_finalize_held(download)
                         or download.status != original_status
                         or download.output_path != original_path):
                     return False
-                if selected is not None and not retained_captures.unchanged(selected.get("media")):
+                if (selected is not None
+                        and selected.get("role") != retained_captures.KEPT_FINAL
+                        and not retained_captures.unchanged(selected.get("media"))):
                     return False
                 if selected is None:
                     # A probe can fail once on a busy machine. Try again on
                     # the next sweep while a file is still there, but not for
                     # ever: give up after the same bound a held capture has.
-                    times = [t for t in (download.last_retry_at, download.completed_at) if t is not None]
-                    waited = datetime.utcnow() - max(times) if times else None
                     still_there = any(
                         os.path.lexists(retained_captures.recorded_path(entry))
                         for entry in entries
                         if isinstance(entry, dict) and isinstance(entry.get("media"), dict)
                     )
-                    if (still_there and waited is not None
-                            and waited < timedelta(hours=HELD_CAPTURE_MAX_WAIT_HOURS)):
+                    if still_there and not overdue:
                         return False
                     download.processing_deferred = False
                     download.error_message = "No retained recording could be verified. Retained files were not deleted."
