@@ -103,6 +103,21 @@ function formatMediaDuration(seconds) {
   return parts.join(' ')
 }
 
+// What the optional end-trim step did to a long recording, or null when it
+// has nothing to say. Most people never turn that option on, and a recording
+// it never touched (or one from before it existed) gets no trim note at all.
+function bufferTrimOutcome(download) {
+  const outcomes = {
+    trimmed: 'Successfully trimmed to expected length',
+    failed: 'Not trimmed — trim failed',
+    already_matched: 'Already at expected length (no trim needed)',
+  }
+  if (download.buffer_trim_status === 'in_progress') {
+    return download.status === 'processing' ? 'Trimming in progress' : 'Trim outcome not confirmed'
+  }
+  return outcomes[download.buffer_trim_status] || null
+}
+
 function renderDurationAnalysis(download) {
   const status = download.duration_analysis_status
   if (download.is_vod || !status) return null
@@ -127,6 +142,7 @@ function renderDurationAnalysis(download) {
           <div>Downloaded before processing: {formatMediaDuration(raw)} · {labels[status]}</div>
           <div>
             Expected: {formatMediaDuration(expected)} (including padding)
+            {status === 'long' && bufferTrimOutcome(download) && ` · ${bufferTrimOutcome(download)}`}
           </div>
         </>
       ) : (

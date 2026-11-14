@@ -10,6 +10,7 @@ from auth import require_admin, require_admin_or_download_user, AuthContext
 from database import get_session
 from models import AppSettings, EPGProgram, XtreamAccount, ScheduledRecording, ScheduledStatus, Download, DownloadStatus
 from services.download_manager import download_manager
+from services.recording_rule_service import recording_rule_service
 from services.epg_ingest_manager import epg_ingest_manager, friendly_connection_error
 from services.epg_service import epg_service
 from services import notifications as notification_service
@@ -287,8 +288,12 @@ async def delete_account(
     )
 
     deleted_account_id = account.id
-    await session.delete(account)
-    await session.commit()
+    # The account's recording rules go with it: there is no guide left for
+    # them to match against.
+    async with recording_rule_service.lock:
+        await recording_rule_service.delete_rules(session, account_id=account.id)
+        await session.delete(account)
+        await session.commit()
     epg_service.clear_cache()
 
     # Best effort: the hourly sweep also removes notifications whose account

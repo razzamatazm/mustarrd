@@ -23,9 +23,10 @@ import {
   IconPlayerPlay,
   IconTrophy,
   IconFile,
+  IconRepeat,
 } from '@tabler/icons-react'
 
-import { downloadsApi, schedulesApi, settingsApi } from '../api'
+import { downloadsApi, recordingRulesApi, schedulesApi, settingsApi } from '../api'
 import { formatChannelDateTime, getChannelDisplayTime, getGuideOffsetHours } from '../utils/channelTime'
 
 const typeIcons = {
@@ -136,6 +137,29 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
     },
   })
 
+  const ruleMutation = useMutation({
+    mutationFn: (data) => recordingRulesApi.create(data),
+    onSuccess: (rule) => {
+      queryClient.invalidateQueries({ queryKey: ['recording-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['schedules'] })
+      notifications.show({
+        title: 'Recurring Recording Created',
+        message: rule.scheduled_count
+          ? `Scheduled ${rule.scheduled_count} recording${rule.scheduled_count === 1 ? '' : 's'}. More are added after each guide refresh.`
+          : 'Nothing to schedule yet. Matching airings are added after each guide refresh.',
+        color: 'green',
+      })
+      onClose()
+    },
+    onError: (error) => {
+      notifications.show({
+        title: 'Error',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
   const handleSchedule = () => {
     scheduleMutation.mutate({
       account_id: parseInt(accountId),
@@ -143,6 +167,17 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
       channel_name: channel.name,
       program: program,
       custom_filename: filename ? `${filename}.ts` : null,
+      pre_padding_minutes: prePadding,
+      post_padding_minutes: postPadding,
+    })
+  }
+
+  const handleRecordEveryAiring = () => {
+    ruleMutation.mutate({
+      account_id: parseInt(accountId),
+      channel_id: channel.stream_id.toString(),
+      channel_name: channel.name,
+      title_match: program.title,
       pre_padding_minutes: prePadding,
       post_padding_minutes: postPadding,
     })
@@ -259,10 +294,19 @@ export default function ScheduleModal({ opened, onClose, program, channel, accou
             Cancel
           </Button>
           <Button
+            variant="default"
+            leftSection={<IconRepeat size={16} />}
+            onClick={handleRecordEveryAiring}
+            loading={ruleMutation.isPending}
+            disabled={!program.title || scheduleMutation.isPending}
+          >
+            Record every airing
+          </Button>
+          <Button
             leftSection={<IconCalendar size={16} />}
             onClick={handleSchedule}
             loading={scheduleMutation.isPending}
-            disabled={isLoadingPreview || !filename}
+            disabled={isLoadingPreview || !filename || ruleMutation.isPending}
           >
             Schedule
           </Button>

@@ -90,6 +90,48 @@ processing; a new capture attempt clears the previous observation. Missing or
 implausible measurements remain uncertain, never replaced with the requested
 length. This is a duration estimate, not proof of uninterrupted or correct content.
 
+**Buffer trim outcome**:
+The saved result of the excess-tail step on the current raw capture. A confirmed
+trim is recorded before Commercial Skip or conversion and is independent of the
+final file duration and overall download status. Old rows without this evidence
+remain unknown; matching final length never backfills a successful trim. A new
+capture resets the result. A file already at the target on recovery is reported
+separately rather than assumed to have been trimmed.
+
+**Recording rule**:
+A saved instruction to record every **airing** of a show on one channel of
+one account, so nobody has to pick each episode by hand. It matches on the
+programme title (exactly, by "contains", or by a regular expression that only
+an admin may save), optionally only on certain weekdays, with its own padding.
+A rule does no recording itself: it creates ordinary scheduled recordings,
+when it is saved and after every guide refresh. Saving one also catches what
+is on air and what finished in the last day, if catchup still has it; a guide
+refresh only looks forward. Deleting a rule deletes the recordings it
+scheduled that have not started and keeps everything else as history.
+_Avoid_: series rule, season pass, series link (it matches a title, it knows
+nothing about seasons), recurring recording (that's what the user gets, and
+the name of the tab), time slot (that's a clock time, not a title)
+
+**Airing**:
+One showing of a programme: this account, this channel, this start and stop.
+It is what a recording rule schedules, and its identity is what stops the
+same showing being recorded twice. An airing already scheduled, recording or
+recorded, by hand or by any rule, is taken. A **moved listing** is the same
+airing, not a new one.
+_Avoid_: episode (two airings can be the same episode), programme (that's the
+guide entry; a repeat is the same programme and a different airing), slot
+
+**Moved listing**:
+A guide entry the provider retimed between refreshes: a match overran, or
+8:00 was corrected to 8:05. The guide keeps the old entry and gains the new
+one, so one airing shows up twice. Two entries on a channel are the same
+airing when they have the same title and overlap for more than half of the
+shorter one, which still keeps back-to-back episodes apart. A rule's
+recording that has not started is moved onto the newer entry; anything
+already started, made by hand, or cancelled is left as it is and simply not
+recorded again.
+_Avoid_: shifted airing, duplicate listing, retime
+
 ### Commercial Skip
 
 **Commercial Skip**:

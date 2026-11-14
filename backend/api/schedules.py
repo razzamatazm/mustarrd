@@ -172,11 +172,20 @@ async def _create_schedule_record(
     data: ScheduleCreate,
     auth: AuthContext,
     session: AsyncSession,
+    *,
+    recording_rule_id: int | None = None,
+    rule_airing_key: str | None = None,
+    allow_ended: bool = False,
 ) -> ScheduledRecording:
     """Validate and persist a new schedule (shared by create and import).
 
     Raises HTTPException: 404 unknown account, 400 invalid/already-ended
     program, 409 duplicate of an active schedule.
+
+    *allow_ended*: permit a programme whose broadcast has already finished.
+    Recurring rules use this so a rule created mid-broadcast (or shortly
+    after) still captures that airing from the catchup archive. The catchup
+    window itself is enforced later by the scheduled dispatcher.
     """
     result = await session.execute(
         select(XtreamAccount).where(XtreamAccount.id == data.account_id)
@@ -196,7 +205,7 @@ async def _create_schedule_record(
         raise HTTPException(status_code=400, detail="Invalid program payload")
 
     now_utc = datetime.now(timezone.utc)
-    if stop_ts <= int(now_utc.timestamp()):
+    if stop_ts <= int(now_utc.timestamp()) and not allow_ended:
         raise HTTPException(status_code=400, detail="Program already ended; download instead")
 
     epg_id = data.program.get("epg_id")
@@ -267,6 +276,8 @@ async def _create_schedule_record(
         status=ScheduledStatus.SCHEDULED.value,
         requested_by_user_id=auth.user_id,
         request_source=auth.provider or "admin_local",
+        recording_rule_id=recording_rule_id,
+        rule_airing_key=rule_airing_key,
     )
 
     session.add(schedule)

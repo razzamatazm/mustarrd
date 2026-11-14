@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -25,6 +26,11 @@ vi.mock('../api', () => ({
     cancel: vi.fn(),
     exportAll: vi.fn(),
     importDoc: vi.fn(),
+  },
+  recordingRulesApi: {
+    list: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   },
   accountsApi: { publicList: vi.fn() },
   authApi: { status: vi.fn() },
@@ -68,9 +74,10 @@ const failedSchedule = {
   download_error_message: 'Stream unavailable',
 }
 
-async function renderScheduled({ schedules = [], isAdmin = true, initialEntries = ['/scheduled'] } = {}) {
-  const { schedulesApi, accountsApi, authApi, settingsApi } = await import('../api')
+async function renderScheduled({ schedules = [], rules = [], isAdmin = true, initialEntries = ['/scheduled'] } = {}) {
+  const { schedulesApi, recordingRulesApi, accountsApi, authApi, settingsApi } = await import('../api')
   schedulesApi.list.mockResolvedValue(schedules)
+  recordingRulesApi.list.mockResolvedValue(rules)
   accountsApi.publicList.mockResolvedValue([{ id: 1, name: 'Main', guide_offset_hours: 0 }])
   authApi.status.mockResolvedValue({ is_admin: isAdmin })
   settingsApi.get.mockResolvedValue({ auto_retry_failed_downloads: true })
@@ -141,5 +148,73 @@ describe('Scheduled page', () => {
   it('shows the auto-retry switch to admins only', async () => {
     await renderScheduled({ schedules: [], isAdmin: false })
     expect(screen.queryByLabelText('Auto-retry failed downloads')).not.toBeInTheDocument()
+  })
+
+  it('lists, disables, and deletes recurring recording rules', async () => {
+    const { recordingRulesApi } = await import('../api')
+    recordingRulesApi.update.mockResolvedValue({})
+    recordingRulesApi.delete.mockResolvedValue({ status: 'deleted', removed_schedules: 3 })
+    const show = vi.spyOn(notifications, 'show').mockImplementation(() => {})
+    await renderScheduled({
+      rules: [{
+        id: 7,
+        account_id: 1,
+        channel_name: 'Game Network',
+        title_match: 'Evening Quiz',
+        enabled: true,
+      }],
+      initialEntries: ['/scheduled?tab=rules'],
+    })
+
+    expect(await screen.findByText('Evening Quiz')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Evening Quiz' }))
+    await waitFor(() => {
+      expect(recordingRulesApi.update).toHaveBeenCalledWith(7, { enabled: false })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule Evening Quiz' }))
+    // Deleting a rule takes its not-yet-started recordings with it, so say so first.
+    expect(screen.getByText(/recordings it scheduled that have not started/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete' }))
+    await waitFor(() => {
+      expect(recordingRulesApi.delete).toHaveBeenCalledWith(7)
+    })
+    await waitFor(() => {
+      expect(show).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining('Removed 3 scheduled recordings that had not started'),
+      }))
+    })
+  })
+
+  it('edits recurring matching, padding, and days', async () => {
+    const { recordingRulesApi } = await import('../api')
+    recordingRulesApi.update.mockResolvedValue({ scheduled_count: 0 })
+    await renderScheduled({
+      rules: [{
+        id: 8,
+        account_id: 1,
+        channel_name: 'Game Network',
+        title_match: 'Evening Quiz',
+        match_mode: 'exact',
+        enabled: true,
+        days_of_week: null,
+        pre_padding_minutes: 1,
+        post_padding_minutes: 5,
+      }],
+      initialEntries: ['/scheduled?tab=rules'],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit rule Evening Quiz' }))
+    fireEvent.change(await screen.findByLabelText('Title match'), { target: { value: 'Quiz' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+
+    await waitFor(() => {
+      expect(recordingRulesApi.update).toHaveBeenCalledWith(8, expect.objectContaining({
+        title_match: 'Quiz',
+        match_mode: 'exact',
+        pre_padding_minutes: 1,
+        post_padding_minutes: 5,
+      }))
+    })
   })
 })

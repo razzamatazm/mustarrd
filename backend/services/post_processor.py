@@ -7,12 +7,14 @@ import platform
 import subprocess
 import shlex
 import re
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Tuple
 from enum import Enum
 
 from services.process_runner import ProcessRunner
+from services.download_analysis import analyze_duration
 
 logger = logging.getLogger(__name__)
 
@@ -2111,6 +2113,92 @@ class PostProcessor:
             keep_segments.append((current_pos, duration))
 
         return keep_segments
+
+    async def trim_buffer_tail(
+        self,
+        input_path: str,
+        expected_seconds: float,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> bool:
+        """Keep the beginning of a long recording, replacing only validated output.
+
+        The caller must first authorize this using the original raw analysis.
+        Re-probing here makes recovery safe after a successful atomic replace
+        that happened before the processing job's database commit.
+        """
+        current = analyze_duration(
+            expected_seconds, await self._get_duration(input_path, log_callback)
+        )
+        if current.status == "matched":
+            await self._notify_log(log_callback, "Buffer trim: the file already matches the requested length.")
+            return False
+        if current.status != "long":
+            raise RuntimeError("The current file has no reliably measured excess tail; it was kept unchanged.")
+
+        ffmpeg = self.get_ffmpeg_path()
+        ffprobe = self._resolve_ffprobe_path()
+        if not ffmpeg or not ffprobe:
+            raise RuntimeError("Buffer trimming requires FFmpeg and ffprobe; the original was kept.")
+
+        source = Path(input_path)
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{source.stem}.buffer-trim-", suffix=source.suffix, dir=source.parent
+        )
+        os.close(descriptor)
+        candidate = Path(temporary_path)
+        try:
+            # No seek or leading cut: -t bounds only the output's end. Initial
+            # non-key packets must survive when a TS starts mid-GOP. Mapping
+            # every stream avoids silently dropping audio/subtitle tracks.
+            #
+            # -dts_delta_threshold 1: -t counts by the clock in the file, and
+            # provider files sometimes skip that clock ahead by a few seconds.
+            # FFmpeg only closes skips over 10s by default, so a smaller one
+            # made the file measure long and the cut then removed real
+            # footage to "fix" it. Closing every skip over 1s makes -t count
+            # footage, so only a genuinely extra tail is removed.
+            result = await self._runner.run_capture([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-dts_delta_threshold", "1",
+                "-i", str(source), "-map", "0", "-c", "copy", "-copyinkf",
+                "-t", f"{expected_seconds:.6f}", "-y", str(candidate),
+            ])
+            if result.timed_out or result.returncode != 0:
+                detail = result.stderr_text.strip()[-500:]
+                raise RuntimeError(f"FFmpeg could not trim the buffer{': ' + detail if detail else '.'}")
+            if not candidate.is_file() or candidate.stat().st_size == 0:
+                raise RuntimeError("Buffer trimming produced no usable file.")
+
+            probe = await self._runner.run_capture([
+                ffprobe, "-v", "error", "-print_format", "json",
+                "-show_entries", "format=duration:stream=codec_type", str(candidate),
+            ], timeout=self.FFPROBE_TIMEOUT_SECONDS)
+            if probe.timed_out or probe.returncode != 0:
+                raise RuntimeError("The trimmed file could not be verified by ffprobe.")
+            try:
+                media = json.loads(probe.stdout_text)
+                measured = float(media.get("format", {}).get("duration", 0))
+                has_media = any(
+                    stream.get("codec_type") in ("audio", "video")
+                    for stream in media.get("streams", [])
+                )
+            except (ValueError, TypeError, AttributeError):
+                raise RuntimeError("ffprobe returned invalid data for the trimmed file.")
+            if not has_media or analyze_duration(expected_seconds, measured).status != "matched":
+                raise RuntimeError("The trimmed file did not pass the stream and duration checks.")
+
+            shutil.copymode(source, candidate)
+            os.replace(candidate, source)
+            await self._notify_log(
+                log_callback,
+                f"Buffer trim complete: kept {measured:.1f}s of the requested {expected_seconds:.1f}s "
+                "including padding; removed only the excess tail.",
+            )
+            return True
+        finally:
+            # Cancellation and all validation failures clean only our own temp.
+            # The original is untouched until the successful atomic replacement.
+            self._remove_partial_output(candidate)
 
     async def _get_duration(
         self,
