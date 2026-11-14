@@ -98,6 +98,105 @@ Then open **http://localhost:4177** in your browser.
 - When any scheduled recording is paused for low disk space, or when free space drops below the configured minimum, an orange banner appears at the top of every page, not just Downloads, so you are alerted no matter where you are in the app
 - The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Interrupted, Failed, or Cancelled entries
 - Failed downloads show a **Retry** button directly on the card; cancelled downloads show a **Download Again** button
+- A catchup download that plays but came back more than five seconds shorter than requested is labelled **Shorter than expected** in History. To treat those as failures, enable **Settings > Recording > Download recovery > Mark short downloads as failed** (off by default). The recording then shows as **Failed** and stays playable
+- If **Auto-retry failed downloads** on Scheduled is also enabled, a short download marked Failed is downloaded again, up to three times and at least ten minutes apart. The attempts wait unprocessed until retrying ends; then the longest one is processed and kept under the recording's normal name, and the others are deleted. The short-file option never starts retries by itself, and VOD is not covered
+- Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries are not cleared so you can still retry them). A recording that is still waiting for a retry is skipped. Clearing history never deletes files
+
+| Desktop | Mobile |
+|---------|--------|
+| ![Browse your provider's program guide](docs/screenshots/screenshot-browse.png) | ![Browse on mobile](docs/screenshots/screenshot-browse-mobile.png) |
+
+## Features
+
+- **Browse past programs:** scroll back through your provider's program guide (EPG) and see what's available to download
+- **Starred channels:** star your favorite channels so they always appear at the top of the list
+- **Quick channel previews:** preview a live channel or any catchup program right in your browser before queuing a download — plays in every major browser, no separate player needed
+- **Commercial skip (cut *or* mark):** ComSkip finds the ad breaks, then either **cuts them out** of the recording or **marks them** so your media player skips them on playback. Marking leaves the recording whole and writes an `.edl` sidecar (Kodi, Jellyfin, Emby, MythTV) plus commercial chapter markers inside MKV/MP4 (so Plex can jump break-to-break). Detection method, break length limits, show-protection margins, and thread count are all configurable from the Settings page, no config file editing needed
+- **Flexible output formats:** save recordings as-is (.ts), remux to MKV or MP4, or re-encode with FFmpeg for smaller files
+- **GPU-accelerated encoding:** if your server has an Intel, AMD, or NVIDIA GPU, re-encoding uses it automatically; the Settings page shows GPU status in plain language
+- **Download from On Demand:** if your provider offers on demand listings, you can grab those too — movies and series browse as a poster grid
+- **Scheduled recordings:** set programs to download automatically when they air; export and import your schedule as a backup or to move to another machine
+- **Download length checks:** compare the original catchup download with its requested length, including padding, before commercial removal or conversion changes the file
+- **Smart file naming:** TV shows, movies, and sports get automatically named in the right format (`Breaking Bad - S01E01 - Pilot.ts`, `The Matrix (1999).ts`, etc.)
+- **Plex Link:** let your Plex users request programming by logging in with their Plex credentials (or don't), and push finished recordings straight into your Plex library
+- **Multiple accounts:** connect more than one IPTV provider. Add more users to give them download access
+
+## Why Do I Need This? I have Sonarr...
+
+- While Sonarr grabs the majority of quality programming out there I was searching for something for those random shows that air once a year. Think sports, awards shows, dog acrobatics competitions, the olympic games, etc.
+- I hate commercials
+- Sure, many good iptv players have the ability to record shows, but that is a recording of a recording. If something glitches, you're out of luck.
+- Link it right to Plex (allow your users to add shows to download if you want using the Plex integration)
+
+## Requirements
+
+- An IPTV subscription with **catchup / timeshift support** (must use the Xtream Codes protocol)
+- **Docker:** recommended install method, everything is bundled
+
+> Not sure if your provider supports catchup? Check if they give you a "catchup days" value or mention timeshift in their plan details.
+
+## Install
+
+### Docker (Recommended)
+
+Before first startup, edit the volume paths in `docker-compose.yml` so files go where you want on your host.
+Update these host-side paths:
+
+- `./config` (app settings/database)
+- `./downloads` (working/in-progress files)
+- `./completed` (final media output - I use a folder linked to a video library in Plex)
+
+
+```bash
+curl -O https://raw.githubusercontent.com/razzamatazm/mustarrd/main/docker-compose.yml
+mkdir -p config downloads completed
+docker compose up -d
+```
+
+Then open **http://localhost:4177** in your browser.
+
+### Unraid
+
+- Use image: `ghcr.io/razzamatazm/mustarrd/backend:latest`
+- Community Apps template: [`unraid/mustarrd.xml`](./unraid/mustarrd.xml)
+- Recommended mappings:
+  - `/app/config` -> `/mnt/cache/appdata/mustarrd`
+  - `/app/downloads` -> `/mnt/user/downloads/mustarrd`
+  - `/app/completed` -> your media share (for example `/mnt/user/media`)
+- Port mapping: container `4177` to host `4177` (or another host port if preferred)
+- Optional hardware acceleration: map `/dev/dri` into the container
+- Keep `PUID`/`PGID` aligned with your Unraid user that should own created files
+
+
+
+## First Run
+
+1. Open **http://localhost:4177**
+2. You'll be prompted to **set an admin username and password**.
+3. Enter your IPTV provider details:
+   - Server URL (e.g. `https://your-provider.com`)
+   - Username and password (from your provider)
+4. Optional - link to your Plex install to allow request access to your plex users and automatic library scans on file completion.
+5. Mustarrd will sync your provider's channel list and program guide to use in "Search All TV" mode. This takes a minute or two on first load. Individual channels will load instantly if you select one.
+6. Go to **Browse**, pick a channel, and start downloading or search all.
+
+## How to Use
+
+### Browse and Download Programs
+
+1. Go to **Browse** and select an account
+2. Click a channel to open its program guide
+3. Catchup programs have a **mustard left edge** with **Preview** and **Download** buttons; upcoming programs have a **teal edge** with a **Schedule** button
+4. Click **Download**, review the auto-generated filename (edit if needed), and confirm
+
+### Monitor Downloads
+
+- The **Active** tab shows downloads in progress, each as a pipeline of stages — Download, Commercials, Re-encode — side by side. Upcoming recordings live on the **Scheduled** page (a link under Active takes you there)
+- A red badge on the **Downloads** menu item shows how many recordings have permanently failed since you last visited. Opening Downloads clears it
+- A badge at the top shows how much free space is left on your recording drive. It turns red when space is low. If your recording drive is not found (for example after an array restart), the badge shows "Recording drive not found" in orange
+- When any scheduled recording is paused for low disk space, or when free space drops below the configured minimum, an orange banner appears at the top of every page, not just Downloads, so you are alerted no matter where you are in the app
+- The **History** tab shows past downloads. Use the status filter dropdown at the top to show only Completed, Interrupted, Failed, or Cancelled entries
+- Failed downloads show a **Retry** button directly on the card; cancelled downloads show a **Download Again** button
 - Catchup downloads more than five seconds shorter than the requested padded window remain visible with their measured and expected lengths. Enable **Settings > Recording > Download recovery > Mark short downloads as failed** to classify them as **Failed** instead of **Interrupted**. The option is off by default.
 - If **Auto-retry failed downloads** on Scheduled is enabled, short downloads marked Failed will also be retried. The master switch controls automatic recovery; the short-file option never enables retries by itself. Up to three retries after the original capture, at least ten minutes apart, respect archive, disk and cancellation safeguards. Raw attempts wait without Commercial Skip or conversion. Once recovery ends, one usable recording is finalized; explicitly tracked superseded attempts are removed only after successful processing, placement and validation. Failures preserve fallbacks. VOD and uncertain measurements do not trigger short-file recovery.
 - Use the **Clear finished** button to remove all completed and failed entries from history at once (a confirmation prompt prevents accidents; cancelled entries are not cleared so you can still retry them) Entries that still own deferred or retained retry files are preserved until safe finalization and cleanup.

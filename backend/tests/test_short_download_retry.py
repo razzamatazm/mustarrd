@@ -112,9 +112,13 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-    async def test_successful_short_capture_is_kept_and_schedule_is_interrupted(self):
+    async def short_capture(self, *, mark_short):
         path = self.downloads / "show.ts"
         payload = b"available raw recording"
+        async with self.sessions() as session:
+            settings = (await session.execute(select(AppSettings))).scalar_one()
+            settings.mark_short_downloads_failed = mark_short
+            await session.commit()
         download = await self.add(recording(path))
         schedule = await self.add(ScheduledRecording(
             account_id=1, channel_id="12", channel_name="Example channel", program_title="Example program",
@@ -128,23 +132,39 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
 
         self.manager._download_catchup_stream = AsyncMock(side_effect=capture)
         self.manager._integrity_check_warning = AsyncMock(return_value=None)
+        self.manager._partial_is_playable = AsyncMock(return_value=True)
         with (
             patch("services.download_manager.async_session_maker", self.sessions),
             patch("services.post_processor.post_processor._get_duration", AsyncMock(return_value=3240)),
         ):
             await self.manager._execute_download(download.id)
         finished = await self.read(download.id)
-        self.assertEqual(finished.status, DownloadStatus.INTERRUPTED.value)
-        self.assertIn("0:54:00", finished.interruption_reason)
-        self.assertIn("1:00:00", finished.interruption_reason)
-        self.assertIn("including padding", finished.interruption_reason)
         self.assertEqual(Path(finished.output_path).read_bytes(), payload)
         self.assertEqual(finished.source_url, download.source_url)
         self.assertEqual(finished.raw_duration_seconds, 3240)
+        self.assertEqual(finished.duration_analysis_status, "short")
         self.assertEqual(finished.retry_count, 0)
         async with self.sessions() as session:
             linked = await session.get(ScheduledRecording, schedule.id)
-            self.assertEqual(linked.status, ScheduledStatus.INTERRUPTED.value)
+        return finished, linked
+
+    async def test_short_capture_with_the_option_off_completes_as_it_always_has(self):
+        finished, linked = await self.short_capture(mark_short=False)
+        self.assertEqual(finished.status, DownloadStatus.COMPLETED.value)
+        self.assertIsNone(finished.interruption_reason)
+        self.assertIsNone(finished.error_message)
+        self.assertFalse(finished.short_file_failed)
+        self.assertEqual(linked.status, ScheduledStatus.COMPLETED.value)
+
+    async def test_short_capture_with_the_option_on_is_failed_and_kept(self):
+        finished, linked = await self.short_capture(mark_short=True)
+        self.assertEqual(finished.status, DownloadStatus.FAILED.value)
+        self.assertTrue(finished.short_file_failed)
+        self.assertTrue(finished.retry_finalized)
+        self.assertIn("0:54:00", finished.interruption_reason)
+        self.assertIn("1:00:00", finished.interruption_reason)
+        self.assertIn("including padding", finished.interruption_reason)
+        self.assertEqual(linked.status, ScheduledStatus.FAILED.value)
 
     async def test_shortfall_is_recorded_before_commercial_processing_and_survives_it(self):
         path = self.downloads / "show.ts"
@@ -154,6 +174,7 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
             settings = (await session.execute(select(AppSettings))).scalar_one()
             settings.transcode_enabled = True
             settings.comskip_enabled = True
+            settings.mark_short_downloads_failed = True
             await session.commit()
         self.manager._download_catchup_stream = AsyncMock(return_value=path.stat().st_size)
         self.manager._integrity_check_warning = AsyncMock(return_value=None)
@@ -175,7 +196,8 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.manager._post_queue.get_nowait(), download.id)
             await self.manager._execute_post_process(download.id)
         finished = await self.read(download.id)
-        self.assertEqual(finished.status, DownloadStatus.INTERRUPTED.value)
+        self.assertEqual(finished.status, DownloadStatus.FAILED.value)
+        self.assertTrue(finished.short_file_failed)
         self.assertEqual(finished.raw_duration_seconds, 3840)
         self.assertEqual(finished.recorded_duration_seconds, 2700)
         self.assertTrue(Path(finished.output_path).is_file())
@@ -188,6 +210,16 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
                 with patch("services.post_processor.post_processor._get_duration", AsyncMock(return_value=actual)):
                     await self.manager._prepare_downloaded_file(download)
                 self.assertIsNone(download.interruption_reason)
+
+    async def test_short_reason_is_written_only_when_the_option_is_on(self):
+        for mark_short, expected in ((False, False), (None, False), (True, True)):
+            with self.subTest(mark_short=mark_short):
+                download = recording(self.downloads / "show.ts")
+                settings = AppSettings(mark_short_downloads_failed=mark_short)
+                with patch("services.post_processor.post_processor._get_duration", AsyncMock(return_value=3240)):
+                    await self.manager._prepare_downloaded_file(download, settings=settings)
+                self.assertEqual(download.duration_analysis_status, "short")
+                self.assertEqual(download.interruption_reason is not None, expected)
 
     async def test_existing_network_interruption_reason_is_preserved(self):
         download = recording(self.downloads / "show.ts", interruption_reason="Provider connection dropped")
@@ -299,7 +331,8 @@ class ShortDownloadTests(unittest.IsolatedAsyncioTestCase):
         with patch("services.download_manager.async_session_maker", self.sessions):
             await self.manager._execute_download(download.id)
         finished = await self.read(download.id)
-        self.assertEqual(finished.status, DownloadStatus.INTERRUPTED.value)
+        self.assertEqual(finished.status, DownloadStatus.COMPLETED.value)
+        self.assertEqual(finished.duration_analysis_status, "short")
         self.assertAlmostEqual(finished.raw_duration_seconds, 50, delta=1)
         self.assertEqual(finished.expected_duration_seconds, 60)
         self.assertEqual(Path(finished.output_path).read_bytes(), source.read_bytes())

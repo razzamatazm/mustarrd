@@ -1,35 +1,36 @@
 # Changelog
 
-## 2026-10-23
-
-### Improved: Keep short-recording recovery details in the option description
-
-**What you would notice:** The explanation of deferred processing and retry-file cleanup now appears in parentheses at the end of Mark short downloads as failed, instead of as a separate line below it.
-
-**What changed:** Consolidated the setting description; classification, retry gating, defaults and cleanup behavior are unchanged.
-
-## 2026-10-22
-
-### Changed: Retry short recordings before processing, then keep one result
-
-**What you would notice:** **Mark short downloads as failed** replaces the separate short-retry switch. Short files are automatically retried only when **Auto-retry failed downloads** is also on. Intermediate attempts wait as raw files instead of repeatedly running Commercial Skip or conversion. After a successful finalization, superseded retry files are removed. A final short recording is kept and remains playable with its Failed status and shortfall explanation.
-
-**What changed:** The existing bounded retry loop now gates all recovery through the failed-download switch and defers processing until recovery ends. Persistent exact-file receipts protect fallback recordings across retries and restarts, and authorize cleanup only after validated final placement. Failed processing or cleanup retains recoverable files with a warning. The normal keep-original preference protects the selected input, not every retry. Historical files without ownership receipts are not guessed at or deleted. The old short-retry preference migrates to failure classification without enabling the master switch.
-
-
-## 2026-10-23
-
-### Improved: Put the original length comparison beside the downloaded time
-
-**What you would notice:** History shows Longer than expected, Shorter than expected, or Matches expected length beside Downloaded before processing, rather than beside the requested length.
-
-**What changed:** Moved the existing comparison label without changing duration analysis, recording status, or playback actions.
-
 All notable changes to Mustarrd are listed here. Most recent changes are at the top.
 
 ---
 
+## 2026-11-14
+
+### Added: Mark short recordings as failed, and try them again
+
+**What you would notice:** Sometimes a provider hands back a recording that plays fine but stops early, with no error. There is a new switch for that at **Settings > Recording > Download recovery > Mark short downloads as failed**. It is off by default, and with it off nothing changes. With it on, a catchup recording more than five seconds shorter than you asked for, padding included, shows as Failed with both lengths spelled out. You can still play it and download it. If **Auto-retry failed downloads** is also on, Mustarrd downloads it again, up to three times and at least ten minutes apart. The attempts wait untouched while it retries, so Commercial Skip and conversion run once at the end instead of once per attempt. When retrying ends, Mustarrd keeps the longest attempt under the recording's normal name and deletes the others.
+
+**What changed:** A retry can only improve a recording. If a later attempt comes back shorter than an earlier one, Mustarrd keeps the earlier one. An attempt that is waiting for a retry cannot wait for ever. Mustarrd finishes it as it is when retries run out, when you turn either switch off, when the programme leaves the provider's archive, or when you cancelled the schedule it came from. It also finishes it after six hours if the provider cannot be reached or the disk is too full to try again. Mustarrd tracks each retry file it wrote and deletes one only after the kept recording has landed and plays. A file that changed since Mustarrd wrote it is left alone, and the row says so. Removing a recording from History never deletes files. A kept short recording sends both `recording.failed` and `recording.completed`, so the failure notification, the webhooks and the poster all still happen. Two details of **Auto-retry failed downloads** changed for everyone, with or without the new switch. The ten-minute gap now counts from the later of the last retry and the last failure, and a retry only uses up one of the three attempts when it is actually queued. On-demand downloads are not covered, and neither are recordings whose length could not be measured.
+
 ## 2026-11-12
+
+### Fixed: A show the provider retimes is no longer recorded twice
+
+**What you would notice:** Providers change listing times between guide refreshes: a match overruns and pushes the next show back, or 8:00 is corrected to 8:05. A recording rule used to treat the changed listing as a brand new showing and schedule it a second time, leaving two near-identical recordings. Now it recognises it as the same showing. If the rule's recording has not started yet, it is moved to the new time, so a show pushed back five minutes is recorded five minutes later instead of losing its ending. A showing you already recorded, scheduled by hand, or cancelled is left exactly as it is and is not recorded again.
+
+**What changed:** Two listings on the same channel count as the same showing when they have the same title and overlap for more than half of the shorter one. That is loose enough to follow a retimed show and tight enough to keep back-to-back episodes as separate recordings. Only a rule's own not-yet-started recordings are moved; recordings you scheduled by hand keep the times you picked. Limits: a provider that renames a show at the same time as moving it still looks like a new showing, and if a provider moves a listing and then moves it back, the recording stays on the later time.
+
+### Added: Record every airing of a show
+
+**What you would notice:** Opening a programme in Browse now offers **Record every airing** alongside the one-off options. That saves a rule for the show on that channel. The new **Recurring** tab on the Scheduled page lists your rules and lets you turn each one off, edit it, or delete it. A rule can match the title exactly or by "contains", can be limited to certain days of the week, and has its own padding. Admins can also match by regular expression. Rules are checked when you save them and after every guide refresh, so upcoming episodes are scheduled for you. Saving a rule also picks up an episode that is on air or finished within the last 24 hours, as long as it is still inside the channel's catchup window. An airing you already scheduled or recorded yourself is not recorded again. Deleting a rule also removes the recordings it scheduled that have not started yet; anything already recorded, in progress, failed or cancelled stays in your history. Thanks to @geoffwatts.
+
+**What changed:** New `recording_rules` table, created on startup, and two new columns on scheduled recordings linking each one to its rule and to the airing it was made for. A rule is tied to one account and one channel. Rule-made recordings are ordinary scheduled recordings, so they queue, retry and show up exactly like ones you pick by hand. A rule keeps at most 100 recordings waiting at a time, nearest first, and tops up as those are recorded, so a loose match cannot flood the queue. Download-only users see and manage only their own rules, and a deleted user's or account's rules are deleted with them. Known limit: removing a still-upcoming cancelled recording from the list lets the rule schedule it again. Not in this release: rules that search every channel, matching on the description, and automatically deleting a rule's old recordings.
+
+### Added: Trim extra time from the end of a recording
+
+**What you would notice:** **Settings > Post-Processing** has a new switch, **Trim extra time from the end**, off by default. Some sources hand back more than was asked for; Dispatcharr, for example, adds buffer time to catchup recordings. With the switch on, a catchup recording that measures longer than the time you requested, including your padding, has the extra cut off its end before Commercial Skip or conversion. It works with Keep .ts. It applies to every account, and it assumes the extra is at the end, so leave it off if your recordings start early instead. In History, a recording this step touched says so next to its expected length: trimmed, already the right length, or not trimmed because the trim failed. If a trim fails for any reason the original recording is kept and the recording finishes with a warning. Thanks to @matrix2669.
+
+**What changed:** The cut is a stream copy to a temporary file, which is checked for audio/video and the right length before it replaces the original. Nothing is cut unless the measured length is reliable and more than 5 seconds over what was requested; a recording whose length cannot be trusted is left alone. Provider files sometimes skip their clock ahead by a few seconds, which makes them measure long without being long, so the cut closes those skips first and counts real footage. The outcome is saved on the recording (`buffer_trim_status`), and VOD is excluded. The Keep .ts description now reads "Keep the recording in its original .ts format", since trimming can apply to it.
 
 ### Added: Poster art for finished recordings
 
@@ -66,12 +67,6 @@ All notable changes to Mustarrd are listed here. Most recent changes are at the 
 **What you would notice:** Settings has a new Webhooks section. Paste in a web address for any of five moments - a recording starting, finishing, failing, being cancelled, or finishing its post-processing - and Mustarrd sends a short message to that address when it happens. That is enough to make Plex or Jellyfin refresh its library the moment a recording lands, to get a phone alert through something like ntfy, Pushover or Discord, or to kick off anything else you run at home. Leave a box empty and that one stays off. If the other end is switched off or refuses the message, nothing happens to your recording - the failure is noted in the logs and that is the end of it. Mustarrd never retries, so a receiver that comes back later will not get a backlog.
 
 **What changed:** The recording event seam gained its first consumer. Each event carries the recording's title, channel, start and end times, file path, status and error message, along with a version number so a receiver can tell if the shape ever changes; the provider stream address is deliberately never included. Addresses on your own network, and on the same machine as Mustarrd (including `localhost`), are allowed on purpose, since that is where a Plex or Jellyfin box lives, while the cloud metadata address and other reserved ranges are refused, redirects are not followed, and the address is trimmed to its host name in the logs in case it contains a token. See docs/adr/0005-webhook-targets-may-be-on-the-lan.md.
-
-### Added: Keep short recordings visible and optionally retry them
-
-**What you would notice:** A catchup download that finishes normally but is more than five seconds shorter than requested now appears as Interrupted, with the downloaded and expected lengths and your padding included. The available recording stays playable. Enable **Settings > Recording > Download recovery > Auto-retry short downloads** to try again automatically; the new switch is off by default and independent of failed-download retries.
-
-**What changed:** Short recordings follow the existing Interrupted finishing path before Commercial Skip or conversion. A later processing error still appears as Failed, but the short-download switch can retry it using the original duration evidence. Automatic recovery shares the existing three-attempt limit, ten-minute interval, archive and disk checks, and cancellation protections. A retry uses a separate filename when folders or working files would collide with the kept recording. Unavailable or unreliable duration measurements and VOD do not trigger the new retry policy.
 
 ### Added: See the downloaded length before processing changes it
 

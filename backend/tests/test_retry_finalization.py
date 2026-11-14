@@ -13,9 +13,10 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database import Base, _apply_lightweight_migrations
-from models import AppSettings, Download, DownloadStatus, XtreamAccount
+from models import AppSettings, Download, DownloadStatus, ScheduledRecording, ScheduledStatus, XtreamAccount
 from services import retained_captures
 from services.download_manager import DownloadManager
+from services.retry_policy import HELD_CAPTURE_MAX_WAIT_HOURS
 from services.scheduled_manager import ScheduledManager
 from tests.test_short_download_retry import recording
 
@@ -45,7 +46,7 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
         self.stack.enter_context(patch('services.download_manager.async_session_maker', self.sessions))
         self.stack.enter_context(patch('services.scheduled_manager.async_session_maker', self.sessions))
         self.stack.enter_context(patch('services.scheduled_manager.download_manager', self.manager))
-        self.stack.enter_context(patch.object(self.scheduler, '_get_free_space_gb', AsyncMock(return_value=1000)))
+        self.free_space = self.stack.enter_context(patch.object(self.scheduler, '_get_free_space_gb', AsyncMock(return_value=1000)))
         self.archive = self.stack.enter_context(patch.object(self.scheduler, '_get_archive_days_raw', AsyncMock(return_value=7)))
         self.probe = self.stack.enter_context(patch('services.post_processor.post_processor._get_duration', AsyncMock(return_value=50)))
         self.stack.enter_context(patch.object(self.manager, '_partial_is_playable', AsyncMock(side_effect=lambda p: bool(p and Path(p).is_file() and Path(p).stat().st_size))))
@@ -75,11 +76,37 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
                 setattr(row,key,value)
             await session.commit()
 
-    async def age(self):
+    async def age(self, minutes=30):
         async with self.sessions() as session:
             row = await session.get(Download,self.download.id)
-            row.last_retry_at = row.completed_at = datetime.utcnow()-timedelta(minutes=30)
+            row.last_retry_at = row.completed_at = datetime.utcnow()-timedelta(minutes=minutes)
             await session.commit()
+
+    async def use_folders(self, downloads, completed, output):
+        async with self.sessions() as session:
+            settings = (await session.execute(select(AppSettings))).scalar_one()
+            settings.download_folder, settings.completed_folder = str(downloads), str(completed)
+            row = await session.get(Download, self.download.id)
+            row.output_path = str(output)
+            await session.commit()
+
+    def symlinked_root(self):
+        """The same folders reached through a symlink, as on a NAS share."""
+        link = self.root / 'link'
+        link.symlink_to(self.root, target_is_directory=True)
+        return link
+
+    async def stop_recovery_without_processing(self):
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.scheduler._auto_retry_failed_downloads()
+        if not self.manager._post_queue.empty():
+            await self.finish()
+
+    async def stop_recovery(self):
+        """Recovery ends without another capture: finalize what is held."""
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
 
     async def capture(self, seconds=50, *, fail=False):
         row = await self.row()
@@ -214,17 +241,19 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(latest.exists())
         self.assertIsNotNone((await self.row()).retained_captures_json)
 
-    async def test_processing_warning_preserves_fallbacks_on_restart(self):
+    async def test_processing_warning_still_removes_superseded_attempts(self):
         old=await self.capture()
         await self.retry()
         await self.capture(60)
         self.processor.side_effect=None
         latest=(await self.row()).output_path
-        self.processor.return_value=(latest,['Conversion failed'])
+        self.processor.return_value=(latest,['Commercial removal skipped'])
         await self.finish()
-        await self.manager.recover_retained_cleanup()
-        self.assertTrue(old.exists())
-        self.assertIsNotNone((await self.row()).retained_captures_json)
+        final=await self.row()
+        self.assertIn('Commercial removal skipped',final.error_message)
+        self.assertTrue(Path(final.output_path).exists())
+        self.assertFalse(old.exists())
+        self.assertIsNone(final.retained_captures_json)
 
     async def test_move_error_keeps_retained_files(self):
         old=await self.capture()
@@ -301,7 +330,7 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.row()).retained_captures_json)
 
     async def test_salvaged_short_output_stays_failed_and_does_not_claim_cleanup_safety(self):
-        from services.recording_events import RECORDING_FAILED
+        from services.recording_events import RECORDING_COMPLETED, RECORDING_FAILED
         await self.capture()
         row=await self.row()
         final=self.completed/'survived.ts'
@@ -310,7 +339,8 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as session:
                 await self.manager._finalize_completed_after_interrupt(
                     session,self.download.id,str(final),status='failed')
-            self.assertEqual(publish.call_args.args[0],RECORDING_FAILED)
+            self.assertEqual([call.args[0] for call in publish.call_args_list],
+                [RECORDING_FAILED,RECORDING_COMPLETED])
         refreshed=await self.row()
         self.assertTrue(refreshed.short_file_failed)
         self.assertTrue(refreshed.retry_finalized)
@@ -353,7 +383,7 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
         await self.capture(60)
         real_unlink=retained_captures.os.unlink
         def reject(path,*args,**kwargs):
-            if str(path)==str(old):
+            if Path(path).resolve()==old.resolve():
                 raise PermissionError("busy")
             return real_unlink(path,*args,**kwargs)
         with patch('services.retained_captures.os.unlink',side_effect=reject):
@@ -374,14 +404,432 @@ class RetryFinalizationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await self.manager.finalize_deferred_capture(self.download.id,recovery_unavailable=True))
         self.assertTrue(self.manager._post_queue.empty())
 
-    async def test_cancellation_preserves_deferred_file_and_stops_retries(self):
+    async def test_cancellation_stops_retries_and_finishes_the_held_capture(self):
         old=await self.capture()
         self.assertTrue(await self.manager.cancel_download(self.download.id))
-        await self.age()
-        await self.scheduler._auto_retry_failed_downloads()
         self.assertEqual((await self.row()).status,'cancelled')
         self.assertTrue(old.exists())
+        await self.age()
+        await self.scheduler._auto_retry_failed_downloads()
         self.assertTrue(self.manager._queue.empty())
+        await self.finish()
+        final=await self.row()
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.retry_count,0)
+        self.assertEqual(final.output_path,str(self.completed/'show.mkv'))
+        self.assertTrue(Path(final.output_path).exists())
+
+    async def test_cancelling_a_retry_in_flight_finishes_the_held_capture(self):
+        await self.capture(50)
+        await self.retry()
+        self.assertEqual((await self.row()).status,'pending')
+        self.assertTrue(await self.manager.cancel_download(self.download.id))
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
+        final=await self.row()
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual(final.output_path,str(self.completed/'show.mkv'))
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_cancel_then_failed_manual_retry_still_finishes_the_held_capture(self):
+        await self.capture(50)
+        await self.retry()
+        await self.manager.cancel_download(self.download.id)
+        self.manager._cancelled.discard(self.download.id)
+        self.assertTrue(await self.manager.retry_download(self.download.id))
+        self.manager._queue.get_nowait()
+        await self.capture(fail=True)
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
+        final=await self.row()
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertTrue(Path(final.output_path).exists())
+
+    # --- the kept recording is the longest one, under its own name -------
+
+    async def test_longest_attempt_wins_at_the_retry_cap(self):
+        paths=[]
+        for attempt, seconds in enumerate((50, 50, 50, 10)):
+            paths.append(await self.capture(seconds))
+            if attempt < 3:
+                await self.retry()
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(paths[2])])
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual(final.status,'failed')
+        self.assertIsNone(final.retained_captures_json)
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_longest_attempt_wins_when_recovery_ends_early(self):
+        longest=await self.capture(50)
+        await self.retry()
+        shorter=await self.capture(20)
+        await self.stop_recovery()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(longest)])
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertFalse(shorter.exists())
+        self.assertIsNone(final.retained_captures_json)
+
+    async def test_retry_names_do_not_pile_up_and_final_file_keeps_original_name(self):
+        paths=[]
+        for attempt in range(4):
+            paths.append(await self.capture())
+            if attempt < 3:
+                await self.retry()
+        self.assertEqual([p.name for p in paths],
+            ['show.ts','show - retry 1.ts','show - retry 2.ts','show - retry 3.ts'])
+        await self.finish()
+        self.assertEqual((await self.row()).output_path,str(self.completed/'show.mkv'))
+
+    async def test_complete_retry_lands_under_original_name(self):
+        await self.capture()
+        await self.retry()
+        await self.capture(60)
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(final.status,'completed')
+        self.assertEqual(final.output_path,str(self.completed/'show.mkv'))
+
+    async def test_final_name_never_overwrites_an_existing_file(self):
+        await self.capture()
+        await self.retry()
+        await self.capture(60)
+        taken=self.completed/'show.mkv'
+        taken.write_bytes(b'somebody else')
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(taken.read_bytes(),b'somebody else')
+        self.assertEqual(final.output_path,str(self.completed/'show - retry 1.mkv'))
+
+    async def test_held_capture_keeps_its_subfolder_through_a_symlinked_folder(self):
+        link=self.symlinked_root()
+        await self.use_folders(link/'downloads',link/'completed',link/'downloads'/'Show'/'Season 01'/'show.ts')
+        await self.capture()
+        await self.stop_recovery()
+        final=await self.row()
+        self.assertEqual(final.output_path,str(link/'completed'/'Show'/'Season 01'/'show.mkv'))
+        self.assertTrue(Path(final.output_path).exists())
+
+    async def test_only_copy_survives_when_one_symlinked_folder_holds_everything(self):
+        link=self.symlinked_root()
+        await self.use_folders(link/'downloads',link/'downloads',link/'downloads'/'show.ts')
+        async def untouched(path,*args,**kwargs):
+            self.processed.append(path)
+            return path,[]
+        self.processor.side_effect=untouched
+        await self.capture()
+        await self.stop_recovery()
+        final=await self.row()
+        self.assertEqual(final.output_path,str(link/'downloads'/'show.ts'))
+        self.assertTrue(Path(final.output_path).exists())
+
+    # --- a retry never replaces a recording with a worse one --------------
+
+    async def test_option_switched_off_mid_retry_still_keeps_the_longest(self):
+        longest=await self.capture(50)
+        await self.retry()
+        await self.settings(mark_short_downloads_failed=False)
+        await self.capture(20)
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(longest)])
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+        self.assertIsNone(final.retained_captures_json)
+
+    async def test_retry_of_unknown_length_never_replaces_a_measured_capture(self):
+        longest=await self.capture(50)
+        await self.retry()
+        await self.capture(None)
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(self.processed,[str(longest)])
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+
+    async def kept_short_recording(self):
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.capture(50)
+        await self.finish()
+        first=await self.row()
+        self.assertEqual(Path(first.output_path).read_bytes(),b'raw-attempt-0-50')
+        self.processed.clear()
+        self.assertTrue(await self.manager.retry_download(self.download.id))
+        self.manager._queue.get_nowait()
+        return first
+
+    async def test_manual_retry_that_comes_back_shorter_keeps_the_existing_recording(self):
+        first=await self.kept_short_recording()
+        await self.capture(20)
+        final=await self.row()
+        self.assertTrue(self.manager._post_queue.empty())
+        self.assertEqual(self.processed,[])
+        self.assertEqual(final.status,'failed')
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertEqual(final.raw_duration_seconds,50)
+        self.assertEqual(final.recorded_duration_seconds,first.recorded_duration_seconds)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-50')
+        self.assertIsNone(final.retained_captures_json)
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_manual_retry_that_comes_back_longer_replaces_the_existing_recording(self):
+        first=await self.kept_short_recording()
+        await self.capture(55)
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertEqual(final.raw_duration_seconds,55)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-55')
+        self.assertIsNone(final.retained_captures_json)
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_cancelling_a_manual_retry_restores_the_existing_recording(self):
+        first=await self.kept_short_recording()
+        self.assertTrue(await self.manager.cancel_download(self.download.id))
+        await self.scheduler._auto_retry_failed_downloads()
+        final=await self.row()
+        self.assertEqual(final.status,'failed')
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.output_path,first.output_path)
+        self.assertTrue(Path(final.output_path).exists())
+
+    async def test_new_download_cannot_stream_over_a_held_capture(self):
+        held=await self.capture()
+        async with self.sessions() as session:
+            with self.assertRaises(ValueError):
+                await self.manager.queue_download(recording(held,program_title='Again'),session=session)
+        self.assertEqual(held.read_bytes(),b'raw-attempt-0-50')
+
+    async def test_short_failed_mark_survives_a_failed_final_commit(self):
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.capture(50)
+        names=await self.events()
+        with patch.object(self.manager,'_transition_completed',AsyncMock(side_effect=RuntimeError('commit failed'))):
+            await self.finish()
+        row=await self.row()
+        self.assertEqual(row.status,'failed')
+        self.assertTrue(row.short_file_failed)
+        self.assertIn('recording.failed',[name for name,_ in names])
+
+    async def test_one_shared_folder_keeping_ts_gets_the_original_name_back(self):
+        await self.settings(transcode_enabled=False)
+        await self.use_folders(self.raw,self.raw,self.raw/'show.ts')
+        await self.capture(20)
+        await self.retry()
+        await self.capture(50)
+        await self.stop_recovery_without_processing()
+        final=await self.row()
+        self.assertEqual(final.output_path,str(self.raw/'show.ts'))
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-1-50')
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[Path(final.output_path)])
+
+    async def test_option_off_interrupted_retry_still_replaces_the_kept_partial(self):
+        await self.settings(mark_short_downloads_failed=False,auto_retry_failed_downloads=False,transcode_enabled=False)
+        await self.use_folders(self.raw,self.raw,self.raw/'show.ts')
+        row=await self.row()
+        path=Path(row.output_path)
+        async def transfer(*args,**kwargs):
+            path.write_bytes(b'partial')
+            raise RuntimeError('Provider dropped')
+        with patch.object(self.manager,'_download_catchup_stream',AsyncMock(side_effect=transfer)):
+            await self.manager._execute_download(row.id)
+        self.assertEqual((await self.row()).status,'interrupted')
+        self.assertTrue(await self.manager.retry_download(self.download.id))
+        self.manager._queue.get_nowait()
+        self.assertEqual(path.read_bytes(),b'partial')
+        await self.capture(60)
+        final=await self.row()
+        self.assertEqual(final.status,'completed')
+        self.assertEqual(final.output_path,str(path))
+        self.assertEqual(path.read_bytes(),b'raw-attempt-0-60')
+        self.assertIsNone(final.retained_captures_json)
+        self.assertEqual([p for p in self.root.rglob('*') if p.is_file()],[path])
+
+    async def test_option_off_interrupted_retry_replaces_even_when_shorter(self):
+        await self.settings(mark_short_downloads_failed=False,auto_retry_failed_downloads=False,transcode_enabled=False)
+        row=await self.row()
+        path=Path(row.output_path)
+        self.probe.return_value=50
+        async def transfer(*args,**kwargs):
+            path.write_bytes(b'partial')
+            raise RuntimeError('Provider dropped')
+        with patch.object(self.manager,'_download_catchup_stream',AsyncMock(side_effect=transfer)):
+            await self.manager._execute_download(row.id)
+        kept=await self.row()
+        self.assertEqual(kept.status,'interrupted')
+        self.assertTrue(await self.manager.retry_download(self.download.id))
+        self.manager._queue.get_nowait()
+        await self.capture(20)
+        final=await self.row()
+        self.assertEqual(final.output_path,kept.output_path)
+        self.assertEqual(Path(final.output_path).read_bytes(),b'raw-attempt-0-20')
+
+    # --- a held capture always has a way out ------------------------------
+
+    async def test_unreachable_provider_finalizes_after_a_bounded_wait(self):
+        await self.capture()
+        self.archive.side_effect=RuntimeError('unreachable')
+        await self.age()
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertTrue((await self.row()).processing_deferred)
+        await self.age(minutes=HELD_CAPTURE_MAX_WAIT_HOURS*60+1)
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
+        final=await self.row()
+        self.assertFalse(final.processing_deferred)
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.retry_count,0)
+        self.assertTrue(Path(final.output_path).exists())
+
+    async def test_low_disk_space_finalizes_after_a_bounded_wait(self):
+        await self.capture()
+        self.free_space.return_value=None
+        await self.age()
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertTrue((await self.row()).processing_deferred)
+        await self.age(minutes=HELD_CAPTURE_MAX_WAIT_HOURS*60+1)
+        await self.scheduler._auto_retry_failed_downloads()
+        await self.finish()
+        self.assertTrue((await self.row()).retry_finalized)
+
+    async def test_cancelled_schedule_finalizes_the_held_capture_without_reviving_it(self):
+        async with self.sessions() as session:
+            schedule=ScheduledRecording(account_id=1,channel_id='12',channel_name='Example',
+                program_title='Example program',program_start=self.download.program_start,
+                program_end=self.download.program_end,duration_minutes=1,
+                download_id=self.download.id,status=ScheduledStatus.CANCELLED.value)
+            session.add(schedule)
+            await session.commit()
+        await self.capture()
+        await self.age()
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertTrue(self.manager._queue.empty())
+        await self.finish()
+        final=await self.row()
+        self.assertTrue(final.retry_finalized)
+        self.assertEqual(final.retry_count,0)
+        self.assertTrue(Path(final.output_path).exists())
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(ScheduledRecording,schedule.id)).status,'cancelled')
+
+    async def test_held_recording_can_be_removed_from_history_and_keeps_its_file(self):
+        from api.downloads import cancel_download
+        from auth import AuthContext
+        auth=AuthContext(authenticated=True,is_admin=True,user_id=1)
+        held=await self.capture()
+        with patch('api.downloads.download_manager',self.manager):
+            async with self.sessions() as session:
+                result=await cancel_download(self.download.id,auth,session)
+        self.assertEqual(result,{'status':'deleted'})
+        self.assertIsNone(await self.row())
+        self.assertTrue(held.exists())
+        await self.scheduler._auto_retry_failed_downloads()
+        self.assertTrue(self.manager._queue.empty())
+        self.assertTrue(self.manager._post_queue.empty())
+
+    async def test_finished_recording_with_leftover_retry_files_can_be_cleared(self):
+        from api.downloads import clear_finished_downloads
+        from auth import AuthContext
+        auth=AuthContext(authenticated=True,is_admin=True,user_id=1)
+        old=await self.capture()
+        await self.retry()
+        old.write_bytes(b'replaced or modified by somebody else')
+        await self.capture(60)
+        await self.finish()
+        final=await self.row()
+        self.assertIsNotNone(final.retained_captures_json)
+        async with self.sessions() as session:
+            await clear_finished_downloads(auth,session)
+        self.assertIsNone(await self.row())
+        self.assertTrue(old.exists())
+        self.assertTrue(Path(final.output_path).exists())
+
+    async def test_cleanup_warning_is_not_repeated_on_every_restart(self):
+        old=await self.capture()
+        await self.retry()
+        old.write_bytes(b'replaced or modified by somebody else')
+        await self.capture(60)
+        await self.finish()
+        await self.manager.recover_retained_cleanup()
+        await self.manager.recover_retained_cleanup()
+        self.assertEqual((await self.row()).error_message.count('Retry-file cleanup'),1)
+
+    # --- a file landed, so subscribers hear about it ----------------------
+
+    async def events(self):
+        names=[]
+        publish=self.stack.enter_context(patch('services.download_manager.recording_events.publish_event'))
+        publish.side_effect=lambda event: names.append((event.name,event.recording.get('status')))
+        return names
+
+    async def test_final_short_recording_announces_both_the_failure_and_the_file(self):
+        names=await self.events()
+        for attempt in range(4):
+            await self.capture()
+            if attempt < 3:
+                await self.retry()
+        await self.finish()
+        self.assertEqual(names[-3:],[('postprocessing.completed','failed'),
+            ('recording.failed','failed'),('recording.completed','failed')])
+
+    async def test_marked_short_without_retries_still_announces_the_failure(self):
+        names=await self.events()
+        await self.settings(auto_retry_failed_downloads=False)
+        await self.capture()
+        await self.finish()
+        self.assertEqual([name for name,_ in names if name!='recording.started'],
+            ['postprocessing.completed','recording.failed','recording.completed'])
+
+    async def test_failure_notification_survives_the_file_landing(self):
+        from models import Notification
+        from services.notifications import NotificationSubscriber
+        from services.recording_events import RECORDING_COMPLETED, RECORDING_FAILED, recording_events
+        notify=NotificationSubscriber(self.sessions)
+        row=(await self.row()).to_dict()
+        row.update(status='failed',short_file_failed=True,retry_finalized=True,error_message='Short')
+        await notify(recording_events.build(RECORDING_FAILED,row))
+        await notify(recording_events.build(RECORDING_COMPLETED,row))
+        async with self.sessions() as session:
+            self.assertEqual(len((await session.execute(select(Notification))).scalars().all()),1)
+        row.update(status='completed',short_file_failed=False)
+        await notify(recording_events.build(RECORDING_COMPLETED,row))
+        async with self.sessions() as session:
+            self.assertEqual((await session.execute(select(Notification))).scalars().all(),[])
+
+    async def test_final_short_recording_is_eligible_for_a_poster(self):
+        from services.poster_art import is_poster_eligible
+        await self.capture()
+        self.assertFalse(is_poster_eligible(await self.row()))
+        await self.stop_recovery()
+        self.assertTrue(is_poster_eligible(await self.row()))
+
+    # --- with the option off, nothing changes from before -----------------
+
+    async def test_option_off_short_capture_still_completes(self):
+        await self.settings(mark_short_downloads_failed=False,auto_retry_failed_downloads=False)
+        await self.capture()
+        await self.finish()
+        final=await self.row()
+        self.assertEqual(final.status,'completed')
+        self.assertIsNone(final.interruption_reason)
+        self.assertEqual(final.duration_analysis_status,'short')
+        self.assertFalse(final.short_file_failed)
+        self.assertIsNone(final.retained_captures_json)
+
+    async def test_option_off_failed_processing_retries_in_place(self):
+        await self.settings(mark_short_downloads_failed=False)
+        raw=await self.capture()
+        self.processor.side_effect=RuntimeError('Comskip error')
+        await self.finish()
+        self.assertEqual((await self.row()).status,'failed')
+        await self.retry()
+        self.assertEqual((await self.row()).output_path,str(raw))
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
     async def test_real_media_four_short_attempts_keep_one_final_file(self):

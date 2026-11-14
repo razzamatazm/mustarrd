@@ -26,12 +26,10 @@ _Avoid_: manual download (ambiguous now that [[time slot]] recording exists),
 instant download
 
 **Interrupted recording**:
-A recording whose capture stopped early - either the provider connection dropped
-and the bounded retries ran out, or a successful transfer contains more than five
-seconds less media than the requested padded window - but which left usable media. Mustarrd
+A recording whose capture stopped early - the provider connection dropped and
+the bounded retries ran out - but which left a file ffprobe can open. Mustarrd
 keeps it: it is post-processed, named and moved to the completed folder like a
-completed recording, and only its status differs. The optional short-file failure policy instead
-reports a reliably measured short catchup file as Failed. A partial ffprobe cannot open,
+completed recording, and only its status differs. A partial ffprobe cannot open,
 including a zero-byte one, is not an interrupted recording; it is deleted and
 the download is Failed. Distinct from a **completed recording with warnings**,
 which finished but probes oddly - a recording can be both.
@@ -39,19 +37,28 @@ _Avoid_: partial recording (that's the file on disk mid-capture), aborted,
 truncated, incomplete
 
 **Short-file failure**:
-An opt-in classification of a reliably measured short raw catchup recording as
-Failed rather than Interrupted. It does not enable recovery by itself: automatic
-re-downloads require **Auto-retry failed downloads**. Unknown measurements and
-VOD do not qualify. A finalized short Failed recording remains playable.
+An opt-in classification (**Mark short downloads as failed**, off by default) of
+a catchup recording whose raw capture measures more than five seconds shorter
+than the requested padded window: it is Failed rather than Completed. The
+transfer itself succeeded, which is what separates it from an **interrupted
+recording**. It does not enable recovery by itself: automatic re-downloads
+require **Auto-retry failed downloads**. Unknown measurements and VOD do not
+qualify. A finalized short Failed recording keeps a playable file and announces
+both `recording.failed` and `recording.completed`.
+_Avoid_: short recording (says nothing about the status), truncated
 
 **Deferred retry capture**:
-A raw recording held without Commercial Skip, remuxing or transcoding while
-bounded automatic recovery is still possible. Recovery uses at most three
-retries after the original capture, at least ten minutes apart, within the
-archive window and disk limits. Once recovery ends, finalize one usable attempt.
-Persist exact file ownership across restart; remove superseded attempts only
-after the selected output passes processing, placement and validation. Never
-infer old retry ownership from filename patterns.
+A raw short capture held without Commercial Skip, remuxing or transcoding while
+bounded automatic recovery is still possible: at most three retries after the
+original capture, at least ten minutes apart, within the archive window and
+disk limits. When recovery ends the longest held attempt is finalized, under the
+recording's original name, and the others are removed. A held capture always
+ends: when retries run out or are switched off, when the linked schedule was
+cancelled, or after six hours if the provider cannot be reached. Exact file
+ownership is persisted across restart; superseded attempts are removed only
+after the kept file has landed and probes as playable. Old retry ownership is
+never inferred from filename patterns.
+_Avoid_: held download, pending retry (a retry in the queue is Pending)
 
 **Catchup URL style**:
 Which of the two shapes a provider serves catchup links in: the **path style**

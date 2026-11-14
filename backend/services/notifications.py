@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import async_session_maker
 from models.account import XtreamAccount
-from models.download import Download
+from models.download import Download, DownloadStatus
 from models.notification import Notification, NotificationDismissal
 from services.recording_events import (
     RECORDING_COMPLETED,
@@ -284,7 +284,10 @@ class NotificationSubscriber:
             async with maker() as session:
                 if event.name == RECORDING_FAILED:
                     await record_recording_failed(session, recording)
-                else:
+                elif recording.get("status") != DownloadStatus.FAILED.value:
+                    # A short recording marked Failed also completes, because
+                    # a playable file landed. It is still a failure to the
+                    # person who asked for that marking, so the notice stays.
                     await clear_notification(session, recording_key(int(download_id)))
                 await session.commit()
         except asyncio.CancelledError:

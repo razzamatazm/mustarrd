@@ -274,7 +274,7 @@ class DurationPipelineTests(unittest.IsolatedAsyncioTestCase):
                 session.commit.assert_awaited_once()
                 self.assertEqual(manager._queue.get_nowait(), download.id)
 
-    async def test_analysis_and_short_reason_precede_queue_commit(self):
+    async def test_analysis_precedes_queue_commit_and_never_changes_status_by_itself(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "recording.ts"
             path.write_bytes(b"raw media")
@@ -289,7 +289,7 @@ class DurationPipelineTests(unittest.IsolatedAsyncioTestCase):
             async def queued(*args, **kwargs):
                 self.assertEqual(download.raw_duration_seconds, 3240)
                 self.assertEqual(download.duration_analysis_status, "short")
-                self.assertIn("including padding", download.interruption_reason)
+                self.assertIsNone(download.interruption_reason)
                 download.status = DownloadStatus.PROCESSING.value
 
             manager._transition_processing = AsyncMock(side_effect=queued)

@@ -43,7 +43,6 @@ import HistoryRow from '../components/HistoryRow'
 import { formatChannelDateTime, formatAirDateTime, getGuideOffsetHours } from '../utils/channelTime'
 import {
   isPlayableDownload,
-  PLAYABLE_DOWNLOAD_STATUSES,
   RETRYABLE_DOWNLOAD_STATUSES,
   TERMINAL_DOWNLOAD_STATUSES,
 } from '../constants/downloadStatus'
@@ -600,7 +599,7 @@ export default function Downloads() {
             </>
           )
         )}
-        {PLAYABLE_DOWNLOAD_STATUSES.includes(download.status) && !download.is_vod && (
+        {isPlayableDownload(download) && !download.is_vod && (
           <ActionIcon
             variant="subtle"
             color="gray"

@@ -139,7 +139,10 @@ class AutoRetryShortDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed.status, DownloadStatus.FAILED.value)
         self.assertEqual(failed.duration_analysis_status, "short")
         self.assertIn("Commercial detection failed", failed.error_message)
-        self.assertIn("including padding", failed.interruption_reason)
+        # The short-file option is off, so nothing marks the shortfall and
+        # the retry behaves exactly as an ordinary failed download does.
+        self.assertIsNone(failed.interruption_reason)
+        self.assertFalse(failed.short_file_failed)
         self.assertEqual(path.read_bytes(), payload)
         async with self.sessions() as session:
             row = await session.get(Download, download.id)
@@ -150,12 +153,10 @@ class AutoRetryShortDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retried.status, DownloadStatus.PENDING.value)
         self.assertEqual(retried.retry_count, 1)
         self.assertEqual(self.manager._queue.qsize(), 1)
-        self.assertNotEqual(retried.output_path, str(path))
+        self.assertEqual(retried.output_path, str(path))
         self.assertEqual(retried.source_url, download.source_url)
         self.assertIsNone(retried.duration_analysis_status)
         self.assertIsNone(retried.interruption_reason)
-        Path(retried.output_path).write_bytes(b"new attempt in flight")
-        self.assertEqual(path.read_bytes(), payload)
 
     async def test_retry_cap_and_cooldown_apply_to_short_recordings(self):
         capped = await self.add_download(retry_count=AUTO_RETRY_MAX_ATTEMPTS)

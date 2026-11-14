@@ -44,9 +44,16 @@ def remember(download, receipt=None):
     receipt = receipt or identity(download.output_path)
     if receipt is None:
         return
+    # The first held capture carries the name the recording was given. Every
+    # retry name and the final file's name are derived from it.
+    value.setdefault("original_path", download.output_path)
     if not any(item.get("media") == receipt for item in value["attempts"]):
         value["attempts"].append({
             "media": receipt,
+            # The receipt holds the resolved path, for identity checks only.
+            # This is the path as Mustarrd recorded it, so a finalized attempt
+            # keeps its place under the configured folders.
+            "path": download.output_path,
             # Deferred raw attempts have not produced companions. Never infer
             # ownership of an older sidecar merely from a matching filename.
             "companions": [],
@@ -57,6 +64,66 @@ def remember(download, receipt=None):
             "short_file_failed": bool(download.short_file_failed),
         })
     save(download, value)
+
+
+# What an entry is to the recording it belongs to.
+#   (no role)   a raw attempt held while retries remain. It competes: the
+#               longest attempt is the one that gets finished.
+#   KEPT_FINAL  the finished file of a short recording marked Failed, noted
+#               when someone retries it. It competes too, and if nothing
+#               longer arrives the recording goes back to it untouched.
+#   REPLACED    the finished file of an interrupted recording, noted when
+#               someone retries it. It never competes: a retry of an
+#               interrupted recording replaces it, as it always has.
+KEPT_FINAL = "final"
+REPLACED = "replaced"
+
+
+def remember_kept(download, role):
+    """Note the finished file a retry is about to try to improve on."""
+    value = manifest(download)
+    receipt = identity(download.output_path)
+    if receipt is None:
+        return
+    value.setdefault("original_path", download.output_path)
+    if not any(item.get("media") == receipt for item in value["attempts"]):
+        value["attempts"].append({
+            "media": receipt,
+            "path": download.output_path,
+            "companions": [],
+            "role": role,
+            "raw_duration_seconds": download.raw_duration_seconds,
+            "duration_analysis_status": download.duration_analysis_status,
+            "duration_analysis_reason": download.duration_analysis_reason,
+            "interruption_reason": download.interruption_reason,
+            "recorded_duration_seconds": download.recorded_duration_seconds,
+            "short_file_failed": bool(download.short_file_failed),
+        })
+    save(download, value)
+
+
+def rivals(download):
+    """Attempts a new capture has to beat. Empty when the record is unreadable."""
+    try:
+        attempts = manifest(download)["attempts"]
+    except (ValueError, TypeError):
+        return []
+    return [item for item in attempts if isinstance(item, dict) and item.get("role") != REPLACED]
+
+
+def recorded_path(entry):
+    """Where the attempt was captured, as recorded rather than resolved."""
+    path = entry.get("path")
+    return path if isinstance(path, str) and path else entry["media"]["path"]
+
+
+def original_path(download):
+    """The first held capture's path, or None when nothing is retained."""
+    try:
+        path = manifest(download).get("original_path")
+    except (ValueError, TypeError):
+        return None
+    return path if isinstance(path, str) and path else None
 
 
 def select_input(download):

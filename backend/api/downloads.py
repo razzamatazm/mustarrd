@@ -431,8 +431,9 @@ async def clear_finished_downloads(
             DownloadStatus.FAILED.value,
             DownloadStatus.INTERRUPTED.value,
         ]),
+        # A capture held for another attempt is not finished yet. It finishes
+        # by itself; removing it one at a time is still possible.
         Download.processing_deferred.isnot(True),
-        Download.retained_captures_json.is_(None),
     )
     if not auth.is_admin:
         query = query.where(Download.requested_by_user_id == auth.user_id)
@@ -735,12 +736,10 @@ async def cancel_download(
         await download_manager.cancel_download(download_id)
         return {"status": "cancelled"}
     else:
-        # Do not erase the only persistent ownership record for retained files.
-        if download.processing_deferred or download.retained_captures_json:
-            raise HTTPException(status_code=409, detail="This recording still owns retained retry files. Finalize or retry it before removing its history.")
-        # Delete from history
-        await session.delete(download)
-        await session.commit()
+        # Delete from history. This never deletes files: a held capture or a
+        # leftover retry file stays in the download folder.
+        if not await download_manager.remove_from_history(session, download):
+            raise HTTPException(status_code=409, detail="This recording just became active again. Cancel it first.")
         return {"status": "deleted"}
 
 

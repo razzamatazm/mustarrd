@@ -131,7 +131,7 @@ describe('Settings page', () => {
     const toggle = await screen.findByRole('switch', { name: 'Mark short downloads as failed' })
     expect(toggle).not.toBeChecked()
     expect(screen.getByText('Download recovery')).toBeInTheDocument()
-    expect(screen.getByText(/If Auto-retry failed downloads is enabled, short downloads will also be retried/)).toBeInTheDocument()
+    expect(screen.getByText(/If Auto-retry failed downloads is also on, a short recording is downloaded again/)).toBeInTheDocument()
     fireEvent.click(toggle)
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
     await waitFor(() => expect(settingsApi.update).toHaveBeenCalled())
@@ -140,8 +140,8 @@ describe('Settings page', () => {
 
   it('keeps the short-attempt explanation in parentheses in the setting description', async () => {
     await renderSettings()
-    expect(await screen.findByText('Mark catchup recordings that are more than five seconds shorter than the requested length, including padding, as Failed. If Auto-retry failed downloads is enabled, short downloads will also be retried. (Short attempts are retained without post-processing while retries remain. The final recording is processed once, and superseded retry files are removed only after successful finalization.)')).toBeInTheDocument()
-    expect(screen.queryByText('Short attempts are retained without post-processing while retries remain. The final recording is processed once, and superseded retry files are removed only after successful finalization.', { exact: true })).not.toBeInTheDocument()
+    expect(await screen.findByText('Mark catchup recordings that are more than five seconds shorter than the requested length, including padding, as Failed. If Auto-retry failed downloads is also on, a short recording is downloaded again, up to three times. (The attempts wait unprocessed until retrying ends. Then the longest one is processed and kept, and the others are removed.)')).toBeInTheDocument()
+    expect(screen.queryByText('The attempts wait unprocessed until retrying ends. Then the longest one is processed and kept, and the others are removed.', { exact: true })).not.toBeInTheDocument()
   })
 
   it('can disable the saved short-file classification setting without changing other preferences', async () => {

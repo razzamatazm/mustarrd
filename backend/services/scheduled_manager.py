@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy import exc as sa_exc
 from database import async_session_maker
 from models import ScheduledRecording, ScheduledStatus, AppSettings, Download, DownloadStatus
@@ -10,7 +10,11 @@ from services.download_builder import build_download_from_program
 from services.download_manager import download_manager
 from services.epg_service import epg_service, NoCatchupSupportError
 from services.disk_space import get_free_space_gb
-from services.retry_policy import AUTO_RETRY_MAX_ATTEMPTS, AUTO_RETRY_MIN_INTERVAL_MINUTES
+from services.retry_policy import (
+    AUTO_RETRY_MAX_ATTEMPTS,
+    AUTO_RETRY_MIN_INTERVAL_MINUTES,
+    HELD_CAPTURE_MAX_WAIT_HOURS,
+)
 from config import settings as app_settings
 from schedule_timing import resolve_scheduled_download_delay_minutes
 
@@ -421,6 +425,12 @@ class ScheduledManager:
 
         Every automatic retry requires the failed-download master switch. The
         short-file setting only controls classification, never enables retries.
+
+        A held capture is unplayable until it is finalized, so it always has a
+        way out: it is finalized when retries are switched off, used up or no
+        longer possible, when its linked schedule was cancelled, and after
+        HELD_CAPTURE_MAX_WAIT_HOURS if the provider cannot be reached or the
+        disk is too full to try again.
         """
         now_utc = datetime.now(timezone.utc)
         to_retry, to_finalize = [], []
@@ -430,13 +440,20 @@ class ScheduledManager:
                 return
             master = bool(settings.auto_retry_failed_downloads)
             mark_short = bool(getattr(settings, "mark_short_downloads_failed", False))
+            held_only = Download.processing_deferred.is_(True)
+            failed = Download.status == DownloadStatus.FAILED.value
+            if not master:
+                failed = and_(failed, held_only)
+            # A cancelled retry leaves its earlier attempts on disk. Those
+            # are finished below; the row is never retried.
+            cancelled_held = and_(
+                Download.status == DownloadStatus.CANCELLED.value, held_only
+            )
             query = select(Download).where(
-                Download.status == DownloadStatus.FAILED.value,
+                or_(failed, cancelled_held),
                 Download.is_vod.isnot(True),
                 Download.retry_finalized.isnot(True),
             )
-            if not master:
-                query = query.where(Download.processing_deferred.is_(True))
             rows = (await session.execute(query)).scalars().all()
             if not rows:
                 return
@@ -449,9 +466,16 @@ class ScheduledManager:
             free_gb = None
             disk_checked = False
             for download in rows:
-                if download.id in blocked:
-                    continue
                 held = bool(download.processing_deferred)
+                if download.status == DownloadStatus.CANCELLED.value:
+                    to_finalize.append((download.id, True))
+                    continue
+                if download.id in blocked:
+                    # A cancelled or completed schedule is never retried, but
+                    # the capture already on disk is still finished.
+                    if held:
+                        to_finalize.append((download.id, True))
+                    continue
                 classified_short = bool(download.short_file_failed) or held
                 stopped = (not master or (classified_short and not mark_short)
                            or int(download.retry_count or 0) >= AUTO_RETRY_MAX_ATTEMPTS)
@@ -463,11 +487,16 @@ class ScheduledManager:
                          for t in (download.last_retry_at, download.completed_at) if t is not None]
                 if times and now_utc - max(times) < timedelta(minutes=AUTO_RETRY_MIN_INTERVAL_MINUTES):
                     continue
+                overdue = held and bool(times) and now_utc - max(times) >= timedelta(
+                    hours=HELD_CAPTURE_MAX_WAIT_HOURS
+                )
                 if not disk_checked:
                     free_gb = await self._get_free_space_gb(settings.download_folder or app_settings.default_download_folder)
                     disk_checked = True
                 minimum = settings.min_free_space_gb if settings.min_free_space_gb is not None else 25
                 if free_gb is None or free_gb < minimum:
+                    if overdue:
+                        to_finalize.append((download.id, True))
                     continue
                 program_end = self._download_program_end_utc(download)
                 if program_end is None:
@@ -480,7 +509,11 @@ class ScheduledManager:
                 except NoCatchupSupportError:
                     archive_days = 0
                 except Exception:
-                    # A temporarily unreachable provider is not confirmed expiry.
+                    # A temporarily unreachable provider is not confirmed
+                    # expiry, so wait. Not for ever: a provider that stays
+                    # unreachable must not leave the capture unplayable.
+                    if overdue:
+                        to_finalize.append((download.id, True))
                     continue
                 if archive_days <= 0 or now_utc >= program_end + timedelta(days=archive_days):
                     self._auto_retry_ineligible.add(download.id)
